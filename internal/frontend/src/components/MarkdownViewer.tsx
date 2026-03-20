@@ -7,6 +7,8 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
 import rehypeKatex from "rehype-katex";
 import { rehypeGithubAlerts } from "rehype-github-alerts";
+import { rehypeCheckboxKeys } from "../plugins/rehypeCheckboxKeys";
+import { useCheckboxOverrides } from "../hooks/useCheckboxOverrides";
 import "katex/dist/katex.min.css";
 import { codeToHtml } from "shiki";
 import mermaid from "mermaid";
@@ -30,6 +32,7 @@ const sanitizeSchema = {
     ...defaultSchema.attributes,
     span: [...(defaultSchema.attributes?.["span"] || []), "style"],
     div: [...(defaultSchema.attributes?.["div"] || []), "style", "align"],
+    input: [...(defaultSchema.attributes?.["input"] || []), "data-checkbox-key"],
   },
 };
 
@@ -431,6 +434,16 @@ export function MarkdownViewer({
     };
   }, [fileId, revision]);
 
+  const basename = fileName.split("/").pop() ?? fileName;
+  const { getChecked, toggle, setCheckboxMap } = useCheckboxOverrides(basename);
+
+  const onCheckboxMap = useCallback(
+    (map: Map<string, boolean>) => {
+      setCheckboxMap(map);
+    },
+    [setCheckboxMap],
+  );
+
   const handleLinkClick = useCallback(
     async (e: React.MouseEvent<HTMLAnchorElement>, href: string, hash: string) => {
       e.preventDefault();
@@ -505,8 +518,29 @@ export function MarkdownViewer({
             );
         }
       },
+      input: ({ disabled: _disabled, type, checked, ...props }) => {
+        if (type !== "checkbox") {
+          return <input type={type} checked={checked} {...props} />;
+        }
+        const key = (props as Record<string, unknown>)["data-checkbox-key"] as
+          | string
+          | undefined;
+        if (!key) {
+          return <input type="checkbox" checked={checked} disabled {...props} />;
+        }
+        const effectiveChecked = getChecked(key);
+        return (
+          <input
+            type="checkbox"
+            checked={effectiveChecked}
+            onChange={() => toggle(key)}
+            style={{ cursor: "pointer" }}
+            {...props}
+          />
+        );
+      },
     }),
-    [fileId, handleLinkClick],
+    [fileId, handleLinkClick, getChecked, toggle],
   );
 
   const isMarkdown = isMarkdownFile(fileName);
@@ -533,6 +567,7 @@ export function MarkdownViewer({
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[
             rehypeRaw,
+            [rehypeCheckboxKeys, { onCheckboxMap }],
             [rehypeSanitize, sanitizeSchema],
             rehypeGithubAlerts,
             rehypeSlug,
@@ -544,7 +579,7 @@ export function MarkdownViewer({
         </Markdown>
       </>
     );
-  }, [content, isRawView, isMarkdown, codeLanguage, parsed, components, fileName]);
+  }, [content, isRawView, isMarkdown, codeLanguage, parsed, components, fileName, onCheckboxMap]);
 
   const prevHeadingsKey = useRef("");
   useEffect(() => {
