@@ -6,22 +6,26 @@ on:
       - "strubio-v*"
 
 jobs:
-  assets:
-    runs-on: macos-latest
-    permissions:
-      contents: write
-      packages: write
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+            ext: zip
+          - goos: darwin
+            goarch: amd64
+            ext: zip
+          - goos: linux
+            goarch: arm64
+            ext: tar.gz
+          - goos: linux
+            goarch: amd64
+            ext: tar.gz
     steps:
       - name: Check out source code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-
-      - name: Extract semver from tag
-        id: version
-        run: echo "semver=${GITHUB_REF_NAME#strubio-v}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
@@ -34,18 +38,50 @@ jobs:
         with:
           package_json_file: internal/frontend/package.json
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29 # v7.0.0
-        with:
-          distribution: goreleaser
-          version: latest
-          args: --clean
+      - name: Generate frontend assets
+        run: go generate ./internal/static/
+
+      - name: Build
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_CURRENT_TAG: v${{ steps.version.outputs.semver }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          COMMIT=$(git rev-parse --short HEAD)
+          go build -ldflags "-s -w -X github.com/k1LoW/mo/version.Revision=$COMMIT" \
+            -trimpath -o mo .
+
+      - name: Package
+        run: |
+          ARCHIVE="mo_${GITHUB_REF_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          if [ "${{ matrix.ext }}" = "zip" ]; then
+            zip "${ARCHIVE}.zip" mo LICENSE
+          else
+            tar czf "${ARCHIVE}.tar.gz" mo LICENSE
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mo_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: mo_*.${{ matrix.ext }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          merge-multiple: true
 
       - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.tar.gz dist/checksums.txt \
+          gh release create "$GITHUB_REF_NAME" *.zip *.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes

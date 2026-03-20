@@ -46,7 +46,7 @@ builds:
 archives:
   -
     id: mo-archive
-    name_template: '{{ .ProjectName }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+    name_template: '{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
     format_overrides:
       - goos: darwin
         formats:
@@ -81,4 +81,4 @@ nfpms:
     bindir: /usr/bin
     epoch: 1
 release:
-  disable: true
+  use_existing_draft: true
