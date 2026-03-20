@@ -1,7 +1,7 @@
 export type LinkResolution =
   | { type: "external" }
   | { type: "hash" }
-  | { type: "markdown"; hrefPath: string }
+  | { type: "markdown"; hrefPath: string; hash: string }
   | { type: "file"; rawUrl: string }
   | { type: "passthrough" };
 
@@ -12,9 +12,10 @@ export function resolveLink(href: string | undefined, fileId: string): LinkResol
   if (href.startsWith("#")) {
     return { type: "hash" };
   }
-  const hrefPath = href.split("#")[0];
+  const [hrefPath, ...hashParts] = href.split("#");
+  const hash = hashParts.length > 0 ? `#${hashParts.join("#")}` : "";
   if (hrefPath.endsWith(".md") || hrefPath.endsWith(".mdx")) {
-    return { type: "markdown", hrefPath };
+    return { type: "markdown", hrefPath, hash };
   }
   const basename = hrefPath.split("/").pop() || "";
   if (basename.includes(".")) {

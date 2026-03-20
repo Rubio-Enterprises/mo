@@ -403,6 +403,7 @@ export function MarkdownViewer({
   const [loading, setLoading] = useState(true);
   const [isRawView, setIsRawView] = useState(false);
   const articleRef = useRef<HTMLElement>(null);
+  const pendingHashRef = useRef<string>("");
   const [prevFetchKey, setPrevFetchKey] = useState({ fileId, revision });
 
   if (fileId !== prevFetchKey.fileId || revision !== prevFetchKey.revision) {
@@ -431,13 +432,14 @@ export function MarkdownViewer({
   }, [fileId, revision]);
 
   const handleLinkClick = useCallback(
-    async (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    async (e: React.MouseEvent<HTMLAnchorElement>, href: string, hash: string) => {
       e.preventDefault();
       try {
+        pendingHashRef.current = hash;
         const entry = await openRelativeFile(fileId, href);
         onFileOpened(entry.id);
       } catch {
-        // fallback: do nothing
+        pendingHashRef.current = "";
       }
     },
     [fileId, onFileOpened],
@@ -485,7 +487,7 @@ export function MarkdownViewer({
             );
           case "markdown":
             return (
-              <a href={href} onClick={(e) => handleLinkClick(e, resolved.hrefPath)} {...props}>
+              <a href={href} onClick={(e) => handleLinkClick(e, resolved.hrefPath, resolved.hash)} {...props}>
                 {children}
               </a>
             );
@@ -574,6 +576,12 @@ export function MarkdownViewer({
   useLayoutEffect(() => {
     if (!loading) {
       onContentRenderedRef.current?.();
+      const hash = pendingHashRef.current;
+      if (hash) {
+        pendingHashRef.current = "";
+        const target = document.getElementById(hash.slice(1));
+        target?.scrollIntoView({ behavior: "instant" });
+      }
     }
   }, [loading, renderedContent]);
 
