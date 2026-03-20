@@ -113,6 +113,12 @@ describe("rehypeCheckboxKeys plugin", () => {
     expect(html).toContain('data-checkbox-key="bold and italic text"');
   });
 
+  it("strips code spans and links from labels", async () => {
+    const md = "- [ ] Use `fetch` to call [the API](https://example.com)\n";
+    const html = await processMarkdown(md);
+    expect(html).toContain('data-checkbox-key="Use fetch to call the API"');
+  });
+
   it("handles empty checkbox labels", async () => {
     // remark-gfm requires non-empty text after [ ] to parse as a checkbox;
     // &nbsp; produces a whitespace-only label that trims to empty ("__empty")
