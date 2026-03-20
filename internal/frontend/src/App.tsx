@@ -7,6 +7,7 @@ import { GroupDropdown } from "./components/GroupDropdown";
 import { ViewModeToggle, type ViewMode } from "./components/ViewModeToggle";
 import { SearchToggle } from "./components/SearchToggle";
 import { TitleToggle } from "./components/TitleToggle";
+import { NavigationButtons } from "./components/NavigationButtons";
 import { RestartButton } from "./components/RestartButton";
 import { DropOverlay } from "./components/DropOverlay";
 import { TocPanel } from "./components/TocPanel";
@@ -15,6 +16,8 @@ import { useSSE } from "./hooks/useSSE";
 import { useFileDrop } from "./hooks/useFileDrop";
 import { useActiveHeading } from "./hooks/useActiveHeading";
 import { useScrollRestoration, SCROLL_SESSION_KEY } from "./hooks/useScrollRestoration";
+import { useNavigationHistory } from "./hooks/useNavigationHistory";
+import type { NavEntry } from "./hooks/useNavigationHistory";
 import type { Group } from "./hooks/useApi";
 import { fetchGroups, removeFile, reorderFiles } from "./hooks/useApi";
 import { allFileIds, parseGroupFromPath, parseFileIdFromSearch, groupToPath } from "./utils/groups";
@@ -249,10 +252,6 @@ export function App() {
     window.history.pushState(null, "", groupToPath(name));
   };
 
-  const handleFileOpened = useCallback((fileId: string) => {
-    setActiveFileId(fileId);
-  }, []);
-
   const handleRemoveFile = useCallback(() => {
     if (activeFileId != null) {
       removeFile(activeFileId);
@@ -283,6 +282,78 @@ export function App() {
     activeHeadingId,
     activeFileId,
   );
+
+  const nav = useNavigationHistory();
+  const pendingRestoreRef = useRef<NavEntry | null>(null);
+
+  const getCurrentNavEntry = useCallback((): NavEntry | null => {
+    if (!scrollContainer || !activeFileId) return null;
+    const headingEl = activeHeadingId ? document.getElementById(activeHeadingId) : null;
+    return {
+      fileId: activeFileId,
+      scrollTop: scrollContainer.scrollTop,
+      headingId: activeHeadingId,
+      headingOffset: headingEl
+        ? headingEl.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top
+        : 0,
+    };
+  }, [scrollContainer, activeFileId, activeHeadingId]);
+
+  const navigateToFile = useCallback(
+    (fileId: string) => {
+      const current = getCurrentNavEntry();
+      if (current && current.fileId !== fileId) {
+        nav.navigate(current);
+      }
+      setActiveFileId(fileId);
+    },
+    [getCurrentNavEntry, nav],
+  );
+
+  const handleFileOpened = useCallback(
+    (fileId: string) => {
+      navigateToFile(fileId);
+    },
+    [navigateToFile],
+  );
+
+  const handleBack = useCallback(() => {
+    const current = getCurrentNavEntry();
+    if (!current) return;
+    const entry = nav.goBack(current);
+    if (entry) {
+      pendingRestoreRef.current = entry;
+      setActiveFileId(entry.fileId);
+    }
+  }, [getCurrentNavEntry, nav]);
+
+  const handleForward = useCallback(() => {
+    const current = getCurrentNavEntry();
+    if (!current) return;
+    const entry = nav.goForward(current);
+    if (entry) {
+      pendingRestoreRef.current = entry;
+      setActiveFileId(entry.fileId);
+    }
+  }, [getCurrentNavEntry, nav]);
+
+  const wrappedOnContentRendered = useCallback(() => {
+    onContentRendered();
+    const entry = pendingRestoreRef.current;
+    if (entry && scrollContainer) {
+      pendingRestoreRef.current = null;
+      if (entry.headingId) {
+        const headingEl = document.getElementById(entry.headingId);
+        if (headingEl) {
+          const currentOffset =
+            headingEl.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top;
+          scrollContainer.scrollTop += currentOffset - entry.headingOffset;
+          return;
+        }
+      }
+      scrollContainer.scrollTop = entry.scrollTop;
+    }
+  }, [onContentRendered, scrollContainer]);
 
   const handleHeadingClick = useCallback((id: string) => {
     const el = document.getElementById(id);
@@ -316,6 +387,12 @@ export function App() {
             )}
           </svg>
         </button>
+        <NavigationButtons
+          canGoBack={nav.canGoBack}
+          canGoForward={nav.canGoForward}
+          onBack={handleBack}
+          onForward={handleForward}
+        />
         <GroupDropdown
           groups={groups}
           activeGroup={activeGroup}
@@ -335,7 +412,7 @@ export function App() {
             groups={groups}
             activeGroup={activeGroup}
             activeFileId={activeFileId}
-            onFileSelect={setActiveFileId}
+            onFileSelect={navigateToFile}
             onFilesReorder={handleFilesReorder}
             viewMode={currentViewMode}
             showTitle={currentShowTitle}
@@ -352,7 +429,7 @@ export function App() {
                 revision={contentRevision}
                 onFileOpened={handleFileOpened}
                 onHeadingsChange={setHeadings}
-                onContentRendered={onContentRendered}
+                onContentRendered={wrappedOnContentRendered}
                 isTocOpen={tocOpen}
                 onTocToggle={() => setTocOpen((v) => !v)}
                 onRemoveFile={handleRemoveFile}
