@@ -81,4 +81,4 @@ nfpms:
     bindir: /usr/bin
     epoch: 1
 release:
-  draft: false
+  disable: true

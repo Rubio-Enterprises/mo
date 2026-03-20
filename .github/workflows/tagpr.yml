@@ -19,6 +19,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Extract semver from tag
+        id: version
+        run: echo "semver=${GITHUB_REF_NAME#strubio-v}" >> "$GITHUB_OUTPUT"
+
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
@@ -38,3 +42,10 @@ jobs:
           args: --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: v${{ steps.version.outputs.semver }}
+
+      - name: Create GitHub release
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.zip dist/*.tar.gz dist/checksums.txt \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
