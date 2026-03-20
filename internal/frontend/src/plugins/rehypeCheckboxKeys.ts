@@ -12,10 +12,7 @@ export function extractHastText(node: Node): string {
   return "";
 }
 
-export function computeCheckboxKey(
-  rawText: string,
-  occurrences: Map<string, number>,
-): string {
+export function computeCheckboxKey(rawText: string, occurrences: Map<string, number>): string {
   const base = rawText.trim() || "__empty";
   const count = (occurrences.get(base) ?? 0) + 1;
   occurrences.set(base, count);
@@ -32,10 +29,7 @@ export function rehypeCheckboxKeys(options: RehypeCheckboxKeysOptions = {}) {
     const checkboxMap = new Map<string, boolean>();
 
     visit(tree, "element", (node: HastElement, _index, parent) => {
-      if (
-        node.tagName !== "input" ||
-        node.properties?.type !== "checkbox"
-      ) {
+      if (node.tagName !== "input" || node.properties?.type !== "checkbox") {
         return;
       }
 
@@ -47,8 +41,7 @@ export function rehypeCheckboxKeys(options: RehypeCheckboxKeysOptions = {}) {
         if (child === node) continue;
         if (
           child.type === "element" &&
-          ((child as HastElement).tagName === "ul" ||
-           (child as HastElement).tagName === "ol")
+          ((child as HastElement).tagName === "ul" || (child as HastElement).tagName === "ol")
         ) {
           continue;
         }
@@ -63,10 +56,7 @@ export function rehypeCheckboxKeys(options: RehypeCheckboxKeysOptions = {}) {
           );
           if (hasInput) {
             for (const pChild of pEl.children) {
-              if (
-                pChild.type === "element" &&
-                (pChild as HastElement).tagName === "input"
-              ) {
+              if (pChild.type === "element" && (pChild as HastElement).tagName === "input") {
                 continue;
               }
               labelText += extractHastText(pChild);

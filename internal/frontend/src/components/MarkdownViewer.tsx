@@ -500,7 +500,11 @@ export function MarkdownViewer({
             );
           case "markdown":
             return (
-              <a href={href} onClick={(e) => handleLinkClick(e, resolved.hrefPath, resolved.hash)} {...props}>
+              <a
+                href={href}
+                onClick={(e) => handleLinkClick(e, resolved.hrefPath, resolved.hash)}
+                {...props}
+              >
                 {children}
               </a>
             );
@@ -522,9 +526,7 @@ export function MarkdownViewer({
         if (type !== "checkbox") {
           return <input type={type} checked={checked} {...props} />;
         }
-        const key = (props as Record<string, unknown>)["data-checkbox-key"] as
-          | string
-          | undefined;
+        const key = (props as Record<string, unknown>)["data-checkbox-key"] as string | undefined;
         if (!key) {
           return <input type="checkbox" checked={checked} disabled {...props} />;
         }

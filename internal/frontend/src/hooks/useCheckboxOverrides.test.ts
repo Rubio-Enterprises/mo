@@ -70,7 +70,7 @@ describe("useCheckboxOverrides", () => {
     // Pre-populate localStorage with an override
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ "test.md": { "Item A": true, "Deleted": false } }),
+      JSON.stringify({ "test.md": { "Item A": true, Deleted: false } }),
     );
 
     const { result } = renderHook(() => useCheckboxOverrides("test.md"));
@@ -87,10 +87,7 @@ describe("useCheckboxOverrides", () => {
   });
 
   it("keeps overrides that differ from source", () => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ "test.md": { "Item A": true } }),
-    );
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ "test.md": { "Item A": true } }));
 
     const { result } = renderHook(() => useCheckboxOverrides("test.md"));
 
@@ -105,12 +102,8 @@ describe("useCheckboxOverrides", () => {
   });
 
   it("isolates state per filename", () => {
-    const { result: hook1 } = renderHook(() =>
-      useCheckboxOverrides("file1.md"),
-    );
-    const { result: hook2 } = renderHook(() =>
-      useCheckboxOverrides("file2.md"),
-    );
+    const { result: hook1 } = renderHook(() => useCheckboxOverrides("file1.md"));
+    const { result: hook2 } = renderHook(() => useCheckboxOverrides("file2.md"));
 
     act(() => {
       hook1.current.setCheckboxMap(new Map([["Item", false]]));

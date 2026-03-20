@@ -23,18 +23,12 @@ describe("extractHastText", () => {
   });
 
   it("extracts text from nested elements", () => {
-    const node = el("li", [
-      text("before "),
-      el("strong", [text("bold")]),
-      text(" after"),
-    ]);
+    const node = el("li", [text("before "), el("strong", [text("bold")]), text(" after")]);
     expect(extractHastText(node)).toBe("before bold after");
   });
 
   it("extracts text from deeply nested formatting", () => {
-    const node = el("li", [
-      el("em", [el("strong", [text("deep")])]),
-    ]);
+    const node = el("li", [el("em", [el("strong", [text("deep")])])]);
     expect(extractHastText(node)).toBe("deep");
   });
 
@@ -65,10 +59,7 @@ describe("computeCheckboxKey", () => {
   });
 });
 
-async function processMarkdown(
-  md: string,
-  onCheckboxMap?: (map: Map<string, boolean>) => void,
-) {
+async function processMarkdown(md: string, onCheckboxMap?: (map: Map<string, boolean>) => void) {
   const result = await unified()
     .use(remarkParse)
     .use(remarkGfm)

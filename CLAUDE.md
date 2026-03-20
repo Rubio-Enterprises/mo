@@ -58,14 +58,18 @@ cd internal/frontend && pnpm run dev
 
 - `--port` / `-p` — Server port (default: 6275)
 - `--target` / `-t` — Tab group name (default: `"default"`)
+- `--bind` / `-b` — Bind address (default: `localhost`). Non-loopback addresses expose mo to the network **without authentication** (confirmation prompt shown).
 - `--open` — Always open browser
 - `--no-open` — Never open browser
 - `--watch` / `-w` — Glob pattern to watch for matching files (repeatable)
 - `--unwatch` — Remove a watched glob pattern (repeatable)
+- `--close` — Close files instead of opening them
 - `--status` — Show status of all running mo servers
 - `--shutdown` — Shut down the running mo server
 - `--restart` — Restart the running mo server
+- `--clear` — Clear saved session (restarts server if running)
 - `--foreground` — Run mo server in foreground (do not background)
+- `--json` — Output structured data as JSON to stdout
 - `--dangerously-allow-remote-access` — Allow remote access without authentication (trusted networks only)
 
 ## Architecture
@@ -121,6 +125,14 @@ Key endpoints:
 - `DELETE /_/api/patterns` — Remove glob watch pattern
 - `GET /_/api/status` — Server status (version, pid, groups with patterns)
 - `GET /_/events` — SSE (event types: `update`, `file-changed`, `restart`)
+
+## Linting
+
+Go linters (`.golangci.yml`): errorlint, godot, gosec, misspell (US locale), revive, funcorder, modernize. Type assertions must be checked (`check-type-assertions: true`). Comments preset exclusions are applied.
+
+gostyle (`.gostyle.yml`): mixedcaps and funcfmt analyzers are disabled. errorstrings analysis excludes tests.
+
+Frontend: ESLint via `pnpm run lint` in `internal/frontend/`. Formatting via `pnpm run fmt` (check with `pnpm run fmt:check`).
 
 ## CI/CD
 
