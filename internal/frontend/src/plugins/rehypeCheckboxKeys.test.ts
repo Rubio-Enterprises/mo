@@ -1,6 +1,12 @@
 // internal/frontend/src/plugins/rehypeCheckboxKeys.test.ts
 import { describe, it, expect } from "vitest";
-import { extractHastText, computeCheckboxKey } from "./rehypeCheckboxKeys";
+import { extractHastText, computeCheckboxKey, rehypeCheckboxKeys } from "./rehypeCheckboxKeys";
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+import remarkGfm from "remark-gfm";
+import remarkRehype from "remark-rehype";
+import rehypeRaw from "rehype-raw";
+import rehypeStringify from "rehype-stringify";
 import type { Element, Text } from "hast";
 
 function text(value: string): Text {
@@ -56,5 +62,69 @@ describe("computeCheckboxKey", () => {
     const counts = new Map<string, number>();
     expect(computeCheckboxKey("", counts)).toBe("__empty");
     expect(computeCheckboxKey("   ", counts)).toBe("__empty#2");
+  });
+});
+
+async function processMarkdown(
+  md: string,
+  onCheckboxMap?: (map: Map<string, boolean>) => void,
+) {
+  const result = await unified()
+    .use(remarkParse)
+    .use(remarkGfm)
+    .use(remarkRehype, { allowDangerousHtml: true })
+    .use(rehypeRaw)
+    .use(rehypeCheckboxKeys, { onCheckboxMap })
+    .use(rehypeStringify)
+    .process(md);
+  return String(result);
+}
+
+describe("rehypeCheckboxKeys plugin", () => {
+  it("adds data-checkbox-key to checkboxes", async () => {
+    const md = "- [ ] First item\n- [x] Second item\n";
+    const html = await processMarkdown(md);
+    expect(html).toContain('data-checkbox-key="First item"');
+    expect(html).toContain('data-checkbox-key="Second item"');
+  });
+
+  it("reports checkbox map via callback", async () => {
+    let receivedMap: Map<string, boolean> | undefined;
+    const md = "- [ ] Unchecked\n- [x] Checked\n";
+    await processMarkdown(md, (map) => {
+      receivedMap = map;
+    });
+    expect(receivedMap).toBeDefined();
+    expect(receivedMap!.get("Unchecked")).toBe(false);
+    expect(receivedMap!.get("Checked")).toBe(true);
+  });
+
+  it("handles duplicate labels", async () => {
+    const md = "- [ ] TODO\n- [ ] TODO\n- [x] TODO\n";
+    const html = await processMarkdown(md);
+    expect(html).toContain('data-checkbox-key="TODO"');
+    expect(html).toContain('data-checkbox-key="TODO#2"');
+    expect(html).toContain('data-checkbox-key="TODO#3"');
+  });
+
+  it("strips inline formatting from labels", async () => {
+    const md = "- [ ] **bold** and *italic* text\n";
+    const html = await processMarkdown(md);
+    expect(html).toContain('data-checkbox-key="bold and italic text"');
+  });
+
+  it("handles empty checkbox labels", async () => {
+    // remark-gfm requires non-empty text after [ ] to parse as a checkbox;
+    // &nbsp; produces a whitespace-only label that trims to empty ("__empty")
+    const md = "- [ ] &nbsp;\n- [ ] &nbsp;\n";
+    const html = await processMarkdown(md);
+    expect(html).toContain('data-checkbox-key="__empty"');
+    expect(html).toContain('data-checkbox-key="__empty#2"');
+  });
+
+  it("does not modify non-checkbox inputs", async () => {
+    const md = 'Some text <input type="text" /> more text\n';
+    const html = await processMarkdown(md);
+    expect(html).not.toContain("data-checkbox-key");
   });
 });
