@@ -1,6 +1,6 @@
 // internal/frontend/src/plugins/rehypeCheckboxKeys.test.ts
 import { describe, it, expect } from "vitest";
-import { extractHastText } from "./rehypeCheckboxKeys";
+import { extractHastText, computeCheckboxKey } from "./rehypeCheckboxKeys";
 import type { Element, Text } from "hast";
 
 function text(value: string): Text {
@@ -35,5 +35,26 @@ describe("extractHastText", () => {
   it("returns empty string for element with no text", () => {
     const node = el("li", []);
     expect(extractHastText(node)).toBe("");
+  });
+});
+
+describe("computeCheckboxKey", () => {
+  it("returns trimmed text as key for first occurrence", () => {
+    const counts = new Map<string, number>();
+    expect(computeCheckboxKey("  Buy milk  ", counts)).toBe("Buy milk");
+    expect(counts.get("Buy milk")).toBe(1);
+  });
+
+  it("disambiguates duplicate labels with #N suffix", () => {
+    const counts = new Map<string, number>();
+    expect(computeCheckboxKey("TODO", counts)).toBe("TODO");
+    expect(computeCheckboxKey("TODO", counts)).toBe("TODO#2");
+    expect(computeCheckboxKey("TODO", counts)).toBe("TODO#3");
+  });
+
+  it("uses __empty for empty/whitespace-only labels", () => {
+    const counts = new Map<string, number>();
+    expect(computeCheckboxKey("", counts)).toBe("__empty");
+    expect(computeCheckboxKey("   ", counts)).toBe("__empty#2");
   });
 });
