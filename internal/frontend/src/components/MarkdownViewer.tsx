@@ -32,7 +32,7 @@ const sanitizeSchema = {
     ...defaultSchema.attributes,
     span: [...(defaultSchema.attributes?.["span"] || []), "style"],
     div: [...(defaultSchema.attributes?.["div"] || []), "style", "align"],
-    input: [...(defaultSchema.attributes?.["input"] || []), "data-checkbox-key"],
+    input: [...(defaultSchema.attributes?.["input"] || []), "dataCheckboxKey"],
   },
 };
 

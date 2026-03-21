@@ -23,7 +23,7 @@ function saveOverrides(overrides: AllOverrides) {
 }
 
 export function useCheckboxOverrides(filename: string) {
-  const [, forceUpdate] = useState(0);
+  const [version, setVersion] = useState(0);
   const checkboxMapRef = useRef<Map<string, boolean>>(new Map());
 
   const setCheckboxMap = useCallback(
@@ -46,11 +46,12 @@ export function useCheckboxOverrides(filename: string) {
         }
         saveOverrides(all);
       }
-      forceUpdate((n) => n + 1);
+      setVersion((n) => n + 1);
     },
     [filename],
   );
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- version ensures re-render after toggle
   const getChecked = useCallback(
     (key: string): boolean => {
       const all = loadOverrides();
@@ -60,7 +61,7 @@ export function useCheckboxOverrides(filename: string) {
       }
       return checkboxMapRef.current.get(key) ?? false;
     },
-    [filename],
+    [filename, version],
   );
 
   const toggle = useCallback(
@@ -82,7 +83,7 @@ export function useCheckboxOverrides(filename: string) {
         all[filename][key] = newValue;
       }
       saveOverrides(all);
-      forceUpdate((n) => n + 1);
+      setVersion((n) => n + 1);
     },
     [filename, getChecked],
   );
