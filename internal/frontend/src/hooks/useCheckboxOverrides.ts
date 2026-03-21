@@ -46,7 +46,6 @@ export function useCheckboxOverrides(filename: string) {
         }
         saveOverrides(all);
       }
-      setVersion((n) => n + 1);
     },
     [filename],
   );
