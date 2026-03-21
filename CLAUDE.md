@@ -137,6 +137,15 @@ Frontend: ESLint via `pnpm run lint` in `internal/frontend/`. Formatting via `pn
 ## CI/CD
 
 - **CI**: golangci-lint (via reviewdog), gostyle, `make ci` (test + coverage), octocov
-- **Release**: tagpr for automated tagging, goreleaser for cross-platform builds. The `go generate` step (frontend build) runs in goreleaser's `before.hooks`.
+- **Release**: Tags trigger the release workflow. The `go generate` step (frontend build) runs before cross-platform Go builds. Binaries are uploaded as a GitHub release, and the Homebrew formula is auto-updated.
 - **License check**: Trivy scans for license issues
 - CI requires pnpm setup (`pnpm/action-setup`) before any Go build step because `go generate` triggers the frontend build.
+
+### Release Tags
+
+This fork uses **`strubio-v*`** tags (e.g., `strubio-v0.21.0`) to trigger the release workflow in `.github/workflows/tagpr.yml`. The workflow strips the `strubio-v` prefix to derive the semver version.
+
+To release:
+1. Update `version/version.go` with the new version
+2. Commit and push
+3. Create and push a tag: `git tag strubio-v<VERSION> && git push origin strubio-v<VERSION>`
