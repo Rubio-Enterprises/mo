@@ -1116,26 +1116,37 @@ func TestEnableBackup_ReflectsLatestState(t *testing.T) {
 
 func TestAddFile_RejectsBinaryFile(t *testing.T) {
 	s := newTestState(t)
-
 	dir := t.TempDir()
 
-	// Binary file (contains NUL bytes)
-	binFile := filepath.Join(dir, "image.png")
-	os.WriteFile(binFile, []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00}, 0o600) //nolint:errcheck
+	// Binary file with known code extension is still rejected.
+	binFile := filepath.Join(dir, "bad.go")
+	os.WriteFile(binFile, []byte("package\x00main"), 0o600) //nolint:errcheck
 
 	_, err := s.AddFile(binFile, DefaultGroup)
 	if err == nil {
-		t.Fatal("expected error for binary file, got nil")
+		t.Fatal("expected error for binary code file, got nil")
 	}
 	if !errors.Is(err, ErrBinaryFile) {
 		t.Fatalf("expected ErrBinaryFile, got: %v", err)
 	}
 
-	// Text file should succeed
+	// Binary file with unknown extension is accepted as FileTypeBinary.
+	unknownBin := filepath.Join(dir, "data.bin")
+	os.WriteFile(unknownBin, []byte("has\x00null"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(unknownBin, DefaultGroup)
+	if err != nil {
+		t.Fatalf("unexpected error for unknown binary: %v", err)
+	}
+	if entry.Type != FileTypeBinary {
+		t.Errorf("Type = %q, want %q", entry.Type, FileTypeBinary)
+	}
+
+	// Text file should succeed.
 	txtFile := filepath.Join(dir, "readme.md")
 	os.WriteFile(txtFile, []byte("# Hello"), 0o600) //nolint:errcheck
 
-	entry, err := s.AddFile(txtFile, DefaultGroup)
+	entry, err = s.AddFile(txtFile, DefaultGroup)
 	if err != nil {
 		t.Fatalf("unexpected error for text file: %v", err)
 	}
@@ -1143,7 +1154,7 @@ func TestAddFile_RejectsBinaryFile(t *testing.T) {
 		t.Fatal("expected non-nil entry for text file")
 	}
 
-	// Non-existent file should not error
+	// Non-existent file should not error.
 	_, err = s.AddFile(filepath.Join(dir, "nonexistent.md"), DefaultGroup)
 	if err != nil {
 		t.Fatalf("unexpected error for non-existent file: %v", err)
@@ -1216,12 +1227,12 @@ func TestAddUploadedFile(t *testing.T) {
 func TestHandleAddFile_RejectsBinaryFile(t *testing.T) {
 	dir := t.TempDir()
 
-	t.Run("returns 400 for binary file", func(t *testing.T) {
+	t.Run("returns 400 for binary code file", func(t *testing.T) {
 		s := newTestState(t)
 		handler := NewHandler(s)
 
-		binFile := filepath.Join(dir, "image.png")
-		os.WriteFile(binFile, []byte{0x89, 0x50, 0x4e, 0x47, 0x00}, 0o600) //nolint:errcheck
+		binFile := filepath.Join(dir, "bad.go")
+		os.WriteFile(binFile, []byte("package\x00main"), 0o600) //nolint:errcheck
 
 		body, err := json.Marshal(addFileRequest{Path: binFile, Group: DefaultGroup})
 		if err != nil {
@@ -1235,6 +1246,36 @@ func TestHandleAddFile_RejectsBinaryFile(t *testing.T) {
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("returns 200 for unknown binary file", func(t *testing.T) {
+		s := newTestState(t)
+		handler := NewHandler(s)
+
+		binFile := filepath.Join(dir, "data.bin")
+		os.WriteFile(binFile, []byte("has\x00null"), 0o600) //nolint:errcheck
+
+		body, err := json.Marshal(addFileRequest{Path: binFile, Group: DefaultGroup})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest("POST", "/_/api/files", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		var entry FileEntry
+		if err := json.NewDecoder(rec.Body).Decode(&entry); err != nil {
+			t.Fatal(err)
+		}
+		if entry.Type != FileTypeBinary {
+			t.Errorf("Type = %q, want %q", entry.Type, FileTypeBinary)
 		}
 	})
 
@@ -1807,5 +1848,101 @@ func TestRemoveFileNotFound(t *testing.T) {
 	// Verify original file is still there
 	if len(s.groups[DefaultGroup].Files) != 1 {
 		t.Error("expected files to be unchanged")
+	}
+}
+
+func TestAddFile_SetsFileType(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+
+	tests := []struct {
+		name     string
+		filename string
+		content  []byte
+		wantType FileType
+		wantErr  bool
+	}{
+		{"markdown", "readme.md", []byte("# Hello"), FileTypeMarkdown, false},
+		{"code", "main.go", []byte("package main"), FileTypeCode, false},
+		{"pdf", "doc.pdf", []byte("%PDF-1.4\x00binary"), FileTypePDF, false},
+		{"image", "photo.png", []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00}, FileTypeImage, false},
+		{"unknown text", "data.xyz", []byte("some text"), FileTypeUnknown, false},
+		{"unknown binary promoted", "data.bin", []byte("has\x00null"), FileTypeBinary, false},
+		{"markdown with null bytes", "bad.md", []byte("# Hi\x00"), FileTypeMarkdown, true},
+		{"code with null bytes", "bad.go", []byte("package\x00main"), FileTypeCode, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(dir, tt.filename)
+			os.WriteFile(path, tt.content, 0o600) //nolint:errcheck
+
+			entry, err := s.AddFile(path, DefaultGroup)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if entry.Type != tt.wantType {
+				t.Errorf("Type = %q, want %q", entry.Type, tt.wantType)
+			}
+
+			// Clean up for next test.
+			s.RemoveFile(entry.ID)
+		})
+	}
+}
+
+func TestAddFile_RejectsDirectoryWithPDFExtension(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	pdfDir := filepath.Join(dir, "something.pdf")
+	os.Mkdir(pdfDir, 0o755) //nolint:errcheck
+
+	_, err := s.AddFile(pdfDir, DefaultGroup)
+	if err == nil {
+		t.Fatal("expected error for directory with .pdf extension")
+	}
+}
+
+func TestAddFile_TitleExtractionByType(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+
+	// Markdown gets title.
+	mdPath := filepath.Join(dir, "doc.md")
+	os.WriteFile(mdPath, []byte("# My Title"), 0o600) //nolint:errcheck
+	entry, err := s.AddFile(mdPath, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Title != "My Title" {
+		t.Errorf("markdown Title = %q, want %q", entry.Title, "My Title")
+	}
+
+	// Code with # comment also gets title (preserves existing behavior).
+	goPath := filepath.Join(dir, "script.sh")
+	os.WriteFile(goPath, []byte("# Setup Script"), 0o600) //nolint:errcheck
+	entry2, err := s.AddFile(goPath, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry2.Title != "Setup Script" {
+		t.Errorf("code Title = %q, want %q", entry2.Title, "Setup Script")
+	}
+
+	// PDF skips title extraction.
+	pdfPath := filepath.Join(dir, "doc.pdf")
+	os.WriteFile(pdfPath, []byte("%PDF-1.4\x00binary"), 0o600) //nolint:errcheck
+	entry3, err := s.AddFile(pdfPath, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry3.Title != "" {
+		t.Errorf("pdf Title = %q, want empty", entry3.Title)
 	}
 }
