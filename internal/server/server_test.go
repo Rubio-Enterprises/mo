@@ -1946,3 +1946,150 @@ func TestAddFile_TitleExtractionByType(t *testing.T) {
 		t.Errorf("pdf Title = %q, want empty", entry3.Title)
 	}
 }
+
+func TestHandleFileServe(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("serves PDF with correct content type", func(t *testing.T) {
+		s := newTestState(t)
+		handler := NewHandler(s)
+
+		pdfFile := filepath.Join(dir, "doc.pdf")
+		os.WriteFile(pdfFile, []byte("%PDF-1.4\x00test content"), 0o600) //nolint:errcheck
+
+		entry, err := s.AddFile(pdfFile, DefaultGroup)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+		}
+		ct := rec.Header().Get("Content-Type")
+		if !strings.Contains(ct, "application/pdf") {
+			t.Errorf("Content-Type = %q, want application/pdf", ct)
+		}
+		if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Error("missing X-Content-Type-Options: nosniff header")
+		}
+	})
+
+	t.Run("returns 404 for unknown ID", func(t *testing.T) {
+		s := newTestState(t)
+		handler := NewHandler(s)
+
+		req := httptest.NewRequest("GET", "/_/api/files/nonexistent/raw", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("got status %d, want %d", rec.Code, http.StatusNotFound)
+		}
+	})
+
+	t.Run("returns 404 for uploaded file", func(t *testing.T) {
+		s := newTestState(t)
+		handler := NewHandler(s)
+
+		s.AddUploadedFile("test.md", "# Hello", DefaultGroup) //nolint:errcheck
+
+		entry := s.Groups()[0].Files[0]
+		req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("got status %d, want %d", rec.Code, http.StatusNotFound)
+		}
+	})
+
+	t.Run("cache busting param does not affect response", func(t *testing.T) {
+		s := newTestState(t)
+		handler := NewHandler(s)
+
+		txtFile := filepath.Join(dir, "hello.md")
+		os.WriteFile(txtFile, []byte("# Hello"), 0o600) //nolint:errcheck
+
+		entry, err := s.AddFile(txtFile, DefaultGroup)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw?v=42", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+		}
+		if !strings.Contains(rec.Body.String(), "# Hello") {
+			t.Error("response body does not contain file content")
+		}
+	})
+}
+
+func TestHandleFileServe_RouteCoexistence(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestState(t)
+	handler := NewHandler(s)
+
+	mdFile := filepath.Join(dir, "readme.md")
+	os.WriteFile(mdFile, []byte("# Hello"), 0o600) //nolint:errcheck
+
+	// Create a sibling image file.
+	imgFile := filepath.Join(dir, "image.png")
+	os.WriteFile(imgFile, []byte("fakepng"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// /raw → handleFileServe (serves the file itself).
+	req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/raw: got status %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "# Hello") {
+		t.Error("/raw: expected file content")
+	}
+
+	// /raw/image.png → handleFileAsset (serves sibling asset).
+	req = httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw/image.png", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/raw/image.png: got status %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "fakepng") {
+		t.Error("/raw/image.png: expected sibling asset content")
+	}
+}
+
+func TestHandleFileContent_RejectsBinaryTypes(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestState(t)
+	handler := NewHandler(s)
+
+	pdfFile := filepath.Join(dir, "doc.pdf")
+	os.WriteFile(pdfFile, []byte("%PDF-1.4\x00binary"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(pdfFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/content", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnsupportedMediaType)
+	}
+}

@@ -1238,7 +1238,8 @@ func NewHandler(state *State) http.Handler {
 	mux.HandleFunc("GET /_/api/groups", handleGroups(state))
 	mux.HandleFunc("PUT /_/api/reorder", handleReorderFiles(state))
 	mux.HandleFunc("GET /_/api/files/{id}/content", handleFileContent(state))
-	mux.HandleFunc("GET /_/api/files/{id}/raw/{path...}", handleFileRaw(state))
+	mux.HandleFunc("GET /_/api/files/{id}/raw", handleFileServe(state))
+	mux.HandleFunc("GET /_/api/files/{id}/raw/{path...}", handleFileAsset(state))
 	mux.HandleFunc("POST /_/api/files/open", handleOpenFile(state))
 	mux.HandleFunc("POST /_/api/patterns", handleAddPattern(state))
 	mux.HandleFunc("DELETE /_/api/patterns", handleRemovePattern(state))
@@ -1261,6 +1262,7 @@ func withCSP(next http.Handler) http.Handler {
 				"img-src 'self' https: data:; "+
 				"font-src 'self' data:; "+
 				"connect-src 'self'; "+
+				"worker-src 'self' blob:; "+
 				"object-src 'none'; "+
 				"base-uri 'self'; "+
 				"form-action 'self'; "+
@@ -1430,6 +1432,13 @@ func handleFileContent(state *State) http.HandlerFunc {
 			return
 		}
 
+		// Reject binary file types — their content cannot be JSON-serialized.
+		switch entry.Type {
+		case FileTypePDF, FileTypeImage, FileTypeBinary:
+			http.Error(w, "content endpoint not supported for binary file types; use the raw endpoint", http.StatusUnsupportedMediaType)
+			return
+		}
+
 		var resp fileContentResponse
 		if entry.Uploaded {
 			resp = fileContentResponse{
@@ -1454,7 +1463,7 @@ func handleFileContent(state *State) http.HandlerFunc {
 	}
 }
 
-func handleFileRaw(state *State) http.HandlerFunc {
+func handleFileAsset(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if id == "" {
@@ -1474,6 +1483,11 @@ func handleFileRaw(state *State) http.HandlerFunc {
 		}
 
 		relPath := r.PathValue("path")
+		if relPath == "" {
+			http.Error(w, "missing asset path", http.StatusBadRequest)
+			return
+		}
+
 		absPath := filepath.Join(filepath.Dir(entry.Path), relPath)
 		absPath = filepath.Clean(absPath)
 
@@ -1484,7 +1498,32 @@ func handleFileRaw(state *State) http.HandlerFunc {
 			return
 		}
 
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		http.ServeFile(w, r, absPath)
+	}
+}
+
+func handleFileServe(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing file id", http.StatusBadRequest)
+			return
+		}
+
+		entry := state.FindFile(id)
+		if entry == nil {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+
+		if entry.Uploaded {
+			http.Error(w, "raw serving not available for uploaded files", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		http.ServeFile(w, r, entry.Path)
 	}
 }
 
