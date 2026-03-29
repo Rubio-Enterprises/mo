@@ -1,7 +1,11 @@
-import type { ComponentType } from "react";
+import { lazy, type ComponentType } from "react";
 import type { FileType } from "../hooks/useApi";
-import { CodeRenderer } from "./CodeRenderer";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { CodeRenderer } from "./CodeRenderer";
+import { GenericRenderer } from "./GenericRenderer";
+import { ImageRenderer } from "./ImageRenderer";
+
+const PdfRenderer = lazy(() => import("./PdfRenderer").then((m) => ({ default: m.PdfRenderer })));
 
 export interface TocHeading {
   id: string;
@@ -44,12 +48,6 @@ export interface RendererEntry {
   contentSource: "text" | "raw";
 }
 
-// Placeholder components — replaced in subsequent tasks.
-// Using inline stubs so the registry compiles before real renderers exist.
-function Placeholder() {
-  return null;
-}
-
 export const rendererRegistry: Record<FileType, RendererEntry> = {
   markdown: {
     component: MarkdownRenderer as ComponentType<RendererProps>,
@@ -62,17 +60,17 @@ export const rendererRegistry: Record<FileType, RendererEntry> = {
     contentSource: "text",
   },
   pdf: {
-    component: Placeholder as ComponentType<RendererProps>,
+    component: PdfRenderer as unknown as ComponentType<RendererProps>,
     features: { toc: false, raw: false, headings: false, copyable: false },
     contentSource: "raw",
   },
   image: {
-    component: Placeholder as ComponentType<RendererProps>,
+    component: ImageRenderer as ComponentType<RendererProps>,
     features: { toc: false, raw: false, headings: false, copyable: false },
     contentSource: "raw",
   },
   binary: {
-    component: Placeholder as ComponentType<RendererProps>,
+    component: GenericRenderer as ComponentType<RendererProps>,
     features: { toc: false, raw: false, headings: false, copyable: false },
     contentSource: "raw",
   },

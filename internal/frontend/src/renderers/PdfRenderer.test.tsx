@@ -7,7 +7,6 @@ vi.mock("react-pdf", () => ({
   Document: ({
     onLoadSuccess,
     children,
-    loading,
   }: {
     file: string;
     onLoadSuccess: (pdf: { numPages: number }) => void;
