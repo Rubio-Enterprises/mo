@@ -49,8 +49,8 @@ func DetectFileType(path string) FileType
 |------|-----------|
 | markdown | `.md`, `.mdx`, `.markdown`, `.mdown`, `.mkdn`, `.mkd` |
 | pdf | `.pdf` |
-| image | `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.ico`, `.bmp` |
-| code | ~40 extensions mirroring frontend `detectLanguage()` map |
+| image | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.ico`, `.bmp` |
+| code | ~40 extensions mirroring frontend `detectLanguage()` map (includes `.svg` — rendered as syntax-highlighted XML, not as an image) |
 | unknown | Everything else (provisional — may be promoted to `binary` after content check) |
 
 `FileTypeBinary` is never returned by `DetectFileType`. It is only produced by the unknown→binary promotion in `AddFile` when null bytes are detected in the file head.
@@ -124,15 +124,17 @@ Existing `handleFileRaw` → `handleFileAsset`. Function name only — URL path 
 ### Route Registration
 
 ```go
-mux.HandleFunc("GET /_/api/files/{id}/raw", s.handleFileServe)       // new
-mux.HandleFunc("GET /_/api/files/{id}/raw/{path...}", s.handleFileAsset) // renamed
+mux.HandleFunc("GET /_/api/files/{id}/raw", handleFileServe(state))       // new
+mux.HandleFunc("GET /_/api/files/{id}/raw/{path...}", handleFileAsset(state)) // renamed
 ```
 
-Go 1.22+ mux disambiguates: exact match (`/raw`) vs wildcard (`/raw/{path...}`). The `handleFileAsset` handler must guard against empty `{path...}` values (return 400).
+Handlers use the existing closure pattern (`handleFileServe(state)` returns `http.HandlerFunc`), matching the codebase convention — not methods on `*State`.
 
-### Existing Endpoint Unchanged
+Go 1.22+ mux disambiguates: exact match (`/raw`) vs wildcard (`/raw/{path...}`). The `handleFileAsset` handler must guard against empty `{path...}` values (return 400). A route coexistence integration test must verify this disambiguation before other work depends on it.
 
-`GET /_/api/files/{id}/content` continues to serve `{ content: string, baseDir: string }` JSON for text files. No changes.
+### Content Endpoint Guard
+
+`GET /_/api/files/{id}/content` gains a type check: if the file's type is `pdf`, `image`, or `binary`, return `415 Unsupported Media Type` instead of attempting to read and JSON-serialize binary content. This prevents corrupt responses if any client calls the text endpoint for a binary file. Text types (`markdown`, `code`, `unknown`) continue to serve `{ content: string, baseDir: string }` JSON as before.
 
 ### CSP Update
 
@@ -172,7 +174,7 @@ interface BaseRendererProps {
   fileName: string;
   revision: number;
   isRawView: boolean;
-  onFileOpened: (fileId: string) => void;
+  onFileOpened?: (fileId: string) => void;
   onHeadingsChange: (headings: TocHeading[]) => void;
   onContentRendered?: () => void;
 }
@@ -245,9 +247,10 @@ Replaces `MarkdownViewer` as the top-level content component. Responsibilities:
 - Owns toolbar rendering: only shows toggles enabled by `features` (ToC, raw, copy)
 - Owns `isRawView` state + toggle (passed to renderers with `features.raw`)
 - Owns `<article>` wrapper with `isWide` class (renderers don't know about layout policy)
-- Owns `isTocOpen`, `onTocToggle`, `onRemoveFile` — toolbar concerns, never passed to renderers
+- Receives `isTocOpen`, `onTocToggle`, `onRemoveFile` as props from `App.tsx` (state remains in `App.tsx` since `TocPanel` is rendered there). `FileViewer` conditionally shows the ToC toggle button based on `features.toc` — never passes these to renderers.
 - Wraps all renderers in `<Suspense fallback={<LoadingIndicator />}>` for lazy-loaded components
-- Passes `onFileOpened` to renderers (markdown link navigation, potentially extensible)
+- Passes `onFileOpened` to renderers that need it (markdown link navigation)
+- Non-heading renderers (pdf, image, binary, code) must call `onHeadingsChange([])` on mount to clear stale headings from previously viewed markdown files. `FileViewer` handles this: if `features.headings` is false, it calls `onHeadingsChange([])` itself rather than relying on the renderer.
 
 ### Renderer Components (`src/renderers/`)
 
@@ -278,6 +281,8 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 ```
 
+**Bundle size note:** `pdfjs-dist` is substantial (~1.5MB minified for the worker). `React.lazy` + Vite code splitting ensures the worker chunk is only loaded when a PDF is actually viewed, not on initial page load. However, the chunk is still embedded in the Go binary via `go:embed`. The binary size increase should be measured after Phase 3 (`make build`, compare before/after). This is expected to be acceptable for a CLI tool.
+
 ### Frontend FileEntry Interface
 
 ```typescript
@@ -301,7 +306,9 @@ The `RendererFeatures` object is static per file type. This is an intentional si
 
 A shared `extensions.json` manifest maps extensions to file types. Both sides import it:
 - Go: `go:embed` in `internal/server/filetype.go`
-- TypeScript: standard import in `src/utils/filetype.ts`
+- TypeScript: standard import in `src/utils/filetype.ts` (via Vite alias or relative path)
+
+The manifest lives at `internal/server/extensions.json` (colocated with the Go consumer). The TypeScript side imports it via a relative path (`../../server/extensions.json`) or a Vite resolve alias — the exact mechanism is determined during Phase 4 implementation. The path resolution challenge between Go embed and TypeScript bundling is a known complexity.
 
 A Go test (`TestExtensionMapConsistency`) verifies both sides agree on the file type for every extension. This prevents drift when extensions are added or changed.
 
@@ -331,6 +338,12 @@ AddFile flow:
 - Concurrent AddFile with same PDF does not create duplicates
 - Type field set correctly on returned FileEntry for each type
 - Title extracted for markdown, code, and unknown text files; skipped for pdf, image, binary
+
+handleFileContent (guard):
+- Returns 415 for PDF file type
+- Returns 415 for image file type
+- Returns 415 for binary file type
+- Continues to return content JSON for markdown, code, unknown types
 
 handleFileServe:
 - Returns raw bytes with correct Content-Type (`.pdf` → `application/pdf`)
@@ -374,6 +387,7 @@ Glob patterns:
 - Raw types: builds URL via `rawFileUrl()`, passes `rawUrl` prop
 - Toolbar toggles respect feature flags
 - `isRawView` state managed and passed correctly
+- Headings cleared (`onHeadingsChange([])`) when switching to a non-heading file type
 
 **Playwright E2E (Phase 4):**
 - Start mo in foreground mode with a test PDF
@@ -399,6 +413,7 @@ Additive changes, no frontend impact. Existing behavior preserved for text files
 5. Update CSP header (`worker-src 'self' blob:`)
 6. Add `IsRegular` check for binary types (pdf, image)
 7. Guard `handleFileAsset` against empty path values
+8. Add type guard to `handleFileContent` (return 415 for binary file types)
 
 ### Phase 2: Frontend Extraction (`refactor/file-viewer-extraction`)
 
