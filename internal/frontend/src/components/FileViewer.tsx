@@ -35,7 +35,7 @@ export function FileViewer({
   onRemoveFile,
   isWide,
 }: FileViewerProps) {
-  const entry = rendererRegistry[fileType] ?? rendererRegistry["unknown"];
+  const entry = rendererRegistry[fileType];
   const { features, contentSource } = entry;
   const Component = entry.component;
 
@@ -68,14 +68,12 @@ export function FileViewer({
     };
   }, [fileId, revision, contentSource]);
 
-  // Clear headings for non-heading file types.
   useEffect(() => {
     if (!features.headings) {
       onHeadingsChange([]);
     }
   }, [features.headings, onHeadingsChange]);
 
-  // Reset raw view when switching files.
   useEffect(() => {
     setIsRawView(false);
   }, [fileId]);
@@ -88,7 +86,6 @@ export function FileViewer({
     );
   }
 
-  // Build renderer props based on content source.
   const baseProps = {
     fileId,
     fileName,

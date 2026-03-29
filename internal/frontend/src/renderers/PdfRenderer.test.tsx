@@ -64,16 +64,4 @@ describe("PdfRenderer", () => {
       expect(screen.getByTestId("pdf-page-1")).toBeInTheDocument();
     });
   });
-
-  it("clears headings on mount", async () => {
-    render(
-      <Suspense fallback={<div>Loading...</div>}>
-        <PdfRenderer {...defaultProps} />
-      </Suspense>,
-    );
-
-    await waitFor(() => {
-      expect(defaultProps.onHeadingsChange).toHaveBeenCalledWith([]);
-    });
-  });
 });

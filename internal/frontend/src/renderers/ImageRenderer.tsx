@@ -1,16 +1,6 @@
-import { useEffect } from "react";
 import type { RawRendererProps } from "./registry";
 
-export function ImageRenderer({
-  fileName,
-  rawUrl,
-  onHeadingsChange,
-  onContentRendered,
-}: RawRendererProps) {
-  useEffect(() => {
-    onHeadingsChange([]);
-  }, [onHeadingsChange]);
-
+export function ImageRenderer({ fileName, rawUrl, onContentRendered }: RawRendererProps) {
   return (
     <div className="flex items-center justify-center p-4">
       <img

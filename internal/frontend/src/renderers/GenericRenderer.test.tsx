@@ -24,9 +24,4 @@ describe("GenericRenderer", () => {
     const link = screen.getByRole("link", { name: /download/i });
     expect(link).toHaveAttribute("href", "/_/api/files/abc123/raw?v=1");
   });
-
-  it("clears headings on mount", () => {
-    render(<GenericRenderer {...defaultProps} />);
-    expect(defaultProps.onHeadingsChange).toHaveBeenCalledWith([]);
-  });
 });

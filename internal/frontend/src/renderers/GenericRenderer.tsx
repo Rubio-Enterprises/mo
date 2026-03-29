@@ -1,16 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import type { RawRendererProps } from "./registry";
 
-export function GenericRenderer({
-  fileName,
-  rawUrl,
-  onHeadingsChange,
-  onContentRendered,
-}: RawRendererProps) {
-  useEffect(() => {
-    onHeadingsChange([]);
-  }, [onHeadingsChange]);
-
+export function GenericRenderer({ fileName, rawUrl, onContentRendered }: RawRendererProps) {
   const onContentRenderedRef = useRef(onContentRendered);
   useLayoutEffect(() => {
     onContentRenderedRef.current = onContentRendered;

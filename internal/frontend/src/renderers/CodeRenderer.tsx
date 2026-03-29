@@ -5,7 +5,7 @@ import { detectLanguage } from "../utils/filetype";
 import type { TextRendererProps } from "./registry";
 
 export function CodeRenderer(props: TextRendererProps) {
-  const { content, fileName, onHeadingsChange, onContentRendered } = props;
+  const { content, fileName, onContentRendered } = props;
   const language = useMemo(() => detectLanguage(fileName), [fileName]);
   const [html, setHtml] = useState<string>("");
 
@@ -25,11 +25,6 @@ export function CodeRenderer(props: TextRendererProps) {
       cancelled = true;
     };
   }, [content, language]);
-
-  // Code files have no headings.
-  useEffect(() => {
-    onHeadingsChange([]);
-  }, [onHeadingsChange]);
 
   const onContentRenderedRef = useRef(onContentRendered);
   useLayoutEffect(() => {

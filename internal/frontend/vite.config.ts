@@ -25,6 +25,7 @@ function pdfjsWorkerPlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use(`/${workerFileName}`, (_req, res) => {
         res.setHeader("Content-Type", "application/javascript");
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
         fs.createReadStream(workerSrc).pipe(res);
       });
     },

@@ -7,7 +7,7 @@ import type { RawRendererProps } from "./registry";
 // Worker file is emitted by the pdfjsWorkerPlugin in vite.config.ts.
 pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
-export function PdfRenderer({ rawUrl, onHeadingsChange, onContentRendered }: RawRendererProps) {
+export function PdfRenderer({ rawUrl, onContentRendered }: RawRendererProps) {
   const [numPages, setNumPages] = useState<number>(0);
   const [error, setError] = useState<string>("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -26,11 +26,6 @@ export function PdfRenderer({ rawUrl, onHeadingsChange, onContentRendered }: Raw
     if (containerRef.current) observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, [measureWidth]);
-
-  // PDF has no headings.
-  useEffect(() => {
-    onHeadingsChange([]);
-  }, [onHeadingsChange]);
 
   function onDocumentLoadSuccess(pdf: { numPages: number }) {
     setNumPages(pdf.numPages);
