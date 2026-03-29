@@ -26,11 +26,12 @@ import (
 )
 
 type FileEntry struct {
-	Name     string `json:"name"`
-	ID       string `json:"id"`
-	Path     string `json:"path"`
-	Title    string `json:"title,omitempty"`
-	Uploaded bool   `json:"uploaded,omitempty"`
+	Name     string   `json:"name"`
+	ID       string   `json:"id"`
+	Path     string   `json:"path"`
+	Title    string   `json:"title,omitempty"`
+	Uploaded bool     `json:"uploaded,omitempty"`
+	Type     FileType `json:"type"`
 	content  string // in-memory content for uploaded files
 }
 
@@ -259,17 +260,45 @@ func (s *State) AddFile(absPath, groupName string) (*FileEntry, error) {
 	}
 	s.mu.RUnlock()
 
-	// Read file head once for both binary check and title extraction.
-	head, err := readFileHead(absPath)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("failed to read file %s: %w", absPath, err)
-		}
-	} else if len(head) > 0 && bytes.IndexByte(head, 0) >= 0 {
-		return nil, fmt.Errorf("%s: %w", absPath, ErrBinaryFile)
-	}
+	fileType := DetectFileType(absPath)
 
-	title := extractTitle(string(head))
+	var head []byte
+	var title string
+
+	switch fileType {
+	case FileTypePDF, FileTypeImage:
+		// Binary types: verify regular file, skip content checks.
+		fi, err := os.Stat(absPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				// Allow non-existent files (existing behavior).
+				break
+			}
+			return nil, fmt.Errorf("failed to stat file %s: %w", absPath, err)
+		}
+		if !fi.Mode().IsRegular() {
+			return nil, fmt.Errorf("not a regular file: %s", absPath)
+		}
+	default:
+		// Text types: read head for binary check and title extraction.
+		var err error
+		head, err = readFileHead(absPath)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return nil, fmt.Errorf("failed to read file %s: %w", absPath, err)
+			}
+		} else if len(head) > 0 && bytes.IndexByte(head, 0) >= 0 {
+			if fileType == FileTypeUnknown {
+				fileType = FileTypeBinary
+			} else {
+				return nil, fmt.Errorf("%s: %w", absPath, ErrBinaryFile)
+			}
+		}
+
+		if fileType != FileTypeBinary {
+			title = extractTitle(string(head))
+		}
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -292,6 +321,7 @@ func (s *State) AddFile(absPath, groupName string) (*FileEntry, error) {
 		ID:    FileID(absPath),
 		Path:  absPath,
 		Title: title,
+		Type:  fileType,
 	}
 	g.Files = append(g.Files, entry)
 
@@ -342,6 +372,7 @@ func (s *State) AddUploadedFile(name, content, groupName string) *FileEntry {
 		ID:       id,
 		Title:    title,
 		Uploaded: true,
+		Type:     DetectFileType(name),
 		content:  content,
 	}
 	g.Files = append(g.Files, entry)
@@ -1207,7 +1238,8 @@ func NewHandler(state *State) http.Handler {
 	mux.HandleFunc("GET /_/api/groups", handleGroups(state))
 	mux.HandleFunc("PUT /_/api/reorder", handleReorderFiles(state))
 	mux.HandleFunc("GET /_/api/files/{id}/content", handleFileContent(state))
-	mux.HandleFunc("GET /_/api/files/{id}/raw/{path...}", handleFileRaw(state))
+	mux.HandleFunc("GET /_/api/files/{id}/raw", handleFileServe(state))
+	mux.HandleFunc("GET /_/api/files/{id}/raw/{path...}", handleFileAsset(state))
 	mux.HandleFunc("POST /_/api/files/open", handleOpenFile(state))
 	mux.HandleFunc("POST /_/api/patterns", handleAddPattern(state))
 	mux.HandleFunc("DELETE /_/api/patterns", handleRemovePattern(state))
@@ -1230,6 +1262,7 @@ func withCSP(next http.Handler) http.Handler {
 				"img-src 'self' https: data:; "+
 				"font-src 'self' data:; "+
 				"connect-src 'self'; "+
+				"worker-src 'self' blob:; "+
 				"object-src 'none'; "+
 				"base-uri 'self'; "+
 				"form-action 'self'; "+
@@ -1399,6 +1432,13 @@ func handleFileContent(state *State) http.HandlerFunc {
 			return
 		}
 
+		// Reject binary file types — their content cannot be JSON-serialized.
+		switch entry.Type {
+		case FileTypePDF, FileTypeImage, FileTypeBinary:
+			http.Error(w, "content endpoint not supported for binary file types; use the raw endpoint", http.StatusUnsupportedMediaType)
+			return
+		}
+
 		var resp fileContentResponse
 		if entry.Uploaded {
 			resp = fileContentResponse{
@@ -1423,7 +1463,7 @@ func handleFileContent(state *State) http.HandlerFunc {
 	}
 }
 
-func handleFileRaw(state *State) http.HandlerFunc {
+func handleFileAsset(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if id == "" {
@@ -1443,6 +1483,11 @@ func handleFileRaw(state *State) http.HandlerFunc {
 		}
 
 		relPath := r.PathValue("path")
+		if relPath == "" {
+			http.Error(w, "missing asset path", http.StatusBadRequest)
+			return
+		}
+
 		absPath := filepath.Join(filepath.Dir(entry.Path), relPath)
 		absPath = filepath.Clean(absPath)
 
@@ -1453,7 +1498,32 @@ func handleFileRaw(state *State) http.HandlerFunc {
 			return
 		}
 
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		http.ServeFile(w, r, absPath)
+	}
+}
+
+func handleFileServe(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing file id", http.StatusBadRequest)
+			return
+		}
+
+		entry := state.FindFile(id)
+		if entry == nil {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+
+		if entry.Uploaded {
+			http.Error(w, "raw serving not available for uploaded files", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		http.ServeFile(w, r, entry.Path)
 	}
 }
 

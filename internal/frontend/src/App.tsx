@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sidebar } from "./components/Sidebar";
-import { MarkdownViewer } from "./components/MarkdownViewer";
+import { FileViewer } from "./components/FileViewer";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { WidthToggle } from "./components/WidthToggle";
 import { GroupDropdown } from "./components/GroupDropdown";
@@ -21,7 +21,6 @@ import type { NavEntry } from "./hooks/useNavigationHistory";
 import type { Group } from "./hooks/useApi";
 import { fetchGroups, removeFile, reorderFiles } from "./hooks/useApi";
 import { allFileIds, parseGroupFromPath, parseFileIdFromSearch, groupToPath } from "./utils/groups";
-import { isMarkdownFile } from "./utils/filetype";
 
 const VIEWMODE_STORAGE_KEY = "mo-sidebar-viewmode";
 const WIDTH_STORAGE_KEY = "mo-layout-width";
@@ -188,12 +187,12 @@ export function App() {
     document.title = (currentShowTitle && activeFile?.title) || activeFileName || "mo";
   }, [currentShowTitle, activeFile?.title, activeFileName]);
 
-  // Auto-close ToC panel when switching to a non-markdown file
+  const activeFileType = activeFile?.type;
   useEffect(() => {
-    if (activeFileName && !isMarkdownFile(activeFileName)) {
+    if (activeFileType && activeFileType !== "markdown") {
       setTocOpen(false);
     }
-  }, [activeFileName]);
+  }, [activeFileType]);
 
   useSSE({
     onUpdate: () => {
@@ -422,10 +421,11 @@ export function App() {
         )}
         <main className="flex-1 flex flex-col overflow-hidden">
           <div ref={setScrollContainer} className="flex-1 overflow-y-auto p-8 bg-gh-bg">
-            {activeFileId != null ? (
-              <MarkdownViewer
+            {activeFileId != null && activeFile != null ? (
+              <FileViewer
                 fileId={activeFileId}
                 fileName={activeFileName}
+                fileType={activeFile.type}
                 revision={contentRevision}
                 onFileOpened={handleFileOpened}
                 onHeadingsChange={setHeadings}

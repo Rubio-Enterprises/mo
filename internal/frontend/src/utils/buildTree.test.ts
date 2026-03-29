@@ -4,11 +4,11 @@ import { buildTree } from "./buildTree";
 
 function makeFile(id: string, path: string): FileEntry {
   const name = path.split("/").pop()!;
-  return { id, name, path };
+  return { id, name, path, type: "markdown" };
 }
 
 function makeUploadedFile(id: string, name: string): FileEntry {
-  return { id, name, path: "", uploaded: true };
+  return { id, name, path: "", type: "markdown", uploaded: true };
 }
 
 describe("buildTree", () => {

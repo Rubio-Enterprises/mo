@@ -8,13 +8,19 @@ const groups: Group[] = [
   {
     name: "default",
     files: [
-      { id: "aaa11111", name: "README.md", path: "/README.md", title: "Getting Started" },
-      { id: "bbb22222", name: "GUIDE.md", path: "/GUIDE.md" },
+      {
+        id: "aaa11111",
+        name: "README.md",
+        path: "/README.md",
+        title: "Getting Started",
+        type: "markdown",
+      },
+      { id: "bbb22222", name: "GUIDE.md", path: "/GUIDE.md", type: "markdown" },
     ],
   },
   {
     name: "docs",
-    files: [{ id: "ccc33333", name: "api.md", path: "/docs/api.md" }],
+    files: [{ id: "ccc33333", name: "api.md", path: "/docs/api.md", type: "markdown" }],
   },
 ];
 

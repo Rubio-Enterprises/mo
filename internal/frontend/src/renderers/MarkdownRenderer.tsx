@@ -12,16 +12,11 @@ import { useCheckboxOverrides } from "../hooks/useCheckboxOverrides";
 import "katex/dist/katex.min.css";
 import { codeToHtml } from "shiki";
 import mermaid from "mermaid";
-import { fetchFileContent, openRelativeFile } from "../hooks/useApi";
-import { RawToggle } from "./RawToggle";
-import { TocToggle } from "./TocToggle";
-import { CopyButton } from "./CopyButton";
-import { CloseFileButton } from "./CloseFileButton";
+import { openRelativeFile } from "../hooks/useApi";
 import { resolveLink, resolveImageSrc, extractLanguage } from "../utils/resolve";
 import { parseFrontmatter } from "../utils/frontmatter";
 import { stripMdxSyntax } from "../utils/mdx";
-import { isMarkdownFile, detectLanguage } from "../utils/filetype";
-import type { TocHeading } from "./TocPanel";
+import type { TextRendererProps, TocHeading } from "./registry";
 import type { Components } from "react-markdown";
 import "github-markdown-css/github-markdown.css";
 
@@ -35,19 +30,6 @@ const sanitizeSchema = {
     input: [...(defaultSchema.attributes?.["input"] || []), "dataCheckboxKey"],
   },
 };
-
-interface MarkdownViewerProps {
-  fileId: string;
-  fileName: string;
-  revision: number;
-  onFileOpened: (fileId: string) => void;
-  onHeadingsChange: (headings: TocHeading[]) => void;
-  onContentRendered?: () => void;
-  isTocOpen: boolean;
-  onTocToggle: () => void;
-  onRemoveFile: () => void;
-  isWide: boolean;
-}
 
 function getMermaidTheme(): "dark" | "default" {
   return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "default";
@@ -390,49 +372,18 @@ function RawView({ content }: { content: string }) {
   return <HighlightedView content={content} language="markdown" />;
 }
 
-export function MarkdownViewer({
+export function MarkdownRenderer({
   fileId,
   fileName,
-  revision,
+  content,
+  revision: _revision,
+  isRawView,
   onFileOpened,
   onHeadingsChange,
   onContentRendered,
-  isTocOpen,
-  onTocToggle,
-  onRemoveFile,
-  isWide,
-}: MarkdownViewerProps) {
-  const [content, setContent] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [isRawView, setIsRawView] = useState(false);
-  const articleRef = useRef<HTMLElement>(null);
+}: TextRendererProps) {
+  const articleRef = useRef<HTMLDivElement>(null);
   const pendingHashRef = useRef<string>("");
-  const [prevFetchKey, setPrevFetchKey] = useState({ fileId, revision });
-
-  if (fileId !== prevFetchKey.fileId || revision !== prevFetchKey.revision) {
-    setPrevFetchKey({ fileId, revision });
-    setLoading(true);
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchFileContent(fileId)
-      .then((data) => {
-        if (!cancelled) {
-          setContent(data.content);
-          setLoading(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setContent("Failed to load file.");
-          setLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [fileId, revision]);
 
   const basename = fileName.split("/").pop() ?? fileName;
   const { getChecked, toggle, setCheckboxMap } = useCheckboxOverrides(basename);
@@ -450,7 +401,7 @@ export function MarkdownViewer({
       try {
         pendingHashRef.current = hash;
         const entry = await openRelativeFile(fileId, href);
-        onFileOpened(entry.id);
+        onFileOpened?.(entry.id);
       } catch {
         pendingHashRef.current = "";
       }
@@ -545,18 +496,12 @@ export function MarkdownViewer({
     [fileId, handleLinkClick, getChecked, toggle],
   );
 
-  const isMarkdown = isMarkdownFile(fileName);
-  const codeLanguage = isMarkdown ? null : detectLanguage(fileName);
-
   const parsed = useMemo(
-    () => (isMarkdown && !isRawView ? parseFrontmatter(content) : null),
-    [content, isRawView, isMarkdown],
+    () => (!isRawView ? parseFrontmatter(content) : null),
+    [content, isRawView],
   );
 
   const renderedContent = useMemo(() => {
-    if (!isMarkdown) {
-      return <HighlightedView content={content} language={codeLanguage!} />;
-    }
     if (isRawView) {
       return <RawView content={content} />;
     }
@@ -581,7 +526,7 @@ export function MarkdownViewer({
         </Markdown>
       </>
     );
-  }, [content, isRawView, isMarkdown, codeLanguage, parsed, components, fileName, onCheckboxMap]);
+  }, [content, isRawView, parsed, components, fileName, onCheckboxMap]);
 
   const prevHeadingsKey = useRef("");
   useEffect(() => {
@@ -611,39 +556,14 @@ export function MarkdownViewer({
   });
 
   useLayoutEffect(() => {
-    if (!loading) {
-      onContentRenderedRef.current?.();
-      const hash = pendingHashRef.current;
-      if (hash) {
-        pendingHashRef.current = "";
-        const target = document.getElementById(hash.slice(1));
-        target?.scrollIntoView({ behavior: "instant" });
-      }
+    onContentRenderedRef.current?.();
+    const hash = pendingHashRef.current;
+    if (hash) {
+      pendingHashRef.current = "";
+      const target = document.getElementById(hash.slice(1));
+      target?.scrollIntoView({ behavior: "instant" });
     }
-  }, [loading, renderedContent]);
+  }, [renderedContent]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-50 text-gh-text-secondary text-sm">
-        Loading...
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-start gap-2">
-      <article
-        ref={articleRef}
-        className={`markdown-body min-w-0 flex-1${isWide ? " markdown-body--wide" : ""}`}
-      >
-        {renderedContent}
-      </article>
-      <div className="shrink-0 flex flex-col gap-2 -mr-4 -mt-4">
-        {isMarkdown && <TocToggle isTocOpen={isTocOpen} onToggle={onTocToggle} />}
-        {isMarkdown && <RawToggle isRaw={isRawView} onToggle={() => setIsRawView((v) => !v)} />}
-        <CopyButton content={content} />
-        <CloseFileButton onClose={onRemoveFile} />
-      </div>
-    </div>
-  );
+  return <div ref={articleRef}>{renderedContent}</div>;
 }

@@ -1,9 +1,12 @@
+export type FileType = "markdown" | "code" | "pdf" | "image" | "binary" | "unknown";
+
 export interface FileEntry {
   name: string;
   id: string;
   path: string;
   title?: string;
   uploaded?: boolean;
+  type: FileType;
 }
 
 export interface Group {
@@ -90,4 +93,9 @@ export async function fetchVersion(): Promise<VersionInfo> {
   const res = await fetch("/_/api/version");
   if (!res.ok) throw new Error("Failed to fetch version");
   return res.json();
+}
+
+export function rawFileUrl(id: string, revision?: number): string {
+  const base = `/_/api/files/${id}/raw`;
+  return revision != null ? `${base}?v=${revision}` : base;
 }

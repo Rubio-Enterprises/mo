@@ -18,8 +18,8 @@ describe("allFileIds", () => {
       {
         name: "default",
         files: [
-          { id: "abc12345", name: "a.md", path: "/a.md" },
-          { id: "def67890", name: "b.md", path: "/b.md" },
+          { id: "abc12345", name: "a.md", path: "/a.md", type: "markdown" },
+          { id: "def67890", name: "b.md", path: "/b.md", type: "markdown" },
         ],
       },
     ];
@@ -30,13 +30,13 @@ describe("allFileIds", () => {
     const groups: Group[] = [
       {
         name: "default",
-        files: [{ id: "abc12345", name: "a.md", path: "/a.md" }],
+        files: [{ id: "abc12345", name: "a.md", path: "/a.md", type: "markdown" }],
       },
       {
         name: "docs",
         files: [
-          { id: "def67890", name: "b.md", path: "/b.md" },
-          { id: "ghi11111", name: "c.md", path: "/c.md" },
+          { id: "def67890", name: "b.md", path: "/b.md", type: "markdown" },
+          { id: "ghi11111", name: "c.md", path: "/c.md", type: "markdown" },
         ],
       },
     ];
@@ -48,7 +48,7 @@ describe("allFileIds", () => {
       { name: "empty", files: [] },
       {
         name: "notempty",
-        files: [{ id: "eee55555", name: "e.md", path: "/e.md" }],
+        files: [{ id: "eee55555", name: "e.md", path: "/e.md", type: "markdown" }],
       },
     ];
     expect(allFileIds(groups)).toEqual(new Set(["eee55555"]));
