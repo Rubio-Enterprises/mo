@@ -4,11 +4,8 @@ import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import type { RawRendererProps } from "./registry";
 
-// Configure pdf.js worker — loaded only when this module is imported (lazy).
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url,
-).toString();
+// Worker file is emitted by the pdfjsWorkerPlugin in vite.config.ts.
+pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
 export function PdfRenderer({ rawUrl, onHeadingsChange, onContentRendered }: RawRendererProps) {
   const [numPages, setNumPages] = useState<number>(0);
