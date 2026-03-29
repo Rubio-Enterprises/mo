@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sidebar } from "./components/Sidebar";
-import { MarkdownViewer } from "./components/MarkdownViewer";
+import { FileViewer } from "./components/FileViewer";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { WidthToggle } from "./components/WidthToggle";
 import { GroupDropdown } from "./components/GroupDropdown";
@@ -421,10 +421,11 @@ export function App() {
         )}
         <main className="flex-1 flex flex-col overflow-hidden">
           <div ref={setScrollContainer} className="flex-1 overflow-y-auto p-8 bg-gh-bg">
-            {activeFileId != null ? (
-              <MarkdownViewer
+            {activeFileId != null && activeFile != null ? (
+              <FileViewer
                 fileId={activeFileId}
                 fileName={activeFileName}
+                fileType={activeFile.type}
                 revision={contentRevision}
                 onFileOpened={handleFileOpened}
                 onHeadingsChange={setHeadings}
