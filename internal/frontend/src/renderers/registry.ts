@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import type { FileType } from "../hooks/useApi";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 
 export interface TocHeading {
   id: string;
@@ -50,7 +51,7 @@ function Placeholder() {
 
 export const rendererRegistry: Record<FileType, RendererEntry> = {
   markdown: {
-    component: Placeholder as ComponentType<RendererProps>,
+    component: MarkdownRenderer as ComponentType<RendererProps>,
     features: { toc: true, raw: true, headings: true, copyable: true },
     contentSource: "text",
   },
