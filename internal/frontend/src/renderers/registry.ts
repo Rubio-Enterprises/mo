@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import type { FileType } from "../hooks/useApi";
+import { CodeRenderer } from "./CodeRenderer";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
 export interface TocHeading {
@@ -56,7 +57,7 @@ export const rendererRegistry: Record<FileType, RendererEntry> = {
     contentSource: "text",
   },
   code: {
-    component: Placeholder as ComponentType<RendererProps>,
+    component: CodeRenderer as ComponentType<RendererProps>,
     features: { toc: false, raw: false, headings: false, copyable: true },
     contentSource: "text",
   },
@@ -76,7 +77,7 @@ export const rendererRegistry: Record<FileType, RendererEntry> = {
     contentSource: "raw",
   },
   unknown: {
-    component: Placeholder as ComponentType<RendererProps>,
+    component: CodeRenderer as ComponentType<RendererProps>,
     features: { toc: false, raw: false, headings: false, copyable: true },
     contentSource: "text",
   },
