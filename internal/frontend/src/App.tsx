@@ -21,7 +21,6 @@ import type { NavEntry } from "./hooks/useNavigationHistory";
 import type { Group } from "./hooks/useApi";
 import { fetchGroups, removeFile, reorderFiles } from "./hooks/useApi";
 import { allFileIds, parseGroupFromPath, parseFileIdFromSearch, groupToPath } from "./utils/groups";
-import { isMarkdownFile } from "./utils/filetype";
 
 const VIEWMODE_STORAGE_KEY = "mo-sidebar-viewmode";
 const WIDTH_STORAGE_KEY = "mo-layout-width";
@@ -190,10 +189,10 @@ export function App() {
 
   // Auto-close ToC panel when switching to a non-markdown file
   useEffect(() => {
-    if (activeFileName && !isMarkdownFile(activeFileName)) {
+    if (activeFile && activeFile.type !== "markdown") {
       setTocOpen(false);
     }
-  }, [activeFileName]);
+  }, [activeFile]);
 
   useSSE({
     onUpdate: () => {
