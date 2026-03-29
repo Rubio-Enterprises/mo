@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import type { RawRendererProps } from "./registry";
 
 export function GenericRenderer({
@@ -11,9 +11,14 @@ export function GenericRenderer({
     onHeadingsChange([]);
   }, [onHeadingsChange]);
 
+  const onContentRenderedRef = useRef(onContentRendered);
+  useLayoutEffect(() => {
+    onContentRenderedRef.current = onContentRendered;
+  });
+
   useEffect(() => {
-    onContentRendered?.();
-  }, [onContentRendered]);
+    onContentRenderedRef.current?.();
+  }, []);
 
   return (
     <div className="flex flex-col items-center justify-center gap-4 py-16 text-gh-text-secondary">

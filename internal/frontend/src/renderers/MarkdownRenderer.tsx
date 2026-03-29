@@ -376,7 +376,7 @@ export function MarkdownRenderer({
   fileId,
   fileName,
   content,
-  revision,
+  revision: _revision,
   isRawView,
   onFileOpened,
   onHeadingsChange,
@@ -564,9 +564,6 @@ export function MarkdownRenderer({
       target?.scrollIntoView({ behavior: "instant" });
     }
   }, [renderedContent]);
-
-  // Suppress unused variable warnings for revision (used by parent for cache-busting)
-  void revision;
 
   return <div ref={articleRef}>{renderedContent}</div>;
 }

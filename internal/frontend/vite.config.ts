@@ -74,7 +74,7 @@ export default defineConfig({
     setupFiles: ["src/test-setup.ts"],
     coverage: {
       provider: "v8",
-      include: ["src/utils/**", "src/hooks/**", "src/components/**"],
+      include: ["src/utils/**", "src/hooks/**", "src/components/**", "src/renderers/**"],
       reporter: ["text", "lcov"],
       reportsDirectory: "coverage",
     },

@@ -1522,6 +1522,12 @@ func handleFileServe(state *State) http.HandlerFunc {
 			return
 		}
 
+		fi, err := os.Stat(entry.Path)
+		if err != nil || !fi.Mode().IsRegular() {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		http.ServeFile(w, r, entry.Path)
 	}

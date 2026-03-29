@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { codeToHtml } from "shiki";
 import { useState } from "react";
 import { detectLanguage } from "../utils/filetype";
@@ -31,9 +31,14 @@ export function CodeRenderer(props: TextRendererProps) {
     onHeadingsChange([]);
   }, [onHeadingsChange]);
 
+  const onContentRenderedRef = useRef(onContentRendered);
+  useLayoutEffect(() => {
+    onContentRenderedRef.current = onContentRendered;
+  });
+
   useEffect(() => {
-    onContentRendered?.();
-  }, [html, onContentRendered]);
+    onContentRenderedRef.current?.();
+  }, [html]);
 
   if (html) {
     return (
