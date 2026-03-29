@@ -187,12 +187,12 @@ export function App() {
     document.title = (currentShowTitle && activeFile?.title) || activeFileName || "mo";
   }, [currentShowTitle, activeFile?.title, activeFileName]);
 
-  // Auto-close ToC panel when switching to a non-markdown file
+  const activeFileType = activeFile?.type;
   useEffect(() => {
-    if (activeFile && activeFile.type !== "markdown") {
+    if (activeFileType && activeFileType !== "markdown") {
       setTocOpen(false);
     }
-  }, [activeFile]);
+  }, [activeFileType]);
 
   useSSE({
     onUpdate: () => {

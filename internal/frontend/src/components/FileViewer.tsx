@@ -43,7 +43,6 @@ export function FileViewer({
   const [loading, setLoading] = useState(true);
   const [isRawView, setIsRawView] = useState(false);
 
-  // Fetch text content for text-based renderers.
   useEffect(() => {
     if (contentSource !== "text") {
       setLoading(false);
