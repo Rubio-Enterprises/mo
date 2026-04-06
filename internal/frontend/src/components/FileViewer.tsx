@@ -1,12 +1,13 @@
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { fetchFileContent, rawFileUrl } from "../hooks/useApi";
 import type { FileType } from "../hooks/useApi";
 import { rendererRegistry } from "../renderers/registry";
-import type { TocHeading, RendererProps } from "../renderers/registry";
+import type { TocHeading, RendererProps, CheckboxInfo } from "../renderers/registry";
 import { TocToggle } from "./TocToggle";
 import { RawToggle } from "./RawToggle";
 import { CopyButton } from "./CopyButton";
 import { CloseFileButton } from "./CloseFileButton";
+import { UncheckAllButton } from "./UncheckAllButton";
 
 interface FileViewerProps {
   fileId: string;
@@ -42,6 +43,11 @@ export function FileViewer({
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
   const [isRawView, setIsRawView] = useState(false);
+  const [checkboxInfo, setCheckboxInfo] = useState<CheckboxInfo | null>(null);
+
+  const onCheckboxInfo = useCallback((info: CheckboxInfo) => {
+    setCheckboxInfo(info);
+  }, []);
 
   useEffect(() => {
     if (contentSource !== "text") {
@@ -94,6 +100,7 @@ export function FileViewer({
     onFileOpened,
     onHeadingsChange,
     onContentRendered,
+    onCheckboxInfo,
   };
 
   const rendererProps: RendererProps =
@@ -122,6 +129,9 @@ export function FileViewer({
         {features.toc && <TocToggle isTocOpen={isTocOpen} onToggle={onTocToggle} />}
         {features.raw && <RawToggle isRaw={isRawView} onToggle={() => setIsRawView((v) => !v)} />}
         {features.copyable && <CopyButton content={content} />}
+        {checkboxInfo?.hasCheckboxes && (
+          <UncheckAllButton onUncheckAll={checkboxInfo.uncheckAll} />
+        )}
         <CloseFileButton onClose={onRemoveFile} />
       </div>
     </div>

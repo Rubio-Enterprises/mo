@@ -25,10 +25,12 @@ function saveOverrides(overrides: AllOverrides) {
 export function useCheckboxOverrides(filename: string) {
   const [version, setVersion] = useState(0);
   const checkboxMapRef = useRef<Map<string, boolean>>(new Map());
+  const [hasCheckboxes, setHasCheckboxes] = useState(false);
 
   const setCheckboxMap = useCallback(
     (map: Map<string, boolean>) => {
       checkboxMapRef.current = map;
+      setHasCheckboxes(map.size > 0);
 
       const all = loadOverrides();
       const fileOverrides = all[filename];
@@ -87,5 +89,25 @@ export function useCheckboxOverrides(filename: string) {
     [filename, getChecked],
   );
 
-  return { getChecked, toggle, setCheckboxMap };
+  const uncheckAll = useCallback(() => {
+    const map = checkboxMapRef.current;
+    if (map.size === 0) return;
+
+    const all = loadOverrides();
+    const fileOverrides: Record<string, boolean> = {};
+    for (const [key, sourceChecked] of map) {
+      if (sourceChecked) {
+        fileOverrides[key] = false;
+      }
+    }
+    if (Object.keys(fileOverrides).length > 0) {
+      all[filename] = fileOverrides;
+    } else {
+      delete all[filename];
+    }
+    saveOverrides(all);
+    setVersion((n) => n + 1);
+  }, [filename]);
+
+  return { getChecked, toggle, setCheckboxMap, uncheckAll, hasCheckboxes };
 }

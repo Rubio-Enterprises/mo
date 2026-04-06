@@ -117,4 +117,107 @@ describe("useCheckboxOverrides", () => {
     expect(hook1.current.getChecked("Item")).toBe(true);
     expect(hook2.current.getChecked("Item")).toBe(false);
   });
+
+  describe("uncheckAll", () => {
+    it("unchecks all checkboxes including source-checked ones", () => {
+      const { result } = renderHook(() => useCheckboxOverrides("test.md"));
+
+      act(() => {
+        result.current.setCheckboxMap(
+          new Map([
+            ["Item A", true],
+            ["Item B", false],
+            ["Item C", true],
+          ]),
+        );
+      });
+
+      act(() => {
+        result.current.uncheckAll();
+      });
+
+      expect(result.current.getChecked("Item A")).toBe(false);
+      expect(result.current.getChecked("Item B")).toBe(false);
+      expect(result.current.getChecked("Item C")).toBe(false);
+    });
+
+    it("stores overrides only for source-checked items", () => {
+      const { result } = renderHook(() => useCheckboxOverrides("test.md"));
+
+      act(() => {
+        result.current.setCheckboxMap(
+          new Map([
+            ["Item A", true],
+            ["Item B", false],
+          ]),
+        );
+      });
+
+      act(() => {
+        result.current.uncheckAll();
+      });
+
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
+      // Only Item A needs an override (source is true, we want false).
+      expect(stored["test.md"]).toEqual({ "Item A": false });
+    });
+
+    it("cleans up file entry when no overrides are needed", () => {
+      const { result } = renderHook(() => useCheckboxOverrides("test.md"));
+
+      act(() => {
+        result.current.setCheckboxMap(
+          new Map([
+            ["Item A", false],
+            ["Item B", false],
+          ]),
+        );
+      });
+
+      act(() => {
+        result.current.uncheckAll();
+      });
+
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
+      expect(stored["test.md"]).toBeUndefined();
+    });
+
+    it("does nothing when no checkboxes exist", () => {
+      const { result } = renderHook(() => useCheckboxOverrides("test.md"));
+
+      act(() => {
+        result.current.setCheckboxMap(new Map());
+      });
+
+      act(() => {
+        result.current.uncheckAll();
+      });
+
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const stored = raw ? JSON.parse(raw) : {};
+      expect(stored["test.md"]).toBeUndefined();
+    });
+  });
+
+  describe("hasCheckboxes", () => {
+    it("is false when checkbox map is empty", () => {
+      const { result } = renderHook(() => useCheckboxOverrides("test.md"));
+
+      act(() => {
+        result.current.setCheckboxMap(new Map());
+      });
+
+      expect(result.current.hasCheckboxes).toBe(false);
+    });
+
+    it("is true when checkbox map has entries", () => {
+      const { result } = renderHook(() => useCheckboxOverrides("test.md"));
+
+      act(() => {
+        result.current.setCheckboxMap(new Map([["Item A", false]]));
+      });
+
+      expect(result.current.hasCheckboxes).toBe(true);
+    });
+  });
 });

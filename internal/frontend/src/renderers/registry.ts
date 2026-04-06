@@ -20,6 +20,11 @@ export interface RendererFeatures {
   copyable: boolean;
 }
 
+export interface CheckboxInfo {
+  hasCheckboxes: boolean;
+  uncheckAll: () => void;
+}
+
 interface BaseRendererProps {
   fileId: string;
   fileName: string;
@@ -28,6 +33,7 @@ interface BaseRendererProps {
   onFileOpened?: (fileId: string) => void;
   onHeadingsChange: (headings: TocHeading[]) => void;
   onContentRendered?: () => void;
+  onCheckboxInfo?: (info: CheckboxInfo) => void;
 }
 
 export type TextRendererProps = BaseRendererProps & {

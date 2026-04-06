@@ -381,12 +381,14 @@ export function MarkdownRenderer({
   onFileOpened,
   onHeadingsChange,
   onContentRendered,
+  onCheckboxInfo,
 }: TextRendererProps) {
   const articleRef = useRef<HTMLDivElement>(null);
   const pendingHashRef = useRef<string>("");
 
   const basename = fileName.split("/").pop() ?? fileName;
-  const { getChecked, toggle, setCheckboxMap } = useCheckboxOverrides(basename);
+  const { getChecked, toggle, setCheckboxMap, uncheckAll, hasCheckboxes } =
+    useCheckboxOverrides(basename);
 
   const onCheckboxMap = useCallback(
     (map: Map<string, boolean>) => {
@@ -394,6 +396,10 @@ export function MarkdownRenderer({
     },
     [setCheckboxMap],
   );
+
+  useEffect(() => {
+    onCheckboxInfo?.({ hasCheckboxes, uncheckAll });
+  }, [hasCheckboxes, uncheckAll, onCheckboxInfo]);
 
   const handleLinkClick = useCallback(
     async (e: React.MouseEvent<HTMLAnchorElement>, href: string, hash: string) => {
