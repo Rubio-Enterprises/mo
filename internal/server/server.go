@@ -305,6 +305,13 @@ func (s *State) AddFile(absPath, groupName string) (*FileEntry, error) {
 		}
 	}
 
+	var checkboxSrc map[string]bool
+	if fileType == FileTypeMarkdown {
+		if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
+			checkboxSrc = ExtractCheckboxSources(string(fullContent))
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -329,6 +336,10 @@ func (s *State) AddFile(absPath, groupName string) (*FileEntry, error) {
 		Type:  fileType,
 	}
 	g.Files = append(g.Files, entry)
+
+	if len(checkboxSrc) > 0 {
+		s.checkboxSources[entry.ID] = checkboxSrc
+	}
 
 	if s.watcher != nil {
 		if err := s.watcher.Add(absPath); err != nil {
@@ -381,6 +392,13 @@ func (s *State) AddUploadedFile(name, content, groupName string) *FileEntry {
 		content:  content,
 	}
 	g.Files = append(g.Files, entry)
+
+	if entry.Type == FileTypeMarkdown {
+		sources := ExtractCheckboxSources(content)
+		if len(sources) > 0 {
+			s.checkboxSources[entry.ID] = sources
+		}
+	}
 
 	slog.Info("uploaded file added", "name", name, "group", groupName, "id", entry.ID)
 
@@ -537,6 +555,8 @@ func (s *State) RemoveFile(id string) bool {
 			if f.ID == id {
 				removedPath = f.Path
 				g.Files = append(g.Files[:i], g.Files[i+1:]...)
+				delete(s.checkboxSources, id)
+				delete(s.checkboxOverrides, id)
 				if len(g.Files) == 0 && !s.groupHasPatterns(gName) {
 					delete(s.groups, gName)
 				}

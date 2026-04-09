@@ -38,6 +38,8 @@ func newTestState(t *testing.T) *State {
 		watchedDirs:        make(map[string]int),
 		fileChangeDebounce: defaultFileChangeDebounce,
 		fileChangeTimers:   make(map[string]*time.Timer),
+		checkboxSources:    make(map[string]map[string]bool),
+		checkboxOverrides:  make(map[string]map[string]bool),
 	}
 	_ = ctx
 	return s
@@ -2091,5 +2093,82 @@ func TestHandleFileContent_RejectsBinaryTypes(t *testing.T) {
 
 	if rec.Code != http.StatusUnsupportedMediaType {
 		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnsupportedMediaType)
+	}
+}
+
+func TestAddFilePopulatesCheckboxSources(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] First\n- [x] Second\n"), 0o600)
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.mu.RLock()
+	sources := s.checkboxSources[entry.ID]
+	s.mu.RUnlock()
+
+	if len(sources) != 2 {
+		t.Fatalf("got %d sources, want 2", len(sources))
+	}
+	if sources["First"] != false {
+		t.Fatal("First should be unchecked")
+	}
+	if sources["Second"] != true {
+		t.Fatal("Second should be checked")
+	}
+}
+
+func TestAddFileSkipsCheckboxesForNonMarkdown(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	goFile := filepath.Join(dir, "main.go")
+	os.WriteFile(goFile, []byte("package main\n"), 0o600)
+
+	entry, err := s.AddFile(goFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.mu.RLock()
+	sources := s.checkboxSources[entry.ID]
+	s.mu.RUnlock()
+
+	if len(sources) != 0 {
+		t.Fatalf("got %d sources for non-markdown, want 0", len(sources))
+	}
+}
+
+func TestRemoveFileCleansUpCheckboxState(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] Item\n"), 0o600)
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Manually add an override.
+	s.mu.Lock()
+	s.checkboxOverrides[entry.ID] = map[string]bool{"Item": true}
+	s.mu.Unlock()
+
+	s.RemoveFile(entry.ID)
+
+	s.mu.RLock()
+	_, hasSources := s.checkboxSources[entry.ID]
+	_, hasOverrides := s.checkboxOverrides[entry.ID]
+	s.mu.RUnlock()
+
+	if hasSources {
+		t.Fatal("sources should be deleted after RemoveFile")
+	}
+	if hasOverrides {
+		t.Fatal("overrides should be deleted after RemoveFile")
 	}
 }
