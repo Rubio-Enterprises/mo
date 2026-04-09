@@ -2,7 +2,7 @@
 
 **Goal:** Add clickable checkbox labels, shift-click range selection with bulk check/uncheck, and a "Check All" operation to complement the existing "Uncheck All."
 
-**Scope:** Single-file checkbox operations only. Multi-file bulk operations are out of scope.
+**Scope:** Single-file checkbox operations only. Multi-file bulk operations and undo support are out of scope.
 
 ---
 
@@ -14,9 +14,10 @@ The `<li>` element containing a task checkbox becomes a click target. Clicking a
 
 In `MarkdownRenderer.tsx`, add a component override for `li` that:
 
-1. Detects if the list item contains a checkbox by checking for a child `<input>` with a `data-checkbox-key` attribute.
-2. Attaches an `onClick` handler to the `<li>` that calls `toggle(key)`.
-3. Prevents double-toggle: the `<input>` keeps its existing `onChange`, but `onClick` on the `<li>` calls `e.preventDefault()` when the target is the input itself (or uses `stopPropagation` on the input's handler).
+1. Detects if the list item is a task item by checking for the `task-list-item` class that remark-gfm adds. This distinguishes task list `<li>` from regular `<li>` elements.
+2. Finds the child `<input>` with `data-checkbox-key` to extract the key.
+3. Attaches an `onClick` handler to the `<li>` that calls `toggle(key)`.
+4. Prevents double-toggle: the `<input>` click handler calls `e.stopPropagation()` so the `<li>` handler doesn't also fire.
 
 ### Visual Feedback
 
@@ -25,8 +26,9 @@ In `MarkdownRenderer.tsx`, add a component override for `li` that:
 
 ### Edge Cases
 
-- **Links inside labels:** Clicking an `<a>` tag should navigate, not toggle. The `onClick` handler checks if `e.target` (or any ancestor up to the `<li>`) is an `<a>` — if so, bail out.
+- **Links inside labels:** Clicking an `<a>` tag should navigate, not toggle. The `onClick` handler walks up from `e.target` to the `<li>` — if any ancestor is an `<a>`, bail out.
 - **Code spans and inline elements:** These toggle when clicked (they are part of the label).
+- **Text selection:** Add `user-select: none` to task list `<li>` elements to prevent accidental text selection on click. Users can still select text in non-task list items.
 
 ---
 
@@ -39,37 +41,43 @@ Shift+clicking a checkbox or its label text selects a range of checkboxes. A flo
 | Interaction | Behavior |
 |-------------|----------|
 | Normal click (no modifier) | Toggle that single checkbox immediately |
-| Shift+click | First shift+click sets the anchor. Second shift+click selects everything between anchor and target (inclusive) |
-| Shift+click again (after a range exists) | Resets, starts new range from new anchor |
-| Escape | Clears selection |
-| Click outside checkboxes | Clears selection |
+| Shift+click (no anchor set) | Sets the anchor. The anchor item is visually highlighted but the action bar does not appear yet. |
+| Shift+click (anchor set) | Selects everything between anchor and target (inclusive). Action bar appears. |
+| Shift+click (range exists) | Clears previous range, sets new anchor (single highlight, no action bar) |
+| Escape | Clears selection and anchor |
+| Click outside task list items | Clears selection and anchor |
 | Ctrl/Cmd+click | Out of scope for initial implementation |
+
+**"Click outside" definition:** A document-level `mousedown` handler checks whether the event target is inside a `<li>` with `task-list-item` class, the `SelectionActionBar`, or the `CheckboxActionsButton`. If not, clear selection.
 
 ### Visual Treatment
 
-- Selected `<li>` elements get a background highlight (e.g., `bg-blue-50 dark:bg-blue-900/20`) and a left border accent.
+- Selected `<li>` elements (including anchor-only state) get a background highlight (e.g., `bg-blue-50 dark:bg-blue-900/20`) and a left border accent.
 - The checkbox `<input>` itself is not visually changed — the highlight is on the `<li>`.
 
 ### Floating Action Bar (`SelectionActionBar`)
 
-- Appears anchored at the bottom of the content area when 2+ checkboxes are selected.
-- Content: **"N selected"** — **Check** | **Uncheck** | **Cancel**
+- Rendered by `FileViewer` (not inside `MarkdownRenderer`), positioned fixed at the bottom of the content area so it does not scroll with the article.
+- Appears when 2+ checkboxes are selected. Conditionally rendered (not CSS-hidden).
+- Content: **"N of M selected"** — **Check** | **Uncheck** | **Cancel** (where M is total checkbox count).
 - Styled to match GitHub theme (border, subtle shadow, rounded).
+- Auto-focuses when it appears for keyboard accessibility. Buttons reachable via Tab.
 - "Cancel" clears selection and dismisses the bar.
-- "Check" / "Uncheck" fires individual `PUT /_/api/files/{id}/checkboxes/{key}` calls for each selected checkbox that needs to change state, then clears selection.
+- "Check" / "Uncheck" calls the batch endpoint with the selected keys and explicit `checked: true` or `checked: false`, then clears selection.
 
 ### State Management
 
+- `useCheckboxSelection` hook lives in `FileViewer`, not `MarkdownRenderer`. Selection callbacks (`onShiftClick`, `isSelected`) are passed down to `MarkdownRenderer` as props.
 - Selection state is local (React `useState`) — transient UI, not persisted or synced.
-- Range calculation uses document order of `[data-checkbox-key]` elements in the DOM.
+- Range calculation uses document order of `[data-checkbox-key]` elements in the DOM, queried via `articleRef`.
 
 ---
 
-## Feature 3: Check All Endpoint
+## Feature 3: Check All and Batch Endpoints
 
-New server endpoint to set all checkboxes to checked, complementing the existing "Uncheck All" (`DELETE /_/api/files/{id}/checkboxes`).
+Two new server endpoints: one for "check all" (complement to "uncheck all") and one for batch operations on a selection.
 
-### API
+### Check All API
 
 `POST /_/api/files/{id}/checkboxes/check-all`
 
@@ -77,13 +85,27 @@ New server endpoint to set all checkboxes to checked, complementing the existing
 - Returns `404 Not Found` if the file ID is unknown.
 - Broadcasts a `checkbox-changed` SSE event.
 
-### Server Logic (`State.CheckAll`)
-
-For each checkbox key in `checkboxSources[id]`:
+**Server logic (`State.CheckAll`):** For each checkbox key in `checkboxSources[id]`:
 - If source is `true`: remove any override (already checked).
 - If source is `false`: set `override = true`.
 
 Same pattern as `UncheckAll` but inverted.
+
+### Batch API
+
+`POST /_/api/files/{id}/checkboxes/batch`
+
+- Body: `{"keys": ["key1", "key2", ...], "checked": true|false}`
+- Returns `204 No Content` on success.
+- Returns `404 Not Found` if the file ID is unknown.
+- Broadcasts a single `checkbox-changed` SSE event (not one per key).
+
+**Server logic (`State.SetCheckboxBatch`):** For each key in the request:
+- If `checked` matches source value for that key: remove any override.
+- If `checked` differs from source: set override.
+- Keys not present in `checkboxSources` are silently ignored.
+
+This avoids the race condition of calling N individual PUTs — the action bar sends one request with explicit `checked` values instead of using `toggle()`.
 
 ---
 
@@ -106,19 +128,20 @@ Replace the existing `UncheckAllButton` with a dropdown button offering both "Ch
 
 | Component | Change |
 |-----------|--------|
-| `MarkdownRenderer.tsx` | `li` override for clickable labels; shift-click detection on both `li` and `input`; selection highlighting; renders `SelectionActionBar` |
-| `FileViewer.tsx` | Swap `UncheckAllButton` for `CheckboxActionsButton`; pass `onCheckAll` alongside `onUncheckAll` via `onCheckboxInfo` |
-| `useCheckboxState.ts` | Add `checkAll()` function; include it in `onCheckboxInfo` data |
-| `useApi.ts` | Add `checkAllCheckboxes(id: string)` function |
-| `server.go` | Add `CheckAll` State method, `handleCheckAll` handler, route registration |
+| `MarkdownRenderer.tsx` | `li` override for clickable labels; shift-click detection delegates to selection callbacks from props; selection highlighting via `isSelected` prop |
+| `FileViewer.tsx` | Swap `UncheckAllButton` for `CheckboxActionsButton`; host `useCheckboxSelection` hook; render `SelectionActionBar`; pass selection callbacks to `MarkdownRenderer` |
+| `useCheckboxState.ts` | Add `checkAll()` function; include it in return value |
+| `useApi.ts` | Add `checkAllCheckboxes(id)` and `batchSetCheckboxes(id, keys, checked)` functions |
+| `renderers/registry.ts` | Extend `CheckboxInfo` type to include `checkAll` alongside existing `uncheckAll` |
+| `server.go` | Add `CheckAll` and `SetCheckboxBatch` State methods, handlers, route registration |
 
 ### New
 
 | Component / Hook | Responsibility |
 |------------------|---------------|
 | `CheckboxActionsButton.tsx` | Dropdown in right action bar: Check All / Uncheck All |
-| `SelectionActionBar.tsx` | Floating bar: "N selected — Check / Uncheck / Cancel" |
-| `useCheckboxSelection.ts` | Selection state: anchor key, selected keys set, `selectRange(key)`, `clearSelection()`, `isSelected(key)`. Escape listener. |
+| `SelectionActionBar.tsx` | Floating bar: "N of M selected — Check / Uncheck / Cancel" |
+| `useCheckboxSelection.ts` | Selection state: anchor key, selected keys set, `selectRange(key)`, `clearSelection()`, `isSelected(key)`. Document-level click-outside and Escape listeners. |
 
 ### Deleted
 
@@ -132,21 +155,24 @@ Replace the existing `UncheckAllButton` with a dropdown button offering both "Ch
 
 ### Clickable labels
 
-1. User clicks `<li>` containing a checkbox.
-2. `onClick` handler extracts `data-checkbox-key` from child input.
-3. Calls `toggle(key)` from `useCheckboxState`.
-4. Existing toggle flow: API PUT, SSE broadcast, state update.
+1. User clicks `<li>` with `task-list-item` class.
+2. `onClick` handler checks click target is not an `<a>` link.
+3. Extracts `data-checkbox-key` from the child input element.
+4. Calls `toggle(key)` from `useCheckboxState`.
+5. Existing toggle flow: API PUT, SSE broadcast, state update.
 
 ### Shift-click range selection
 
-1. User shift+clicks a checkbox or label.
-2. `MarkdownRenderer` detects shift key, calls `useCheckboxSelection.selectRange(key)`.
-3. Hook computes range using document order of `[data-checkbox-key]` elements.
-4. Selected keys stored in state; `isSelected(key)` drives `<li>` highlight.
-5. `SelectionActionBar` renders when `selectedKeys.length >= 2`.
-6. User clicks "Check" or "Uncheck" in the action bar.
-7. Loop through selected keys, call `toggle(key)` for each that needs to change.
-8. Clear selection.
+1. User shift+clicks a checkbox or its label `<li>`.
+2. `MarkdownRenderer` detects shift key, calls `onShiftClick(key)` (prop from `FileViewer`).
+3. `useCheckboxSelection` in `FileViewer` handles anchor/range logic.
+4. If anchor was already set, computes range using document order of `[data-checkbox-key]` elements via `articleRef`.
+5. Selected keys stored in state; `isSelected(key)` passed to `MarkdownRenderer` drives `<li>` highlights.
+6. `SelectionActionBar` conditionally renders in `FileViewer` when `selectedKeys.length >= 2`.
+7. User clicks "Check" or "Uncheck" in the action bar.
+8. `FileViewer` calls `batchSetCheckboxes(fileId, selectedKeys, checked)` — single API request.
+9. Server applies changes atomically, broadcasts one `checkbox-changed` SSE event.
+10. Clear selection.
 
 ### Check All
 
@@ -164,19 +190,25 @@ Replace the existing `UncheckAllButton` with a dropdown button offering both "Ch
 - `TestCheckAllEndpoint` — sets all checkboxes to checked; source-true keys have no override, source-false keys get `override = true`.
 - `TestCheckAllRemovesExistingOverrides` — previous override of `false` on a source-true key is cleared.
 - `TestCheckAllReturns404` — unknown file ID returns 404.
+- `TestBatchSetCheckboxes` — sets specific keys to checked/unchecked; verifies only those keys have overrides.
+- `TestBatchSetIgnoresUnknownKeys` — keys not in checkboxSources are silently ignored.
+- `TestBatchSetSingleSSEEvent` — verify only one `checkbox-changed` event is broadcast per batch call.
 
 ### Frontend (Vitest)
 
-- `useCheckboxSelection.test.ts` — range computation produces correct keys in document order; clear resets; single shift-click sets anchor only; escape clears.
+- `useCheckboxSelection.test.ts` — range computation produces correct keys in document order; clear resets; single shift-click sets anchor only (no range); escape clears; second shift-click after range resets to new anchor.
 - `CheckboxActionsButton.test.ts` — renders dropdown; both actions fire correct callbacks.
-- `SelectionActionBar.test.ts` — renders with count; check/uncheck/cancel fire callbacks; hidden when count < 2.
+- `SelectionActionBar.test.ts` — renders with "N of M" count; check/uncheck/cancel fire callbacks; not rendered when count < 2.
+- `MarkdownRenderer` label click test — clicking `<li>` text toggles checkbox; clicking `<a>` inside label does not toggle.
 
 ### Manual verification
 
 - Click label text toggles checkbox (not just the input).
 - Links inside labels navigate instead of toggling.
-- Shift+click two checkboxes highlights the range, shows action bar.
+- Shift+click first checkbox highlights it as anchor.
+- Shift+click second checkbox highlights range, shows action bar.
 - "Check" in action bar checks all selected, clears selection.
 - Escape clears selection.
 - Check All / Uncheck All dropdown works.
 - Multi-client sync still works for all operations.
+- Action bar is keyboard-accessible (Tab to buttons, Enter to activate).
