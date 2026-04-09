@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { fetchFileContent, rawFileUrl } from "../hooks/useApi";
 import type { FileType } from "../hooks/useApi";
 import { rendererRegistry } from "../renderers/registry";
@@ -8,6 +8,9 @@ import { RawToggle } from "./RawToggle";
 import { CopyButton } from "./CopyButton";
 import { CloseFileButton } from "./CloseFileButton";
 import { CheckboxActionsButton } from "./CheckboxActionsButton";
+import { useCheckboxSelection } from "../hooks/useCheckboxSelection";
+import { SelectionActionBar } from "./SelectionActionBar";
+import { batchSetCheckboxes } from "../hooks/useApi";
 
 interface FileViewerProps {
   fileId: string;
@@ -45,9 +48,25 @@ export function FileViewer({
   const [isRawView, setIsRawView] = useState(false);
   const [checkboxInfo, setCheckboxInfo] = useState<CheckboxInfo | null>(null);
 
+  const articleRef = useRef<HTMLDivElement>(null);
+  const { selectedKeys, isSelected, onShiftClick, clearSelection } =
+    useCheckboxSelection(articleRef);
+
   const onCheckboxInfo = useCallback((info: CheckboxInfo) => {
     setCheckboxInfo(info);
   }, []);
+
+  const handleBatchCheck = useCallback(() => {
+    if (!checkboxInfo) return;
+    batchSetCheckboxes(fileId, selectedKeys, true).catch(() => {});
+    clearSelection();
+  }, [fileId, selectedKeys, clearSelection, checkboxInfo]);
+
+  const handleBatchUncheck = useCallback(() => {
+    if (!checkboxInfo) return;
+    batchSetCheckboxes(fileId, selectedKeys, false).catch(() => {});
+    clearSelection();
+  }, [fileId, selectedKeys, clearSelection, checkboxInfo]);
 
   useEffect(() => {
     if (contentSource !== "text") {
@@ -101,6 +120,8 @@ export function FileViewer({
     onHeadingsChange,
     onContentRendered,
     onCheckboxInfo,
+    onShiftClick,
+    isCheckboxSelected: isSelected,
   };
 
   const rendererProps: RendererProps =
@@ -113,30 +134,41 @@ export function FileViewer({
         };
 
   return (
-    <div className="flex items-start gap-2">
-      <article className={`markdown-body min-w-0 flex-1${isWide ? " markdown-body--wide" : ""}`}>
-        <Suspense
-          fallback={
-            <div className="flex items-center justify-center h-50 text-gh-text-secondary text-sm">
-              Loading...
-            </div>
-          }
-        >
-          <Component {...rendererProps} />
-        </Suspense>
-      </article>
-      <div className="shrink-0 flex flex-col gap-2 -mr-4 -mt-4">
-        {features.toc && <TocToggle isTocOpen={isTocOpen} onToggle={onTocToggle} />}
-        {features.raw && <RawToggle isRaw={isRawView} onToggle={() => setIsRawView((v) => !v)} />}
-        {features.copyable && <CopyButton content={content} />}
-        {checkboxInfo?.hasCheckboxes && (
-            <CheckboxActionsButton
-              onCheckAll={checkboxInfo.checkAll}
-              onUncheckAll={checkboxInfo.uncheckAll}
-            />
-          )}
-        <CloseFileButton onClose={onRemoveFile} />
+    <>
+      <div className="flex items-start gap-2">
+        <article ref={articleRef} className={`markdown-body min-w-0 flex-1${isWide ? " markdown-body--wide" : ""}`}>
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center h-50 text-gh-text-secondary text-sm">
+                Loading...
+              </div>
+            }
+          >
+            <Component {...rendererProps} />
+          </Suspense>
+        </article>
+        <div className="shrink-0 flex flex-col gap-2 -mr-4 -mt-4">
+          {features.toc && <TocToggle isTocOpen={isTocOpen} onToggle={onTocToggle} />}
+          {features.raw && <RawToggle isRaw={isRawView} onToggle={() => setIsRawView((v) => !v)} />}
+          {features.copyable && <CopyButton content={content} />}
+          {checkboxInfo?.hasCheckboxes && (
+              <CheckboxActionsButton
+                onCheckAll={checkboxInfo.checkAll}
+                onUncheckAll={checkboxInfo.uncheckAll}
+              />
+            )}
+          <CloseFileButton onClose={onRemoveFile} />
+        </div>
       </div>
-    </div>
+      {selectedKeys.length >= 2 && checkboxInfo && (
+        <SelectionActionBar
+          selectedCount={selectedKeys.length}
+          totalCount={checkboxInfo.totalCheckboxes}
+          onCheck={handleBatchCheck}
+          onUncheck={handleBatchUncheck}
+          onCancel={clearSelection}
+        />
+      )}
+    </>
   );
 }

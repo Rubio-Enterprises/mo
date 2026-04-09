@@ -36,6 +36,8 @@ interface BaseRendererProps {
   onHeadingsChange: (headings: TocHeading[]) => void;
   onContentRendered?: () => void;
   onCheckboxInfo?: (info: CheckboxInfo) => void;
+  onShiftClick?: (key: string) => void;
+  isCheckboxSelected?: (key: string) => boolean;
 }
 
 export type TextRendererProps = BaseRendererProps & {

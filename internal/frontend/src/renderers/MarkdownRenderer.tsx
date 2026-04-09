@@ -382,6 +382,8 @@ export function MarkdownRenderer({
   onHeadingsChange,
   onContentRendered,
   onCheckboxInfo,
+  onShiftClick,
+  isCheckboxSelected,
 }: TextRendererProps) {
   const articleRef = useRef<HTMLDivElement>(null);
   const pendingHashRef = useRef<string>("");
@@ -498,7 +500,14 @@ export function MarkdownRenderer({
         return (
           <li
             className={className}
-            style={{ cursor: checkboxKey ? "pointer" : undefined, userSelect: "none" }}
+            style={{
+            cursor: checkboxKey ? "pointer" : undefined,
+            userSelect: "none",
+            backgroundColor: checkboxKey && isCheckboxSelected?.(checkboxKey) ? "var(--color-gh-bg-active)" : undefined,
+            borderLeft: checkboxKey && isCheckboxSelected?.(checkboxKey) ? "3px solid var(--color-gh-accent)" : undefined,
+            paddingLeft: checkboxKey && isCheckboxSelected?.(checkboxKey) ? "5px" : undefined,
+            borderRadius: "4px",
+          }}
             onClick={(e) => {
               if (!checkboxKey) return;
               // Don't toggle if user clicked a link.
@@ -509,7 +518,11 @@ export function MarkdownRenderer({
               }
               // Don't toggle if user clicked the checkbox input directly (it has its own handler).
               if ((e.target as HTMLElement).tagName === "INPUT") return;
-              toggle(checkboxKey);
+              if (e.shiftKey && onShiftClick) {
+                onShiftClick(checkboxKey);
+              } else {
+                toggle(checkboxKey);
+              }
             }}
             {...props}
           >
@@ -530,14 +543,25 @@ export function MarkdownRenderer({
           <input
             type="checkbox"
             checked={effectiveChecked}
-            onChange={() => toggle(key)}
+            onChange={(e) => {
+              // Prevent li handler from also firing.
+              e.stopPropagation();
+            }}
+            onClick={(e) => {
+              if (e.shiftKey && onShiftClick) {
+                e.preventDefault();
+                onShiftClick(key);
+              } else {
+                toggle(key);
+              }
+            }}
             style={{ cursor: "pointer" }}
             {...props}
           />
         );
       },
     }),
-    [fileId, handleLinkClick, getChecked, toggle],
+    [fileId, handleLinkClick, getChecked, toggle, onShiftClick, isCheckboxSelected],
   );
 
   const parsed = useMemo(
