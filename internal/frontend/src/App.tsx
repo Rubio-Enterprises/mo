@@ -207,6 +207,13 @@ export function App() {
         return current;
       });
     },
+    onCheckboxChanged: (fileId, sources, overrides) => {
+      window.dispatchEvent(
+        new CustomEvent("mo-checkbox-changed", {
+          detail: { fileId, sources, overrides },
+        }),
+      );
+    },
   });
 
   const { isDragging } = useFileDrop(activeGroup);

@@ -8,7 +8,7 @@ import rehypeSlug from "rehype-slug";
 import rehypeKatex from "rehype-katex";
 import { rehypeGithubAlerts } from "rehype-github-alerts";
 import { rehypeCheckboxKeys } from "../plugins/rehypeCheckboxKeys";
-import { useCheckboxOverrides } from "../hooks/useCheckboxOverrides";
+import { useCheckboxState } from "../hooks/useCheckboxState";
 import "katex/dist/katex.min.css";
 import { codeToHtml } from "shiki";
 import mermaid from "mermaid";
@@ -386,16 +386,8 @@ export function MarkdownRenderer({
   const articleRef = useRef<HTMLDivElement>(null);
   const pendingHashRef = useRef<string>("");
 
-  const basename = fileName.split("/").pop() ?? fileName;
-  const { getChecked, toggle, setCheckboxMap, uncheckAll, hasCheckboxes } =
-    useCheckboxOverrides(basename);
-
-  const onCheckboxMap = useCallback(
-    (map: Map<string, boolean>) => {
-      setCheckboxMap(map);
-    },
-    [setCheckboxMap],
-  );
+  const { getChecked, toggle, uncheckAll, hasCheckboxes } =
+    useCheckboxState(fileId);
 
   useEffect(() => {
     onCheckboxInfo?.({ hasCheckboxes, uncheckAll });
@@ -520,7 +512,7 @@ export function MarkdownRenderer({
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[
             rehypeRaw,
-            [rehypeCheckboxKeys, { onCheckboxMap }],
+            rehypeCheckboxKeys,
             [rehypeSanitize, sanitizeSchema],
             rehypeGithubAlerts,
             rehypeSlug,
@@ -532,7 +524,7 @@ export function MarkdownRenderer({
         </Markdown>
       </>
     );
-  }, [content, isRawView, parsed, components, fileName, onCheckboxMap]);
+  }, [content, isRawView, parsed, components, fileName]);
 
   const prevHeadingsKey = useRef("");
   useEffect(() => {
