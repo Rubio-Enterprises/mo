@@ -2429,3 +2429,160 @@ func TestRestoreCheckboxOverrides(t *testing.T) {
 		t.Fatal("Deleted override should be pruned (not in source)")
 	}
 }
+
+func TestHandleCheckAll(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [ ] Gamma\n"), 0o600) //nolint:errcheck
+
+	entry, _ := s.AddFile(mdFile, DefaultGroup)
+	handler := NewHandler(s)
+
+	// Set an existing override: Beta overridden to false.
+	s.mu.Lock()
+	s.checkboxOverrides[entry.ID] = map[string]bool{"Beta": false}
+	s.mu.Unlock()
+
+	t.Run("checks all", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/_/api/files/"+entry.ID+"/checkboxes/check-all", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("got status %d, want 204", w.Code)
+		}
+
+		s.mu.RLock()
+		overrides := s.checkboxOverrides[entry.ID]
+		s.mu.RUnlock()
+
+		// Alpha: source false, should have override true.
+		if overrides["Alpha"] != true {
+			t.Fatal("Alpha override should be true")
+		}
+		// Beta: source true, should have no override (checked = source).
+		if _, exists := overrides["Beta"]; exists {
+			t.Fatal("Beta override should be removed (matches source)")
+		}
+		// Gamma: source false, should have override true.
+		if overrides["Gamma"] != true {
+			t.Fatal("Gamma override should be true")
+		}
+	})
+
+	t.Run("returns 404 for unknown file", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/_/api/files/deadbeef/checkboxes/check-all", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("got status %d, want 404", w.Code)
+		}
+	})
+}
+
+func TestHandleBatchSetCheckboxes(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [ ] Gamma\n- [x] Delta\n"), 0o600) //nolint:errcheck
+
+	entry, _ := s.AddFile(mdFile, DefaultGroup)
+	handler := NewHandler(s)
+
+	t.Run("batch check specific keys", func(t *testing.T) {
+		body := strings.NewReader(`{"keys": ["Alpha", "Gamma"], "checked": true}`)
+		req := httptest.NewRequest("POST", "/_/api/files/"+entry.ID+"/checkboxes/batch", body)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("got status %d, want 204", w.Code)
+		}
+
+		s.mu.RLock()
+		overrides := s.checkboxOverrides[entry.ID]
+		s.mu.RUnlock()
+
+		// Alpha: source false, checked true → override true.
+		if overrides["Alpha"] != true {
+			t.Fatal("Alpha override should be true")
+		}
+		// Gamma: source false, checked true → override true.
+		if overrides["Gamma"] != true {
+			t.Fatal("Gamma override should be true")
+		}
+		// Beta and Delta: untouched.
+		if _, exists := overrides["Beta"]; exists {
+			t.Fatal("Beta should not have an override")
+		}
+		if _, exists := overrides["Delta"]; exists {
+			t.Fatal("Delta should not have an override")
+		}
+	})
+
+	t.Run("batch uncheck specific keys", func(t *testing.T) {
+		// Clear overrides from previous sub-test.
+		s.mu.Lock()
+		delete(s.checkboxOverrides, entry.ID)
+		s.mu.Unlock()
+
+		body := strings.NewReader(`{"keys": ["Beta", "Delta"], "checked": false}`)
+		req := httptest.NewRequest("POST", "/_/api/files/"+entry.ID+"/checkboxes/batch", body)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("got status %d, want 204", w.Code)
+		}
+
+		s.mu.RLock()
+		overrides := s.checkboxOverrides[entry.ID]
+		s.mu.RUnlock()
+
+		// Beta: source true, checked false → override false.
+		if overrides["Beta"] != false {
+			t.Fatal("Beta override should be false")
+		}
+		// Delta: source true, checked false → override false.
+		if overrides["Delta"] != false {
+			t.Fatal("Delta override should be false")
+		}
+	})
+
+	t.Run("ignores unknown keys", func(t *testing.T) {
+		s.mu.Lock()
+		delete(s.checkboxOverrides, entry.ID)
+		s.mu.Unlock()
+
+		body := strings.NewReader(`{"keys": ["Alpha", "NonExistent"], "checked": true}`)
+		req := httptest.NewRequest("POST", "/_/api/files/"+entry.ID+"/checkboxes/batch", body)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("got status %d, want 204", w.Code)
+		}
+
+		s.mu.RLock()
+		overrides := s.checkboxOverrides[entry.ID]
+		s.mu.RUnlock()
+
+		if overrides["Alpha"] != true {
+			t.Fatal("Alpha override should be true")
+		}
+		if _, exists := overrides["NonExistent"]; exists {
+			t.Fatal("NonExistent should not create an override")
+		}
+	})
+
+	t.Run("returns 404 for unknown file", func(t *testing.T) {
+		body := strings.NewReader(`{"keys": ["Alpha"], "checked": true}`)
+		req := httptest.NewRequest("POST", "/_/api/files/deadbeef/checkboxes/batch", body)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("got status %d, want 404", w.Code)
+		}
+	})
+}

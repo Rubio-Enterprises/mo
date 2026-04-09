@@ -1330,6 +1330,8 @@ func NewHandler(state *State) http.Handler {
 	mux.HandleFunc("GET /_/api/files/{id}/checkboxes", handleGetCheckboxes(state))
 	mux.HandleFunc("PUT /_/api/files/{id}/checkboxes/{key}", handlePutCheckbox(state))
 	mux.HandleFunc("DELETE /_/api/files/{id}/checkboxes", handleDeleteCheckboxes(state))
+	mux.HandleFunc("POST /_/api/files/{id}/checkboxes/check-all", handleCheckAll(state))
+	mux.HandleFunc("POST /_/api/files/{id}/checkboxes/batch", handleBatchSetCheckboxes(state))
 	mux.HandleFunc("GET /_/api/files/{id}/raw", handleFileServe(state))
 	mux.HandleFunc("GET /_/api/files/{id}/raw/{path...}", handleFileAsset(state))
 	mux.HandleFunc("POST /_/api/files/open", handleOpenFile(state))
@@ -1998,6 +2000,123 @@ func (s *State) UncheckAll(id string) bool {
 	return true
 }
 
+// CheckAll sets all checkboxes to checked for a file.
+func (s *State) CheckAll(id string) bool {
+	s.mu.Lock()
+
+	fileFound := false
+	for _, g := range s.groups {
+		for _, f := range g.Files {
+			if f.ID == id {
+				fileFound = true
+				break
+			}
+		}
+		if fileFound {
+			break
+		}
+	}
+	if !fileFound {
+		s.mu.Unlock()
+		return false
+	}
+
+	src := s.checkboxSources[id]
+	if len(src) == 0 {
+		s.mu.Unlock()
+		return true
+	}
+
+	newOverrides := make(map[string]bool)
+	for key, sourceChecked := range src {
+		if !sourceChecked {
+			newOverrides[key] = true
+		}
+	}
+
+	if len(newOverrides) > 0 {
+		s.checkboxOverrides[id] = newOverrides
+	} else {
+		delete(s.checkboxOverrides, id)
+	}
+
+	ovr := s.checkboxOverrides[id]
+	if ovr == nil {
+		ovr = map[string]bool{}
+	}
+	srcCopy := make(map[string]bool, len(src))
+	for k, v := range src {
+		srcCopy[k] = v
+	}
+	s.mu.Unlock()
+
+	s.broadcastCheckboxChanged(id, srcCopy, ovr)
+	return true
+}
+
+// SetCheckboxBatch sets multiple checkboxes to the same checked state.
+// Keys not present in checkboxSources are silently ignored.
+func (s *State) SetCheckboxBatch(id string, keys []string, checked bool) bool {
+	s.mu.Lock()
+
+	fileFound := false
+	for _, g := range s.groups {
+		for _, f := range g.Files {
+			if f.ID == id {
+				fileFound = true
+				break
+			}
+		}
+		if fileFound {
+			break
+		}
+	}
+	if !fileFound {
+		s.mu.Unlock()
+		return false
+	}
+
+	src := s.checkboxSources[id]
+	if src == nil {
+		s.mu.Unlock()
+		return true
+	}
+
+	for _, key := range keys {
+		sourceVal, inSrc := src[key]
+		if !inSrc {
+			continue
+		}
+		if checked == sourceVal {
+			// Matches source — remove override.
+			if ovr, ok := s.checkboxOverrides[id]; ok {
+				delete(ovr, key)
+				if len(ovr) == 0 {
+					delete(s.checkboxOverrides, id)
+				}
+			}
+		} else {
+			if s.checkboxOverrides[id] == nil {
+				s.checkboxOverrides[id] = make(map[string]bool)
+			}
+			s.checkboxOverrides[id][key] = checked
+		}
+	}
+
+	srcCopy := make(map[string]bool, len(src))
+	for k, v := range src {
+		srcCopy[k] = v
+	}
+	ovr := s.checkboxOverrides[id]
+	if ovr == nil {
+		ovr = map[string]bool{}
+	}
+	s.mu.Unlock()
+
+	s.broadcastCheckboxChanged(id, srcCopy, ovr)
+	return true
+}
+
 // RestoreCheckboxOverrides loads persisted checkbox overrides into the state.
 // Should be called after all files have been added (so checkboxSources are populated).
 func (s *State) RestoreCheckboxOverrides(overrides map[string]map[string]bool) {
@@ -2100,6 +2219,46 @@ func handleDeleteCheckboxes(state *State) http.HandlerFunc {
 			return
 		}
 		if !state.UncheckAll(id) {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleCheckAll(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing file id", http.StatusBadRequest)
+			return
+		}
+		if !state.CheckAll(id) {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleBatchSetCheckboxes(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing file id", http.StatusBadRequest)
+			return
+		}
+
+		var req struct {
+			Keys    []string `json:"keys"`
+			Checked bool     `json:"checked"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if !state.SetCheckboxBatch(id, req.Keys, req.Checked) {
 			http.Error(w, "file not found", http.StatusNotFound)
 			return
 		}
