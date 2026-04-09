@@ -99,3 +99,28 @@ export function rawFileUrl(id: string, revision?: number): string {
   const base = `/_/api/files/${id}/raw`;
   return revision != null ? `${base}?v=${revision}` : base;
 }
+
+export interface CheckboxState {
+  sources: Record<string, boolean>;
+  overrides: Record<string, boolean>;
+}
+
+export async function fetchCheckboxes(id: string): Promise<CheckboxState> {
+  const res = await fetch(`/_/api/files/${id}/checkboxes`);
+  if (!res.ok) throw new Error("Failed to fetch checkboxes");
+  return res.json();
+}
+
+export async function toggleCheckbox(id: string, key: string, checked: boolean): Promise<void> {
+  const res = await fetch(`/_/api/files/${id}/checkboxes/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ checked }),
+  });
+  if (!res.ok) throw new Error("Failed to toggle checkbox");
+}
+
+export async function uncheckAllCheckboxes(id: string): Promise<void> {
+  const res = await fetch(`/_/api/files/${id}/checkboxes`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to uncheck all");
+}
