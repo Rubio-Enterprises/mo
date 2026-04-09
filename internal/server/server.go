@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,7 +162,8 @@ type sseEvent struct {
 
 const (
 	eventUpdate      = "update"
-	eventFileChanged = "file-changed"
+	eventFileChanged    = "file-changed"
+	eventCheckboxChanged = "checkbox-changed"
 )
 
 // GlobPattern represents a glob pattern being watched for new files.
@@ -1277,6 +1279,9 @@ func NewHandler(state *State) http.Handler {
 	mux.HandleFunc("GET /_/api/groups", handleGroups(state))
 	mux.HandleFunc("PUT /_/api/reorder", handleReorderFiles(state))
 	mux.HandleFunc("GET /_/api/files/{id}/content", handleFileContent(state))
+	mux.HandleFunc("GET /_/api/files/{id}/checkboxes", handleGetCheckboxes(state))
+	mux.HandleFunc("PUT /_/api/files/{id}/checkboxes/{key}", handlePutCheckbox(state))
+	mux.HandleFunc("DELETE /_/api/files/{id}/checkboxes", handleDeleteCheckboxes(state))
 	mux.HandleFunc("GET /_/api/files/{id}/raw", handleFileServe(state))
 	mux.HandleFunc("GET /_/api/files/{id}/raw/{path...}", handleFileAsset(state))
 	mux.HandleFunc("POST /_/api/files/open", handleOpenFile(state))
@@ -1799,5 +1804,229 @@ func handleSPA() http.HandlerFunc {
 		// SPA fallback: serve index.html for all non-file routes
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
+	}
+}
+
+// GetCheckboxState returns the sources and overrides for a file.
+func (s *State) GetCheckboxState(id string) (sources, overrides map[string]bool, found bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Verify file exists.
+	fileFound := false
+	for _, g := range s.groups {
+		for _, f := range g.Files {
+			if f.ID == id {
+				fileFound = true
+				break
+			}
+		}
+		if fileFound {
+			break
+		}
+	}
+	if !fileFound {
+		return nil, nil, false
+	}
+
+	src := s.checkboxSources[id]
+	if src == nil {
+		src = map[string]bool{}
+	}
+	ovr := s.checkboxOverrides[id]
+	if ovr == nil {
+		ovr = map[string]bool{}
+	}
+	return src, ovr, true
+}
+
+// SetCheckbox sets or removes a checkbox override for a file.
+func (s *State) SetCheckbox(id, key string, checked bool) bool {
+	s.mu.Lock()
+
+	fileFound := false
+	for _, g := range s.groups {
+		for _, f := range g.Files {
+			if f.ID == id {
+				fileFound = true
+				break
+			}
+		}
+		if fileFound {
+			break
+		}
+	}
+	if !fileFound {
+		s.mu.Unlock()
+		return false
+	}
+
+	sourceVal := false
+	if src, ok := s.checkboxSources[id]; ok {
+		sourceVal = src[key]
+	}
+
+	if checked == sourceVal {
+		// Matches source — remove override.
+		if ovr, ok := s.checkboxOverrides[id]; ok {
+			delete(ovr, key)
+			if len(ovr) == 0 {
+				delete(s.checkboxOverrides, id)
+			}
+		}
+	} else {
+		if s.checkboxOverrides[id] == nil {
+			s.checkboxOverrides[id] = make(map[string]bool)
+		}
+		s.checkboxOverrides[id][key] = checked
+	}
+
+	src := s.checkboxSources[id]
+	if src == nil {
+		src = map[string]bool{}
+	}
+	ovr := s.checkboxOverrides[id]
+	if ovr == nil {
+		ovr = map[string]bool{}
+	}
+	s.mu.Unlock()
+
+	s.broadcastCheckboxChanged(id, src, ovr)
+	return true
+}
+
+// UncheckAll sets all checkboxes to unchecked for a file.
+func (s *State) UncheckAll(id string) bool {
+	s.mu.Lock()
+
+	fileFound := false
+	for _, g := range s.groups {
+		for _, f := range g.Files {
+			if f.ID == id {
+				fileFound = true
+				break
+			}
+		}
+		if fileFound {
+			break
+		}
+	}
+	if !fileFound {
+		s.mu.Unlock()
+		return false
+	}
+
+	src := s.checkboxSources[id]
+	if len(src) == 0 {
+		s.mu.Unlock()
+		return true
+	}
+
+	newOverrides := make(map[string]bool)
+	for key, sourceChecked := range src {
+		if sourceChecked {
+			newOverrides[key] = false
+		}
+	}
+
+	// Remove any existing overrides for source-false keys.
+	if len(newOverrides) > 0 {
+		s.checkboxOverrides[id] = newOverrides
+	} else {
+		delete(s.checkboxOverrides, id)
+	}
+
+	ovr := s.checkboxOverrides[id]
+	if ovr == nil {
+		ovr = map[string]bool{}
+	}
+	srcCopy := make(map[string]bool, len(src))
+	for k, v := range src {
+		srcCopy[k] = v
+	}
+	s.mu.Unlock()
+
+	s.broadcastCheckboxChanged(id, srcCopy, ovr)
+	return true
+}
+
+func (s *State) broadcastCheckboxChanged(id string, sources, overrides map[string]bool) {
+	b, err := json.Marshal(struct {
+		FileID    string          `json:"fileId"`
+		Sources   map[string]bool `json:"sources"`
+		Overrides map[string]bool `json:"overrides"`
+	}{FileID: id, Sources: sources, Overrides: overrides})
+	if err != nil {
+		slog.Error("broadcastCheckboxChanged", "err", err)
+		return
+	}
+	s.sendEvent(sseEvent{
+		Name: eventCheckboxChanged,
+		Data: string(b),
+	})
+	s.markDirty()
+}
+
+func handleGetCheckboxes(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing file id", http.StatusBadRequest)
+			return
+		}
+		sources, overrides, found := state.GetCheckboxState(id)
+		if !found {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(struct {
+			Sources   map[string]bool `json:"sources"`
+			Overrides map[string]bool `json:"overrides"`
+		}{Sources: sources, Overrides: overrides})
+	}
+}
+
+func handlePutCheckbox(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing file id", http.StatusBadRequest)
+			return
+		}
+		key, err := url.PathUnescape(r.PathValue("key"))
+		if err != nil {
+			http.Error(w, "invalid key encoding", http.StatusBadRequest)
+			return
+		}
+
+		var req struct {
+			Checked bool `json:"checked"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if !state.SetCheckbox(id, key, req.Checked) {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleDeleteCheckboxes(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing file id", http.StatusBadRequest)
+			return
+		}
+		if !state.UncheckAll(id) {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
