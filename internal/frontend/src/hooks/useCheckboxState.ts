@@ -1,11 +1,18 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { fetchCheckboxes, toggleCheckbox, uncheckAllCheckboxes } from "./useApi";
+import {
+  fetchCheckboxes,
+  toggleCheckbox,
+  uncheckAllCheckboxes,
+  checkAllCheckboxes,
+} from "./useApi";
 
 interface CheckboxStateResult {
   getChecked: (key: string) => boolean;
   toggle: (key: string) => void;
   uncheckAll: () => void;
+  checkAll: () => void;
   hasCheckboxes: boolean;
+  totalCheckboxes: number;
 }
 
 export function useCheckboxState(fileId: string): CheckboxStateResult {
@@ -84,7 +91,14 @@ export function useCheckboxState(fileId: string): CheckboxStateResult {
     });
   }, [fileId]);
 
-  const hasCheckboxes = Object.keys(sources).length > 0;
+  const checkAll = useCallback(() => {
+    checkAllCheckboxes(fileId).catch(() => {
+      // Error handled silently — SSE will provide authoritative state.
+    });
+  }, [fileId]);
 
-  return { getChecked, toggle, uncheckAll, hasCheckboxes };
+  const totalCheckboxes = Object.keys(sources).length;
+  const hasCheckboxes = totalCheckboxes > 0;
+
+  return { getChecked, toggle, uncheckAll, checkAll, hasCheckboxes, totalCheckboxes };
 }

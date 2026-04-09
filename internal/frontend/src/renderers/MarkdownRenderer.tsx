@@ -386,11 +386,12 @@ export function MarkdownRenderer({
   const articleRef = useRef<HTMLDivElement>(null);
   const pendingHashRef = useRef<string>("");
 
-  const { getChecked, toggle, uncheckAll, hasCheckboxes } = useCheckboxState(fileId);
+  const { getChecked, toggle, uncheckAll, checkAll, hasCheckboxes, totalCheckboxes } =
+    useCheckboxState(fileId);
 
   useEffect(() => {
-    onCheckboxInfo?.({ hasCheckboxes, uncheckAll });
-  }, [hasCheckboxes, uncheckAll, onCheckboxInfo]);
+    onCheckboxInfo?.({ hasCheckboxes, totalCheckboxes, uncheckAll, checkAll });
+  }, [hasCheckboxes, totalCheckboxes, uncheckAll, checkAll, onCheckboxInfo]);
 
   const handleLinkClick = useCallback(
     async (e: React.MouseEvent<HTMLAnchorElement>, href: string, hash: string) => {

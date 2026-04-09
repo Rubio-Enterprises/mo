@@ -22,7 +22,9 @@ export interface RendererFeatures {
 
 export interface CheckboxInfo {
   hasCheckboxes: boolean;
+  totalCheckboxes: number;
   uncheckAll: () => void;
+  checkAll: () => void;
 }
 
 interface BaseRendererProps {
