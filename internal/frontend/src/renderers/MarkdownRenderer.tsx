@@ -531,10 +531,10 @@ export function MarkdownRenderer({
               // Don't toggle if user was selecting text.
               const selection = window.getSelection();
               if (selection && selection.toString().length > 0) return;
-              // Don't toggle if user clicked a link.
+              // Don't toggle if user clicked a link or button (e.g. code block copy).
               let target = e.target as HTMLElement | null;
               while (target && target !== e.currentTarget) {
-                if (target.tagName === "A") return;
+                if (target.tagName === "A" || target.tagName === "BUTTON") return;
                 target = target.parentElement;
               }
               // Don't toggle if user clicked the checkbox input directly (it has its own handler).
