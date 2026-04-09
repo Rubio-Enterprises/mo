@@ -18,7 +18,15 @@ export function UncheckAllButton({ onUncheckAll }: UncheckAllButtonProps) {
         strokeWidth={1.5}
         viewBox="0 0 24 24"
       >
-        <rect x="3" y="3" width="18" height="18" rx="3" strokeLinecap="round" strokeLinejoin="round" />
+        <rect
+          x="3"
+          y="3"
+          width="18"
+          height="18"
+          rx="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l6 6M15 9l-6 6" />
       </svg>
     </button>

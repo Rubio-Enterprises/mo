@@ -386,8 +386,7 @@ export function MarkdownRenderer({
   const articleRef = useRef<HTMLDivElement>(null);
   const pendingHashRef = useRef<string>("");
 
-  const { getChecked, toggle, uncheckAll, hasCheckboxes } =
-    useCheckboxState(fileId);
+  const { getChecked, toggle, uncheckAll, hasCheckboxes } = useCheckboxState(fileId);
 
   useEffect(() => {
     onCheckboxInfo?.({ hasCheckboxes, uncheckAll });

@@ -129,9 +129,7 @@ export function FileViewer({
         {features.toc && <TocToggle isTocOpen={isTocOpen} onToggle={onTocToggle} />}
         {features.raw && <RawToggle isRaw={isRawView} onToggle={() => setIsRawView((v) => !v)} />}
         {features.copyable && <CopyButton content={content} />}
-        {checkboxInfo?.hasCheckboxes && (
-          <UncheckAllButton onUncheckAll={checkboxInfo.uncheckAll} />
-        )}
+        {checkboxInfo?.hasCheckboxes && <UncheckAllButton onUncheckAll={checkboxInfo.uncheckAll} />}
         <CloseFileButton onClose={onRemoveFile} />
       </div>
     </div>

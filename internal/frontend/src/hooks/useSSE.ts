@@ -3,7 +3,11 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 interface SSECallbacks {
   onUpdate: () => void;
   onFileChanged?: (fileId: string) => void;
-  onCheckboxChanged?: (fileId: string, sources: Record<string, boolean>, overrides: Record<string, boolean>) => void;
+  onCheckboxChanged?: (
+    fileId: string,
+    sources: Record<string, boolean>,
+    overrides: Record<string, boolean>,
+  ) => void;
 }
 
 export function useSSE(callbacks: SSECallbacks) {

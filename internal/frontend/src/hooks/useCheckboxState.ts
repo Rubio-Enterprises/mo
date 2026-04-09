@@ -66,7 +66,10 @@ export function useCheckboxState(fileId: string): CheckboxStateResult {
 
   const toggle = useCallback(
     (key: string) => {
-      const currentChecked = key in overridesRef.current ? overridesRef.current[key] : (sourcesRef.current[key] ?? false);
+      const currentChecked =
+        key in overridesRef.current
+          ? overridesRef.current[key]
+          : (sourcesRef.current[key] ?? false);
       const newChecked = !currentChecked;
       toggleCheckbox(fileId, key, newChecked).catch(() => {
         // Error handled silently — SSE will provide authoritative state.
