@@ -74,7 +74,10 @@ export function FileViewer({
       return;
     }
     let cancelled = false;
-    setLoading(true);
+    // Only show loading spinner on initial load, not on revision bumps (SSE live-reload).
+    // Showing the spinner replaces content with a placeholder, which collapses the scroll
+    // container and resets scrollTop to 0, breaking scroll restoration.
+    if (!content) setLoading(true);
     fetchFileContent(fileId)
       .then((data) => {
         if (!cancelled) {
