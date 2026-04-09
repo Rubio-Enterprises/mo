@@ -129,16 +129,3 @@ export async function checkAllCheckboxes(id: string): Promise<void> {
   const res = await fetch(`/_/api/files/${id}/checkboxes/check-all`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to check all");
 }
-
-export async function batchSetCheckboxes(
-  id: string,
-  keys: string[],
-  checked: boolean,
-): Promise<void> {
-  const res = await fetch(`/_/api/files/${id}/checkboxes/batch`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ keys, checked }),
-  });
-  if (!res.ok) throw new Error("Failed to batch set checkboxes");
-}

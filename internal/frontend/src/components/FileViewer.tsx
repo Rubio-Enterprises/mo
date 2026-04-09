@@ -8,9 +8,6 @@ import { RawToggle } from "./RawToggle";
 import { CopyButton } from "./CopyButton";
 import { CloseFileButton } from "./CloseFileButton";
 import { CheckboxActionsButton } from "./CheckboxActionsButton";
-import { useCheckboxSelection } from "../hooks/useCheckboxSelection";
-import { SelectionActionBar } from "./SelectionActionBar";
-import { batchSetCheckboxes } from "../hooks/useApi";
 
 interface FileViewerProps {
   fileId: string;
@@ -49,24 +46,10 @@ export function FileViewer({
   const [checkboxInfo, setCheckboxInfo] = useState<CheckboxInfo | null>(null);
 
   const articleRef = useRef<HTMLDivElement>(null);
-  const { selectedKeys, isSelected, onShiftClick, clearSelection } =
-    useCheckboxSelection(articleRef);
 
   const onCheckboxInfo = useCallback((info: CheckboxInfo) => {
     setCheckboxInfo(info);
   }, []);
-
-  const handleBatchCheck = useCallback(() => {
-    if (!checkboxInfo) return;
-    batchSetCheckboxes(fileId, selectedKeys, true).catch(() => {});
-    clearSelection();
-  }, [fileId, selectedKeys, clearSelection, checkboxInfo]);
-
-  const handleBatchUncheck = useCallback(() => {
-    if (!checkboxInfo) return;
-    batchSetCheckboxes(fileId, selectedKeys, false).catch(() => {});
-    clearSelection();
-  }, [fileId, selectedKeys, clearSelection, checkboxInfo]);
 
   useEffect(() => {
     if (contentSource !== "text") {
@@ -123,8 +106,6 @@ export function FileViewer({
     onHeadingsChange,
     onContentRendered,
     onCheckboxInfo,
-    onShiftClick,
-    isCheckboxSelected: isSelected,
   };
 
   const rendererProps: RendererProps =
@@ -166,15 +147,6 @@ export function FileViewer({
           <CloseFileButton onClose={onRemoveFile} />
         </div>
       </div>
-      {selectedKeys.length >= 2 && checkboxInfo && (
-        <SelectionActionBar
-          selectedCount={selectedKeys.length}
-          totalCount={checkboxInfo.totalCheckboxes}
-          onCheck={handleBatchCheck}
-          onUncheck={handleBatchUncheck}
-          onCancel={clearSelection}
-        />
-      )}
     </>
   );
 }

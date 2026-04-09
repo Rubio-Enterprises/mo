@@ -382,8 +382,6 @@ export function MarkdownRenderer({
   onHeadingsChange,
   onContentRendered,
   onCheckboxInfo,
-  onShiftClick,
-  isCheckboxSelected,
 }: TextRendererProps) {
   const articleRef = useRef<HTMLDivElement>(null);
   const pendingHashRef = useRef<string>("");
@@ -526,15 +524,6 @@ export function MarkdownRenderer({
             className={className}
             style={{
               cursor: checkboxKey ? "pointer" : undefined,
-              backgroundColor:
-                checkboxKey && isCheckboxSelected?.(checkboxKey)
-                  ? "var(--color-gh-bg-active)"
-                  : undefined,
-              borderLeft:
-                checkboxKey && isCheckboxSelected?.(checkboxKey)
-                  ? "3px solid var(--color-gh-accent)"
-                  : undefined,
-              paddingLeft: checkboxKey && isCheckboxSelected?.(checkboxKey) ? "5px" : undefined,
               borderRadius: "4px",
             }}
             onClick={(e) => {
@@ -550,11 +539,7 @@ export function MarkdownRenderer({
               }
               // Don't toggle if user clicked the checkbox input directly (it has its own handler).
               if ((e.target as HTMLElement).tagName === "INPUT") return;
-              if (e.shiftKey && onShiftClick) {
-                onShiftClick(checkboxKey);
-              } else {
-                toggleRef.current(checkboxKey);
-              }
+              toggleRef.current(checkboxKey);
             }}
             {...props}
           >
@@ -579,13 +564,8 @@ export function MarkdownRenderer({
               // Prevent li handler from also firing.
               e.stopPropagation();
             }}
-            onClick={(e) => {
-              if (e.shiftKey && onShiftClick) {
-                e.preventDefault();
-                onShiftClick(key);
-              } else {
-                toggleRef.current(key);
-              }
+            onClick={() => {
+              toggleRef.current(key);
             }}
             style={{ cursor: "pointer" }}
             {...props}
@@ -593,7 +573,7 @@ export function MarkdownRenderer({
         );
       },
     }),
-    [fileId, handleLinkClick, onShiftClick, isCheckboxSelected],
+    [fileId, handleLinkClick],
   );
 
   const parsed = useMemo(
