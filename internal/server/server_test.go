@@ -2398,3 +2398,34 @@ func TestCheckboxReconciliationOnFileChange(t *testing.T) {
 		t.Fatalf("got %d sources, want 2", len(sources))
 	}
 }
+
+func TestRestoreCheckboxOverrides(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600)
+
+	entry, _ := s.AddFile(mdFile, DefaultGroup)
+
+	overrides := map[string]map[string]bool{
+		entry.ID: {"Alpha": true, "Beta": true, "Deleted": false},
+	}
+	s.RestoreCheckboxOverrides(overrides)
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	ovr := s.checkboxOverrides[entry.ID]
+	// Alpha: source false, override true — should survive.
+	if ovr["Alpha"] != true {
+		t.Fatal("Alpha override should survive")
+	}
+	// Beta: source true, override true — matches source, should be pruned.
+	if _, exists := ovr["Beta"]; exists {
+		t.Fatal("Beta override should be pruned (matches source)")
+	}
+	// Deleted: not in source — should be pruned.
+	if _, exists := ovr["Deleted"]; exists {
+		t.Fatal("Deleted override should be pruned (not in source)")
+	}
+}

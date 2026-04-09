@@ -1998,6 +1998,34 @@ func (s *State) UncheckAll(id string) bool {
 	return true
 }
 
+// RestoreCheckboxOverrides loads persisted checkbox overrides into the state.
+// Should be called after all files have been added (so checkboxSources are populated).
+func (s *State) RestoreCheckboxOverrides(overrides map[string]map[string]bool) {
+	if len(overrides) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for fileID, ovr := range overrides {
+		src := s.checkboxSources[fileID]
+		if src == nil {
+			continue // File not loaded — skip stale overrides.
+		}
+		reconciled := make(map[string]bool)
+		for key, val := range ovr {
+			srcVal, inSrc := src[key]
+			if !inSrc || val == srcVal {
+				continue // Stale or matches source.
+			}
+			reconciled[key] = val
+		}
+		if len(reconciled) > 0 {
+			s.checkboxOverrides[fileID] = reconciled
+		}
+	}
+}
+
 func (s *State) broadcastCheckboxChanged(id string, sources, overrides map[string]bool) {
 	b, err := json.Marshal(struct {
 		FileID    string          `json:"fileId"`

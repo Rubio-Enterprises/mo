@@ -301,11 +301,11 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	if restore != "" {
-		filesByGroup, patternsByGroup, uploadedFiles, err := loadRestoreData(restore)
+		filesByGroup, patternsByGroup, uploadedFiles, cbOverrides, err := loadRestoreData(restore)
 		if err != nil {
 			return fmt.Errorf("failed to restore state: %w", err)
 		}
-		return startServer(cmd.Context(), addr, filesByGroup, patternsByGroup, uploadedFiles)
+		return startServer(cmd.Context(), addr, filesByGroup, patternsByGroup, uploadedFiles, cbOverrides)
 	}
 
 	resolved, err := server.ResolveGroupName(target)
@@ -397,9 +397,9 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	if foreground {
-		return startServer(cmd.Context(), addr, filesByGroup, patternsByGroup, uploadedFiles)
+		return startServer(cmd.Context(), addr, filesByGroup, patternsByGroup, uploadedFiles, rd.CheckboxOverrides)
 	}
-	return startBackground(addr, filesByGroup, patternsByGroup, uploadedFiles)
+	return startBackground(addr, filesByGroup, patternsByGroup, uploadedFiles, rd.CheckboxOverrides)
 }
 
 // mergeGroups merges base and additional group maps, with base entries first.
@@ -446,18 +446,18 @@ func filterValidRestoreData(rd *server.RestoreData) (map[string][]string, map[st
 	return filesByGroup, patternsByGroup, rd.UploadedFiles
 }
 
-func loadRestoreData(path string) (map[string][]string, map[string][]string, []server.UploadedFileData, error) {
+func loadRestoreData(path string) (map[string][]string, map[string][]string, []server.UploadedFileData, map[string]map[string]bool, error) {
 	data, err := os.ReadFile(path) //nolint:gosec
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	os.Remove(path)
 
 	var rd server.RestoreData
 	if err := json.Unmarshal(data, &rd); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return rd.Groups, rd.Patterns, rd.UploadedFiles, nil
+	return rd.Groups, rd.Patterns, rd.UploadedFiles, rd.CheckboxOverrides, nil
 }
 
 func isLoopbackBind(bind string) bool {
@@ -1098,7 +1098,7 @@ func discoverPorts() []int {
 	return ports
 }
 
-func startServer(ctx context.Context, addr string, filesByGroup map[string][]string, patternsByGroup map[string][]string, uploadedFiles []server.UploadedFileData) error {
+func startServer(ctx context.Context, addr string, filesByGroup map[string][]string, patternsByGroup map[string][]string, uploadedFiles []server.UploadedFileData, checkboxOverrides map[string]map[string]bool) error {
 	sigCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -1161,6 +1161,10 @@ func startServer(ctx context.Context, addr string, filesByGroup map[string][]str
 
 	for _, uf := range uploadedFiles {
 		state.AddUploadedFile(uf.Name, uf.Content, uf.Group)
+	}
+
+	if len(checkboxOverrides) > 0 {
+		state.RestoreCheckboxOverrides(checkboxOverrides)
 	}
 
 	if totalFiles > 0 && skippedFiles == totalFiles && patternsAdded == 0 && len(uploadedFiles) == 0 {
@@ -1245,8 +1249,8 @@ func spawnNewProcess(addr string, restoreFile string) (*os.Process, error) {
 	return cmd.Process, nil
 }
 
-func startBackground(addr string, filesByGroup map[string][]string, patternsByGroup map[string][]string, uploadedFiles []server.UploadedFileData) error {
-	restoreFile, err := server.WriteRestoreFile(server.RestoreData{Groups: filesByGroup, Patterns: patternsByGroup, UploadedFiles: uploadedFiles})
+func startBackground(addr string, filesByGroup map[string][]string, patternsByGroup map[string][]string, uploadedFiles []server.UploadedFileData, checkboxOverrides map[string]map[string]bool) error {
+	restoreFile, err := server.WriteRestoreFile(server.RestoreData{Groups: filesByGroup, Patterns: patternsByGroup, UploadedFiles: uploadedFiles, CheckboxOverrides: checkboxOverrides})
 	if err != nil {
 		return err
 	}
