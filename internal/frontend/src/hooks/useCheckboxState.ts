@@ -13,11 +13,14 @@ interface CheckboxStateResult {
   checkAll: () => void;
   hasCheckboxes: boolean;
   totalCheckboxes: number;
+  /** Monotonically increasing counter that bumps on every state change. */
+  checkboxRevision: number;
 }
 
 export function useCheckboxState(fileId: string): CheckboxStateResult {
   const [sources, setSources] = useState<Record<string, boolean>>({});
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  const [checkboxRevision, setCheckboxRevision] = useState(0);
   const sourcesRef = useRef(sources);
   const overridesRef = useRef(overrides);
 
@@ -55,6 +58,7 @@ export function useCheckboxState(fileId: string): CheckboxStateResult {
       if (detail.fileId === fileId) {
         setSources(detail.sources);
         setOverrides(detail.overrides);
+        setCheckboxRevision((r) => r + 1);
       }
     };
     window.addEventListener("mo-checkbox-changed", handler);
@@ -100,5 +104,5 @@ export function useCheckboxState(fileId: string): CheckboxStateResult {
   const totalCheckboxes = Object.keys(sources).length;
   const hasCheckboxes = totalCheckboxes > 0;
 
-  return { getChecked, toggle, uncheckAll, checkAll, hasCheckboxes, totalCheckboxes };
+  return { getChecked, toggle, uncheckAll, checkAll, hasCheckboxes, totalCheckboxes, checkboxRevision };
 }

@@ -1086,21 +1086,19 @@ func (s *State) notifyFileChangedByPath(absPath string) {
 
 					// Reconcile overrides.
 					if ovr, ok := s.checkboxOverrides[entry.ID]; ok {
-						changed := false
 						for key, val := range ovr {
 							srcVal, inSrc := newCheckboxSrc[key]
 							if !inSrc || val == srcVal {
 								delete(ovr, key)
-								changed = true
 							}
 						}
 						if len(ovr) == 0 {
 							delete(s.checkboxOverrides, entry.ID)
 						}
-						if changed {
-							checkboxChangedIDs = append(checkboxChangedIDs, entry.ID)
-						}
 					}
+
+					// Always broadcast so the frontend's sources stay in sync.
+					checkboxChangedIDs = append(checkboxChangedIDs, entry.ID)
 				}
 			}
 		}

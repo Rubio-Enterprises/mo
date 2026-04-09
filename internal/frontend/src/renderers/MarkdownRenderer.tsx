@@ -388,7 +388,7 @@ export function MarkdownRenderer({
   const articleRef = useRef<HTMLDivElement>(null);
   const pendingHashRef = useRef<string>("");
 
-  const { getChecked, toggle, uncheckAll, checkAll, hasCheckboxes, totalCheckboxes } =
+  const { getChecked, toggle, uncheckAll, checkAll, hasCheckboxes, totalCheckboxes, checkboxRevision } =
     useCheckboxState(fileId);
 
   // Use refs for checkbox callbacks so the components useMemo stays stable
@@ -626,7 +626,8 @@ export function MarkdownRenderer({
         </Markdown>
       </>
     );
-  }, [content, isRawView, parsed, components, fileName]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content, isRawView, parsed, components, fileName, checkboxRevision]);
 
   const prevHeadingsKey = useRef("");
   useEffect(() => {
