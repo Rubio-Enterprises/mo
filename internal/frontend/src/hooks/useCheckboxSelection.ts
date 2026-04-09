@@ -27,10 +27,7 @@ export function useCheckboxSelection(
     selectedSetRef.current = new Set(selectedKeys);
   }, [selectedKeys]);
 
-  const isSelected = useCallback(
-    (key: string): boolean => selectedSetRef.current.has(key),
-    [],
-  );
+  const isSelected = useCallback((key: string): boolean => selectedSetRef.current.has(key), []);
 
   const getDocumentOrder = useCallback((): string[] => {
     if (!articleRef.current) return [];

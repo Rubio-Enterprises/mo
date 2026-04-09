@@ -136,7 +136,10 @@ export function FileViewer({
   return (
     <>
       <div className="flex items-start gap-2">
-        <article ref={articleRef} className={`markdown-body min-w-0 flex-1${isWide ? " markdown-body--wide" : ""}`}>
+        <article
+          ref={articleRef}
+          className={`markdown-body min-w-0 flex-1${isWide ? " markdown-body--wide" : ""}`}
+        >
           <Suspense
             fallback={
               <div className="flex items-center justify-center h-50 text-gh-text-secondary text-sm">
@@ -152,11 +155,11 @@ export function FileViewer({
           {features.raw && <RawToggle isRaw={isRawView} onToggle={() => setIsRawView((v) => !v)} />}
           {features.copyable && <CopyButton content={content} />}
           {checkboxInfo?.hasCheckboxes && (
-              <CheckboxActionsButton
-                onCheckAll={checkboxInfo.checkAll}
-                onUncheckAll={checkboxInfo.uncheckAll}
-              />
-            )}
+            <CheckboxActionsButton
+              onCheckAll={checkboxInfo.checkAll}
+              onUncheckAll={checkboxInfo.uncheckAll}
+            />
+          )}
           <CloseFileButton onClose={onRemoveFile} />
         </div>
       </div>

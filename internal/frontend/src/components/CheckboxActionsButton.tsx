@@ -29,8 +29,22 @@ export function CheckboxActionsButton({ onCheckAll, onUncheckAll }: CheckboxActi
         aria-label="Checkbox actions"
         title="Checkbox actions"
       >
-        <svg className="size-5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-          <rect x="3" y="3" width="18" height="18" rx="3" strokeLinecap="round" strokeLinejoin="round" />
+        <svg
+          className="size-5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          viewBox="0 0 24 24"
+        >
+          <rect
+            x="3"
+            y="3"
+            width="18"
+            height="18"
+            rx="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6" />
         </svg>
       </button>

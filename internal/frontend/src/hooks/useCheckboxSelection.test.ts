@@ -4,11 +4,7 @@ import { describe, it, expect } from "vitest";
 // We test the range computation algorithm directly since the hook
 // depends on DOM refs that are hard to mock in unit tests.
 
-function computeRange(
-  order: string[],
-  anchor: string,
-  target: string,
-): string[] {
+function computeRange(order: string[], anchor: string, target: string): string[] {
   const anchorIdx = order.indexOf(anchor);
   const targetIdx = order.indexOf(target);
   if (anchorIdx === -1 || targetIdx === -1) return [target];

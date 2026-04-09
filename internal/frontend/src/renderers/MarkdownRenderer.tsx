@@ -501,13 +501,19 @@ export function MarkdownRenderer({
           <li
             className={className}
             style={{
-            cursor: checkboxKey ? "pointer" : undefined,
-            userSelect: "none",
-            backgroundColor: checkboxKey && isCheckboxSelected?.(checkboxKey) ? "var(--color-gh-bg-active)" : undefined,
-            borderLeft: checkboxKey && isCheckboxSelected?.(checkboxKey) ? "3px solid var(--color-gh-accent)" : undefined,
-            paddingLeft: checkboxKey && isCheckboxSelected?.(checkboxKey) ? "5px" : undefined,
-            borderRadius: "4px",
-          }}
+              cursor: checkboxKey ? "pointer" : undefined,
+              userSelect: "none",
+              backgroundColor:
+                checkboxKey && isCheckboxSelected?.(checkboxKey)
+                  ? "var(--color-gh-bg-active)"
+                  : undefined,
+              borderLeft:
+                checkboxKey && isCheckboxSelected?.(checkboxKey)
+                  ? "3px solid var(--color-gh-accent)"
+                  : undefined,
+              paddingLeft: checkboxKey && isCheckboxSelected?.(checkboxKey) ? "5px" : undefined,
+              borderRadius: "4px",
+            }}
             onClick={(e) => {
               if (!checkboxKey) return;
               // Don't toggle if user clicked a link.
