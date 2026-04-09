@@ -191,6 +191,9 @@ type State struct {
 	fileChangeDebounce time.Duration
 	fileChangeTimers   map[string]*time.Timer
 
+	checkboxSources   map[string]map[string]bool // fileID → checkboxKey → source checked
+	checkboxOverrides map[string]map[string]bool // fileID → checkboxKey → overridden checked
+
 	backupCh     chan struct{}     // dirty signal (buffered, size 1)
 	backupSaveFn func(RestoreData) // backup write callback
 	backupDone   chan struct{}     // closed when backupLoop exits
@@ -213,6 +216,8 @@ func NewState(ctx context.Context) *State {
 		watchedDirs:        make(map[string]int),
 		fileChangeDebounce: defaultFileChangeDebounce,
 		fileChangeTimers:   make(map[string]*time.Timer),
+		checkboxSources:    make(map[string]map[string]bool),
+		checkboxOverrides:  make(map[string]map[string]bool),
 	}
 
 	if w != nil {
@@ -753,9 +758,10 @@ type UploadedFileData struct {
 
 // RestoreData represents the state to be persisted across restarts.
 type RestoreData struct {
-	Groups        map[string][]string `json:"groups"`
-	Patterns      map[string][]string `json:"patterns,omitempty"`
-	UploadedFiles []UploadedFileData  `json:"uploadedFiles,omitempty"`
+	Groups            map[string][]string          `json:"groups"`
+	Patterns          map[string][]string          `json:"patterns,omitempty"`
+	UploadedFiles     []UploadedFileData           `json:"uploadedFiles,omitempty"`
+	CheckboxOverrides map[string]map[string]bool   `json:"checkboxOverrides,omitempty"`
 }
 
 // WriteRestoreFile writes RestoreData to a temporary file and returns the path.
@@ -820,6 +826,19 @@ func (s *State) snapshotRestoreData() RestoreData {
 		data.Patterns = make(map[string][]string)
 		for _, p := range s.patterns {
 			data.Patterns[p.Group] = append(data.Patterns[p.Group], p.Pattern)
+		}
+	}
+
+	if len(s.checkboxOverrides) > 0 {
+		data.CheckboxOverrides = make(map[string]map[string]bool, len(s.checkboxOverrides))
+		for fileID, overrides := range s.checkboxOverrides {
+			if len(overrides) > 0 {
+				cp := make(map[string]bool, len(overrides))
+				for k, v := range overrides {
+					cp[k] = v
+				}
+				data.CheckboxOverrides[fileID] = cp
+			}
 		}
 	}
 
