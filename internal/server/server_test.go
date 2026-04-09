@@ -2348,3 +2348,53 @@ func TestHandleDeleteCheckboxes(t *testing.T) {
 		}
 	})
 }
+
+func TestCheckboxReconciliationOnFileChange(t *testing.T) {
+	ctx, cancel := donegroup.WithCancel(context.Background())
+	defer cancel()
+	s := NewState(ctx)
+	s.fileChangeDebounce = 0 // Disable debounce for testing.
+
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [ ] Gamma\n"), 0o600)
+
+	entry, _ := s.AddFile(mdFile, DefaultGroup)
+
+	// Set up overrides.
+	s.mu.Lock()
+	s.checkboxOverrides[entry.ID] = map[string]bool{
+		"Alpha": true,  // Differs from source (false) — should survive.
+		"Beta":  false, // Differs from source (true) — should survive.
+		"Gamma": false, // Matches source (false) — should be pruned.
+	}
+	s.mu.Unlock()
+
+	// Rewrite the file: remove Gamma, change Beta to unchecked.
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [ ] Beta\n"), 0o600)
+
+	// Trigger reconciliation.
+	s.notifyFileChangedByPath(mdFile)
+
+	s.mu.RLock()
+	overrides := s.checkboxOverrides[entry.ID]
+	sources := s.checkboxSources[entry.ID]
+	s.mu.RUnlock()
+
+	// Alpha: source is still false, override true — should remain.
+	if overrides["Alpha"] != true {
+		t.Fatal("Alpha override should survive (differs from source)")
+	}
+	// Beta: source changed to false, override is false — should be pruned (matches new source).
+	if _, exists := overrides["Beta"]; exists {
+		t.Fatal("Beta override should be pruned (matches new source)")
+	}
+	// Gamma: removed from file — should be pruned.
+	if _, exists := overrides["Gamma"]; exists {
+		t.Fatal("Gamma override should be pruned (key no longer in source)")
+	}
+	// Sources should be updated.
+	if len(sources) != 2 {
+		t.Fatalf("got %d sources, want 2", len(sources))
+	}
+}

@@ -1047,9 +1047,18 @@ func (s *State) notifyFileChangedByPath(absPath string) {
 	// Extract the title outside the lock (file I/O should not hold the mutex).
 	newTitle, titleOK := extractTitleFromFile(absPath)
 
-	// Single lock pass: collect IDs and update titles together.
+	// Re-extract checkbox sources for reconciliation.
+	var newCheckboxSrc map[string]bool
+	if ft := DetectFileType(absPath); ft == FileTypeMarkdown {
+		if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
+			newCheckboxSrc = ExtractCheckboxSources(string(fullContent))
+		}
+	}
+
+	// Single lock pass: collect IDs, update titles, and reconcile checkboxes.
 	var ids []string
 	titleChanged := false
+	var checkboxChangedIDs []string
 	s.mu.Lock()
 	for _, g := range s.groups {
 		for _, entry := range g.Files {
@@ -1058,6 +1067,40 @@ func (s *State) notifyFileChangedByPath(absPath string) {
 				if titleOK && entry.Title != newTitle {
 					entry.Title = newTitle
 					titleChanged = true
+				}
+			}
+		}
+	}
+
+	// Reconcile checkbox state.
+	if newCheckboxSrc != nil {
+		for _, g := range s.groups {
+			for _, entry := range g.Files {
+				if entry.Path == absPath {
+					// Update sources.
+					if len(newCheckboxSrc) > 0 {
+						s.checkboxSources[entry.ID] = newCheckboxSrc
+					} else {
+						delete(s.checkboxSources, entry.ID)
+					}
+
+					// Reconcile overrides.
+					if ovr, ok := s.checkboxOverrides[entry.ID]; ok {
+						changed := false
+						for key, val := range ovr {
+							srcVal, inSrc := newCheckboxSrc[key]
+							if !inSrc || val == srcVal {
+								delete(ovr, key)
+								changed = true
+							}
+						}
+						if len(ovr) == 0 {
+							delete(s.checkboxOverrides, entry.ID)
+						}
+						if changed {
+							checkboxChangedIDs = append(checkboxChangedIDs, entry.ID)
+						}
+					}
 				}
 			}
 		}
@@ -1071,6 +1114,11 @@ func (s *State) notifyFileChangedByPath(absPath string) {
 		s.sendEvent(sseEvent{Name: eventUpdate, Data: "{}"})
 	}
 	s.notifyFileChanged(ids)
+
+	for _, cbID := range checkboxChangedIDs {
+		src, ovr, _ := s.GetCheckboxState(cbID)
+		s.broadcastCheckboxChanged(cbID, src, ovr)
+	}
 }
 
 func (s *State) notifyFileChanged(ids []string) {
