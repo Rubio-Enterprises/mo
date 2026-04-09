@@ -482,19 +482,36 @@ export function MarkdownRenderer({
             </li>
           );
         }
-        // Extract checkbox key from the first input child.
+        // Extract checkbox key from children. Check direct children first,
+        // then one level deeper (loose lists wrap content in <p>).
         let checkboxKey: string | undefined;
         const childArray = Array.isArray(children) ? children : [children];
         for (const child of childArray) {
           if (
             child &&
             typeof child === "object" &&
-            "props" in child &&
-            child.props?.type === "checkbox" &&
-            child.props?.["data-checkbox-key"]
+            "props" in child
           ) {
-            checkboxKey = child.props["data-checkbox-key"] as string;
-            break;
+            if (child.props?.type === "checkbox" && child.props?.["data-checkbox-key"]) {
+              checkboxKey = child.props["data-checkbox-key"] as string;
+              break;
+            }
+            // Check inside <p> wrapper (loose list items).
+            const nested = child.props?.children;
+            const nestedArray = Array.isArray(nested) ? nested : [nested];
+            for (const inner of nestedArray) {
+              if (
+                inner &&
+                typeof inner === "object" &&
+                "props" in inner &&
+                inner.props?.type === "checkbox" &&
+                inner.props?.["data-checkbox-key"]
+              ) {
+                checkboxKey = inner.props["data-checkbox-key"] as string;
+                break;
+              }
+            }
+            if (checkboxKey) break;
           }
         }
         return (
