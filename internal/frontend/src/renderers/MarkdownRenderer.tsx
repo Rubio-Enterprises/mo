@@ -471,6 +471,52 @@ export function MarkdownRenderer({
             );
         }
       },
+      li: ({ className, children, ...props }) => {
+        const isTask = typeof className === "string" && className.includes("task-list-item");
+        if (!isTask) {
+          return (
+            <li className={className} {...props}>
+              {children}
+            </li>
+          );
+        }
+        // Extract checkbox key from the first input child.
+        let checkboxKey: string | undefined;
+        const childArray = Array.isArray(children) ? children : [children];
+        for (const child of childArray) {
+          if (
+            child &&
+            typeof child === "object" &&
+            "props" in child &&
+            child.props?.type === "checkbox" &&
+            child.props?.["data-checkbox-key"]
+          ) {
+            checkboxKey = child.props["data-checkbox-key"] as string;
+            break;
+          }
+        }
+        return (
+          <li
+            className={className}
+            style={{ cursor: checkboxKey ? "pointer" : undefined, userSelect: "none" }}
+            onClick={(e) => {
+              if (!checkboxKey) return;
+              // Don't toggle if user clicked a link.
+              let target = e.target as HTMLElement | null;
+              while (target && target !== e.currentTarget) {
+                if (target.tagName === "A") return;
+                target = target.parentElement;
+              }
+              // Don't toggle if user clicked the checkbox input directly (it has its own handler).
+              if ((e.target as HTMLElement).tagName === "INPUT") return;
+              toggle(checkboxKey);
+            }}
+            {...props}
+          >
+            {children}
+          </li>
+        );
+      },
       input: ({ disabled: _disabled, type, checked, ...props }) => {
         if (type !== "checkbox") {
           return <input type={type} checked={checked} {...props} />;
