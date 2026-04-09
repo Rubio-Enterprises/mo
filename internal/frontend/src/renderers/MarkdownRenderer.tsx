@@ -391,6 +391,13 @@ export function MarkdownRenderer({
   const { getChecked, toggle, uncheckAll, checkAll, hasCheckboxes, totalCheckboxes } =
     useCheckboxState(fileId);
 
+  // Use refs for checkbox callbacks so the components useMemo stays stable
+  // across checkbox state changes, preventing full re-render flicker.
+  const getCheckedRef = useRef(getChecked);
+  getCheckedRef.current = getChecked;
+  const toggleRef = useRef(toggle);
+  toggleRef.current = toggle;
+
   useEffect(() => {
     onCheckboxInfo?.({ hasCheckboxes, totalCheckboxes, uncheckAll, checkAll });
   }, [hasCheckboxes, totalCheckboxes, uncheckAll, checkAll, onCheckboxInfo]);
@@ -546,7 +553,7 @@ export function MarkdownRenderer({
               if (e.shiftKey && onShiftClick) {
                 onShiftClick(checkboxKey);
               } else {
-                toggle(checkboxKey);
+                toggleRef.current(checkboxKey);
               }
             }}
             {...props}
@@ -563,7 +570,7 @@ export function MarkdownRenderer({
         if (!key) {
           return <input type="checkbox" checked={checked} disabled {...props} />;
         }
-        const effectiveChecked = getChecked(key);
+        const effectiveChecked = getCheckedRef.current(key);
         return (
           <input
             type="checkbox"
@@ -577,7 +584,7 @@ export function MarkdownRenderer({
                 e.preventDefault();
                 onShiftClick(key);
               } else {
-                toggle(key);
+                toggleRef.current(key);
               }
             }}
             style={{ cursor: "pointer" }}
@@ -586,7 +593,7 @@ export function MarkdownRenderer({
         );
       },
     }),
-    [fileId, handleLinkClick, getChecked, toggle, onShiftClick, isCheckboxSelected],
+    [fileId, handleLinkClick, onShiftClick, isCheckboxSelected],
   );
 
   const parsed = useMemo(
