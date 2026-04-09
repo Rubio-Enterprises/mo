@@ -150,7 +150,7 @@ export function FileViewer({
             <Component {...rendererProps} />
           </Suspense>
         </article>
-        <div className="shrink-0 flex flex-col gap-2 -mr-4 -mt-4">
+        <div className="shrink-0 sticky top-0 self-start flex flex-col gap-2 -mr-4 -mt-4">
           {features.toc && <TocToggle isTocOpen={isTocOpen} onToggle={onTocToggle} />}
           {features.raw && <RawToggle isRaw={isRawView} onToggle={() => setIsRawView((v) => !v)} />}
           {features.copyable && <CopyButton content={content} />}
