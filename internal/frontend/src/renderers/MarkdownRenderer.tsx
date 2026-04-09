@@ -519,7 +519,6 @@ export function MarkdownRenderer({
             className={className}
             style={{
               cursor: checkboxKey ? "pointer" : undefined,
-              userSelect: "none",
               backgroundColor:
                 checkboxKey && isCheckboxSelected?.(checkboxKey)
                   ? "var(--color-gh-bg-active)"
@@ -533,6 +532,9 @@ export function MarkdownRenderer({
             }}
             onClick={(e) => {
               if (!checkboxKey) return;
+              // Don't toggle if user was selecting text.
+              const selection = window.getSelection();
+              if (selection && selection.toString().length > 0) return;
               // Don't toggle if user clicked a link.
               let target = e.target as HTMLElement | null;
               while (target && target !== e.currentTarget) {
