@@ -43,6 +43,11 @@ func extractNodeText(n ast.Node, source []byte) string {
 			t, ok := child.(*ast.Text)
 			if ok {
 				sb.Write(t.Segment.Value(source))
+				// Preserve line breaks as newlines to match the frontend's text
+				// extraction (rehype represents these as \n text nodes in the HAST).
+				if t.SoftLineBreak() || t.HardLineBreak() {
+					sb.WriteByte('\n')
+				}
 			}
 		case ast.KindString:
 			s, ok := child.(*ast.String)
@@ -55,6 +60,25 @@ func extractNodeText(n ast.Node, source []byte) string {
 		}
 	}
 	return sb.String()
+}
+
+// extractCheckboxLabel extracts the label text for a checkbox list item.
+// For loose list items (where content is wrapped in Paragraphs), only the
+// first Paragraph is processed — matching the frontend's rehypeCheckboxKeys
+// plugin which breaks after the first <p>.
+func extractCheckboxLabel(listItem ast.Node, source []byte) string {
+	first := listItem.FirstChild()
+	if first == nil {
+		return ""
+	}
+	// For loose lists the first child is a Paragraph; for tight lists it is
+	// a TextBlock. In both cases, extract text only from that first block to
+	// match the frontend behavior (which processes only the first <p>).
+	if first.Kind() == ast.KindParagraph || first.Kind() == ast.KindTextBlock {
+		return extractNodeText(first, source)
+	}
+	// Fallback: extract from the whole item (shouldn't happen for valid GFM task lists).
+	return extractNodeText(listItem, source)
 }
 
 // ExtractCheckboxSources parses markdown content and returns a map of
@@ -101,9 +125,9 @@ func ExtractCheckboxSources(content string) map[string]bool {
 			return ast.WalkContinue, nil
 		}
 
-		// Extract label text from the list item, excluding nested lists
-		// and the checkbox node itself.
-		labelText := extractNodeText(n, source)
+		// Extract label text from the first block of the list item,
+		// excluding nested lists and the checkbox node itself.
+		labelText := extractCheckboxLabel(n, source)
 		key := computeCheckboxKey(labelText, occurrences)
 		result[key] = checkbox.IsChecked
 

@@ -129,4 +129,24 @@ func TestExtractCheckboxSources(t *testing.T) {
 			t.Fatal("missing key Child")
 		}
 	})
+
+	t.Run("soft line break preserved in key", func(t *testing.T) {
+		md := "- [ ] First line\n  continued text\n"
+		sources := ExtractCheckboxSources(md)
+		want := "First line\ncontinued text"
+		if _, ok := sources[want]; !ok {
+			t.Fatalf("expected key %q, got keys: %v", want, sources)
+		}
+	})
+
+	t.Run("loose list uses only first paragraph", func(t *testing.T) {
+		md := "- [ ] Task A\n\n  More details\n\n- [ ] Task B\n"
+		sources := ExtractCheckboxSources(md)
+		if _, ok := sources["Task A"]; !ok {
+			t.Fatalf("expected key 'Task A', got keys: %v", sources)
+		}
+		if _, ok := sources["Task B"]; !ok {
+			t.Fatalf("expected key 'Task B', got keys: %v", sources)
+		}
+	})
 }
