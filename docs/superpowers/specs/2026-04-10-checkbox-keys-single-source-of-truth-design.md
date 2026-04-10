@@ -39,7 +39,7 @@ Add a new field to `State`:
 checkboxOrderedKeys map[string][]string // fileID → keys in document order
 ```
 
-Populate it everywhere `checkboxSources` is populated (`AddFile`, `notifyFileChangedByPath`, `AddUploadedFile` if applicable). Keep the old name `ExtractCheckboxSources` as a thin wrapper if any callers outside the server package use it; otherwise delete it.
+Populate it everywhere `checkboxSources` is populated (`AddFile`, `notifyFileChangedByPath`, `AddUploadedFile` if applicable). `ExtractCheckboxSources` is only referenced from within `internal/server/`, so it is deleted outright in favor of `ExtractCheckboxes`.
 
 `GetCheckboxState(id)` changes its signature to return the ordered keys as well:
 
