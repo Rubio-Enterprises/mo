@@ -31,15 +31,16 @@ func newTestState(t *testing.T) *State {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	s := &State{
-		groups:             make(map[string]*Group),
-		subscribers:        make(map[chan sseEvent]struct{}),
-		restartCh:          make(chan string, 1),
-		shutdownCh:         make(chan struct{}, 1),
-		watchedDirs:        make(map[string]int),
-		fileChangeDebounce: defaultFileChangeDebounce,
-		fileChangeTimers:   make(map[string]*time.Timer),
-		checkboxSources:    make(map[string]map[string]bool),
-		checkboxOverrides:  make(map[string]map[string]bool),
+		groups:              make(map[string]*Group),
+		subscribers:         make(map[chan sseEvent]struct{}),
+		restartCh:           make(chan string, 1),
+		shutdownCh:          make(chan struct{}, 1),
+		watchedDirs:         make(map[string]int),
+		fileChangeDebounce:  defaultFileChangeDebounce,
+		fileChangeTimers:    make(map[string]*time.Timer),
+		checkboxSources:     make(map[string]map[string]bool),
+		checkboxOverrides:   make(map[string]map[string]bool),
+		checkboxOrderedKeys: make(map[string][]string),
 	}
 	_ = ctx
 	return s
@@ -2163,6 +2164,7 @@ func TestRemoveFileCleansUpCheckboxState(t *testing.T) {
 	s.mu.RLock()
 	_, hasSources := s.checkboxSources[entry.ID]
 	_, hasOverrides := s.checkboxOverrides[entry.ID]
+	_, hasOrdered := s.checkboxOrderedKeys[entry.ID]
 	s.mu.RUnlock()
 
 	if hasSources {
@@ -2170,6 +2172,32 @@ func TestRemoveFileCleansUpCheckboxState(t *testing.T) {
 	}
 	if hasOverrides {
 		t.Fatal("overrides should be deleted after RemoveFile")
+	}
+	if hasOrdered {
+		t.Fatal("orderedKeys should be deleted after RemoveFile")
+	}
+}
+
+func TestAddFilePopulatesCheckboxOrderedKeys(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] First\n- [x] Second\n"), 0o600)
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.mu.RLock()
+	ordered := s.checkboxOrderedKeys[entry.ID]
+	s.mu.RUnlock()
+
+	if len(ordered) != 2 {
+		t.Fatalf("got %d ordered keys, want 2", len(ordered))
+	}
+	if ordered[0] != "First" || ordered[1] != "Second" {
+		t.Fatalf("ordered keys wrong: %v", ordered)
 	}
 }
 

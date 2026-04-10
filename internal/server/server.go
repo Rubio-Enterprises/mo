@@ -193,8 +193,9 @@ type State struct {
 	fileChangeDebounce time.Duration
 	fileChangeTimers   map[string]*time.Timer
 
-	checkboxSources   map[string]map[string]bool // fileID → checkboxKey → source checked
-	checkboxOverrides map[string]map[string]bool // fileID → checkboxKey → overridden checked
+	checkboxSources     map[string]map[string]bool // fileID → checkboxKey → source checked
+	checkboxOverrides   map[string]map[string]bool // fileID → checkboxKey → overridden checked
+	checkboxOrderedKeys map[string][]string        // fileID → keys in document order
 
 	backupCh     chan struct{}     // dirty signal (buffered, size 1)
 	backupSaveFn func(RestoreData) // backup write callback
@@ -218,8 +219,9 @@ func NewState(ctx context.Context) *State {
 		watchedDirs:        make(map[string]int),
 		fileChangeDebounce: defaultFileChangeDebounce,
 		fileChangeTimers:   make(map[string]*time.Timer),
-		checkboxSources:    make(map[string]map[string]bool),
-		checkboxOverrides:  make(map[string]map[string]bool),
+		checkboxSources:     make(map[string]map[string]bool),
+		checkboxOverrides:   make(map[string]map[string]bool),
+		checkboxOrderedKeys: make(map[string][]string),
 	}
 
 	if w != nil {
@@ -308,9 +310,10 @@ func (s *State) AddFile(absPath, groupName string) (*FileEntry, error) {
 	}
 
 	var checkboxSrc map[string]bool
+	var checkboxOrdered []string
 	if fileType == FileTypeMarkdown {
 		if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
-			checkboxSrc = ExtractCheckboxSources(string(fullContent))
+			checkboxSrc, checkboxOrdered = ExtractCheckboxes(string(fullContent))
 		}
 	}
 
@@ -341,6 +344,9 @@ func (s *State) AddFile(absPath, groupName string) (*FileEntry, error) {
 
 	if len(checkboxSrc) > 0 {
 		s.checkboxSources[entry.ID] = checkboxSrc
+	}
+	if len(checkboxOrdered) > 0 {
+		s.checkboxOrderedKeys[entry.ID] = checkboxOrdered
 	}
 
 	if s.watcher != nil {
@@ -396,10 +402,11 @@ func (s *State) AddUploadedFile(name, content, groupName string) *FileEntry {
 	g.Files = append(g.Files, entry)
 
 	if entry.Type == FileTypeMarkdown {
-		sources := ExtractCheckboxSources(content)
+		sources, ordered := ExtractCheckboxes(content)
 		if len(sources) > 0 {
 			s.checkboxSources[entry.ID] = sources
 		}
+		s.checkboxOrderedKeys[entry.ID] = ordered
 	}
 
 	slog.Info("uploaded file added", "name", name, "group", groupName, "id", entry.ID)
@@ -559,6 +566,7 @@ func (s *State) RemoveFile(id string) bool {
 				g.Files = append(g.Files[:i], g.Files[i+1:]...)
 				delete(s.checkboxSources, id)
 				delete(s.checkboxOverrides, id)
+				delete(s.checkboxOrderedKeys, id)
 				if len(g.Files) == 0 && !s.groupHasPatterns(gName) {
 					delete(s.groups, gName)
 				}
@@ -1049,9 +1057,10 @@ func (s *State) notifyFileChangedByPath(absPath string) {
 
 	// Re-extract checkbox sources for reconciliation.
 	var newCheckboxSrc map[string]bool
+	var newCheckboxOrdered []string
 	if ft := DetectFileType(absPath); ft == FileTypeMarkdown {
 		if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
-			newCheckboxSrc = ExtractCheckboxSources(string(fullContent))
+			newCheckboxSrc, newCheckboxOrdered = ExtractCheckboxes(string(fullContent))
 		}
 	}
 
@@ -1077,11 +1086,16 @@ func (s *State) notifyFileChangedByPath(absPath string) {
 		for _, g := range s.groups {
 			for _, entry := range g.Files {
 				if entry.Path == absPath {
-					// Update sources.
+					// Update sources and ordered keys.
 					if len(newCheckboxSrc) > 0 {
 						s.checkboxSources[entry.ID] = newCheckboxSrc
 					} else {
 						delete(s.checkboxSources, entry.ID)
+					}
+					if len(newCheckboxOrdered) > 0 {
+						s.checkboxOrderedKeys[entry.ID] = newCheckboxOrdered
+					} else {
+						delete(s.checkboxOrderedKeys, entry.ID)
 					}
 
 					// Reconcile overrides.
@@ -1114,8 +1128,8 @@ func (s *State) notifyFileChangedByPath(absPath string) {
 	s.notifyFileChanged(ids)
 
 	for _, cbID := range checkboxChangedIDs {
-		src, ovr, _ := s.GetCheckboxState(cbID)
-		s.broadcastCheckboxChanged(cbID, src, ovr)
+		src, ovr, ordered, _ := s.GetCheckboxState(cbID)
+		s.broadcastCheckboxChanged(cbID, src, ovr, ordered)
 	}
 }
 
@@ -1854,8 +1868,8 @@ func handleSPA() http.HandlerFunc {
 	}
 }
 
-// GetCheckboxState returns the sources and overrides for a file.
-func (s *State) GetCheckboxState(id string) (sources, overrides map[string]bool, found bool) {
+// GetCheckboxState returns the sources, overrides, and ordered keys for a file.
+func (s *State) GetCheckboxState(id string) (sources, overrides map[string]bool, orderedKeys []string, found bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1873,7 +1887,7 @@ func (s *State) GetCheckboxState(id string) (sources, overrides map[string]bool,
 		}
 	}
 	if !fileFound {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 
 	src := s.checkboxSources[id]
@@ -1884,7 +1898,11 @@ func (s *State) GetCheckboxState(id string) (sources, overrides map[string]bool,
 	if ovr == nil {
 		ovr = map[string]bool{}
 	}
-	return src, ovr, true
+	ordered := s.checkboxOrderedKeys[id]
+	if ordered == nil {
+		ordered = []string{}
+	}
+	return src, ovr, ordered, true
 }
 
 // SetCheckbox sets or removes a checkbox override for a file.
@@ -1936,9 +1954,13 @@ func (s *State) SetCheckbox(id, key string, checked bool) bool {
 	if ovr == nil {
 		ovr = map[string]bool{}
 	}
+	ordered := s.checkboxOrderedKeys[id]
+	if ordered == nil {
+		ordered = []string{}
+	}
 	s.mu.Unlock()
 
-	s.broadcastCheckboxChanged(id, src, ovr)
+	s.broadcastCheckboxChanged(id, src, ovr, ordered)
 	return true
 }
 
@@ -1991,9 +2013,13 @@ func (s *State) UncheckAll(id string) bool {
 	for k, v := range src {
 		srcCopy[k] = v
 	}
+	ordered := s.checkboxOrderedKeys[id]
+	if ordered == nil {
+		ordered = []string{}
+	}
 	s.mu.Unlock()
 
-	s.broadcastCheckboxChanged(id, srcCopy, ovr)
+	s.broadcastCheckboxChanged(id, srcCopy, ovr, ordered)
 	return true
 }
 
@@ -2045,9 +2071,13 @@ func (s *State) CheckAll(id string) bool {
 	for k, v := range src {
 		srcCopy[k] = v
 	}
+	ordered := s.checkboxOrderedKeys[id]
+	if ordered == nil {
+		ordered = []string{}
+	}
 	s.mu.Unlock()
 
-	s.broadcastCheckboxChanged(id, srcCopy, ovr)
+	s.broadcastCheckboxChanged(id, srcCopy, ovr, ordered)
 	return true
 }
 
@@ -2079,12 +2109,13 @@ func (s *State) RestoreCheckboxOverrides(overrides map[string]map[string]bool) {
 	}
 }
 
-func (s *State) broadcastCheckboxChanged(id string, sources, overrides map[string]bool) {
+func (s *State) broadcastCheckboxChanged(id string, sources, overrides map[string]bool, orderedKeys []string) {
 	b, err := json.Marshal(struct {
-		FileID    string          `json:"fileId"`
-		Sources   map[string]bool `json:"sources"`
-		Overrides map[string]bool `json:"overrides"`
-	}{FileID: id, Sources: sources, Overrides: overrides})
+		FileID      string          `json:"fileId"`
+		Sources     map[string]bool `json:"sources"`
+		Overrides   map[string]bool `json:"overrides"`
+		OrderedKeys []string        `json:"orderedKeys"`
+	}{FileID: id, Sources: sources, Overrides: overrides, OrderedKeys: orderedKeys})
 	if err != nil {
 		slog.Error("broadcastCheckboxChanged", "err", err)
 		return
@@ -2103,16 +2134,17 @@ func handleGetCheckboxes(state *State) http.HandlerFunc {
 			http.Error(w, "missing file id", http.StatusBadRequest)
 			return
 		}
-		sources, overrides, found := state.GetCheckboxState(id)
+		sources, overrides, orderedKeys, found := state.GetCheckboxState(id)
 		if !found {
 			http.Error(w, "file not found", http.StatusNotFound)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(struct {
-			Sources   map[string]bool `json:"sources"`
-			Overrides map[string]bool `json:"overrides"`
-		}{Sources: sources, Overrides: overrides})
+			Sources     map[string]bool `json:"sources"`
+			Overrides   map[string]bool `json:"overrides"`
+			OrderedKeys []string        `json:"orderedKeys"`
+		}{Sources: sources, Overrides: overrides, OrderedKeys: orderedKeys})
 	}
 }
 

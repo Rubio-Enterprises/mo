@@ -7,7 +7,7 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
 import rehypeKatex from "rehype-katex";
 import { rehypeGithubAlerts } from "rehype-github-alerts";
-import { rehypeCheckboxKeys } from "../plugins/rehypeCheckboxKeys";
+import { rehypeCheckboxIndices } from "../plugins/rehypeCheckboxIndices";
 import { useCheckboxState } from "../hooks/useCheckboxState";
 import "katex/dist/katex.min.css";
 import { codeToHtml } from "shiki";
@@ -386,8 +386,17 @@ export function MarkdownRenderer({
   const articleRef = useRef<HTMLDivElement>(null);
   const pendingHashRef = useRef<string>("");
 
-  const { getChecked, toggle, uncheckAll, checkAll, hasCheckboxes, totalCheckboxes, checkboxRevision } =
-    useCheckboxState(fileId);
+  const {
+    getChecked,
+    toggle,
+    uncheckAll,
+    checkAll,
+    hasCheckboxes,
+    totalCheckboxes,
+    orderedKeys,
+    checkboxesLoaded,
+    checkboxRevision,
+  } = useCheckboxState(fileId);
 
   // Use refs for checkbox callbacks so the components useMemo stays stable
   // across checkbox state changes, preventing full re-render flicker.
@@ -492,11 +501,7 @@ export function MarkdownRenderer({
         let checkboxKey: string | undefined;
         const childArray = Array.isArray(children) ? children : [children];
         for (const child of childArray) {
-          if (
-            child &&
-            typeof child === "object" &&
-            "props" in child
-          ) {
+          if (child && typeof child === "object" && "props" in child) {
             if (child.props?.type === "checkbox" && child.props?.["data-checkbox-key"]) {
               checkboxKey = child.props["data-checkbox-key"] as string;
               break;
@@ -581,20 +586,33 @@ export function MarkdownRenderer({
     [content, isRawView],
   );
 
+  const previousRenderedRef = useRef<React.ReactNode>(null);
+
   const renderedContent = useMemo(() => {
     if (isRawView) {
-      return <RawView content={content} />;
+      const node = <RawView content={content} />;
+      previousRenderedRef.current = node;
+      return node;
+    }
+    // Gate interactive rendering on checkbox keys being ready. While the
+    // initial fetch is in flight, render the previously rendered tree (if
+    // any) to avoid a flicker where checkboxes briefly appear unkeyed and
+    // therefore disabled. On file switch, `checkboxesLoaded` resets to
+    // false inside useCheckboxState and flips true once the new fetch
+    // resolves.
+    if (!checkboxesLoaded) {
+      return previousRenderedRef.current ?? null;
     }
     const base = parsed ? parsed.content : content;
     const md = fileName.toLowerCase().endsWith(".mdx") ? stripMdxSyntax(base) : base;
-    return (
+    const node = (
       <>
         {parsed && <FrontmatterBlock yaml={parsed.yaml} />}
         <Markdown
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[
             rehypeRaw,
-            rehypeCheckboxKeys,
+            [rehypeCheckboxIndices, { orderedKeys }],
             [rehypeSanitize, sanitizeSchema],
             rehypeGithubAlerts,
             rehypeSlug,
@@ -606,11 +624,23 @@ export function MarkdownRenderer({
         </Markdown>
       </>
     );
+    previousRenderedRef.current = node;
+    return node;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [content, isRawView, parsed, components, fileName, checkboxRevision]);
+  }, [
+    content,
+    isRawView,
+    parsed,
+    components,
+    fileName,
+    checkboxRevision,
+    checkboxesLoaded,
+    orderedKeys,
+  ]);
 
   const prevHeadingsKey = useRef("");
   useEffect(() => {
+    if (renderedContent == null) return;
     const newHeadings: TocHeading[] = [];
     if (!isRawView && articleRef.current) {
       const els = articleRef.current.querySelectorAll("h1, h2, h3, h4, h5, h6");
@@ -637,6 +667,7 @@ export function MarkdownRenderer({
   });
 
   useLayoutEffect(() => {
+    if (renderedContent == null) return;
     onContentRenderedRef.current?.();
     const hash = pendingHashRef.current;
     if (hash) {
