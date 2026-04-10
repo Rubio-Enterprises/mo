@@ -7,6 +7,7 @@ interface SSECallbacks {
     fileId: string,
     sources: Record<string, boolean>,
     overrides: Record<string, boolean>,
+    orderedKeys: string[],
   ) => void;
 }
 
@@ -58,7 +59,12 @@ export function useSSE(callbacks: SSECallbacks) {
       es.addEventListener("checkbox-changed", (e) => {
         try {
           const data = JSON.parse(e.data);
-          callbacksRef.current.onCheckboxChanged?.(data.fileId, data.sources, data.overrides);
+          callbacksRef.current.onCheckboxChanged?.(
+            data.fileId,
+            data.sources,
+            data.overrides,
+            data.orderedKeys ?? [],
+          );
         } catch {
           // ignore malformed data
         }

@@ -13,6 +13,10 @@ interface CheckboxStateResult {
   checkAll: () => void;
   hasCheckboxes: boolean;
   totalCheckboxes: number;
+  /** Ordered checkbox keys in document order, authored by the backend. */
+  orderedKeys: string[];
+  /** True once the first fetchCheckboxes call for this fileId has resolved or rejected. */
+  checkboxesLoaded: boolean;
   /** Monotonically increasing counter that bumps on every state change. */
   checkboxRevision: number;
 }
@@ -20,6 +24,8 @@ interface CheckboxStateResult {
 export function useCheckboxState(fileId: string): CheckboxStateResult {
   const [sources, setSources] = useState<Record<string, boolean>>({});
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  const [orderedKeys, setOrderedKeys] = useState<string[]>([]);
+  const [checkboxesLoaded, setCheckboxesLoaded] = useState(false);
   const [checkboxRevision, setCheckboxRevision] = useState(0);
   const sourcesRef = useRef(sources);
   const overridesRef = useRef(overrides);
@@ -28,14 +34,18 @@ export function useCheckboxState(fileId: string): CheckboxStateResult {
   sourcesRef.current = sources;
   overridesRef.current = overrides;
 
-  // Fetch initial state.
+  // Fetch initial state. Reset `checkboxesLoaded` on fileId change so the
+  // renderer gates re-rendering until the new file's ordered keys arrive.
   useEffect(() => {
     let cancelled = false;
+    setCheckboxesLoaded(false);
     fetchCheckboxes(fileId)
       .then((data) => {
         if (!cancelled) {
           setSources(data.sources);
           setOverrides(data.overrides);
+          setOrderedKeys(data.orderedKeys ?? []);
+          setCheckboxesLoaded(true);
         }
       })
       .catch(() => {
@@ -43,6 +53,8 @@ export function useCheckboxState(fileId: string): CheckboxStateResult {
         if (!cancelled) {
           setSources({});
           setOverrides({});
+          setOrderedKeys([]);
+          setCheckboxesLoaded(true);
         }
       });
     return () => {
@@ -58,6 +70,9 @@ export function useCheckboxState(fileId: string): CheckboxStateResult {
       if (detail.fileId === fileId) {
         setSources(detail.sources);
         setOverrides(detail.overrides);
+        if (Array.isArray(detail.orderedKeys)) {
+          setOrderedKeys(detail.orderedKeys);
+        }
         setCheckboxRevision((r) => r + 1);
       }
     };
@@ -104,5 +119,15 @@ export function useCheckboxState(fileId: string): CheckboxStateResult {
   const totalCheckboxes = Object.keys(sources).length;
   const hasCheckboxes = totalCheckboxes > 0;
 
-  return { getChecked, toggle, uncheckAll, checkAll, hasCheckboxes, totalCheckboxes, checkboxRevision };
+  return {
+    getChecked,
+    toggle,
+    uncheckAll,
+    checkAll,
+    hasCheckboxes,
+    totalCheckboxes,
+    orderedKeys,
+    checkboxesLoaded,
+    checkboxRevision,
+  };
 }

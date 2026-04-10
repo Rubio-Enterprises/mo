@@ -207,10 +207,10 @@ export function App() {
         return current;
       });
     },
-    onCheckboxChanged: (fileId, sources, overrides) => {
+    onCheckboxChanged: (fileId, sources, overrides, orderedKeys) => {
       window.dispatchEvent(
         new CustomEvent("mo-checkbox-changed", {
-          detail: { fileId, sources, overrides },
+          detail: { fileId, sources, overrides, orderedKeys },
         }),
       );
     },

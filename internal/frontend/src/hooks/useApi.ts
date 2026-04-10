@@ -103,6 +103,7 @@ export function rawFileUrl(id: string, revision?: number): string {
 export interface CheckboxState {
   sources: Record<string, boolean>;
   overrides: Record<string, boolean>;
+  orderedKeys: string[];
 }
 
 export async function fetchCheckboxes(id: string): Promise<CheckboxState> {
