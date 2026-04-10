@@ -640,6 +640,7 @@ export function MarkdownRenderer({
 
   const prevHeadingsKey = useRef("");
   useEffect(() => {
+    if (renderedContent == null) return;
     const newHeadings: TocHeading[] = [];
     if (!isRawView && articleRef.current) {
       const els = articleRef.current.querySelectorAll("h1, h2, h3, h4, h5, h6");
@@ -666,6 +667,7 @@ export function MarkdownRenderer({
   });
 
   useLayoutEffect(() => {
+    if (renderedContent == null) return;
     onContentRenderedRef.current?.();
     const hash = pendingHashRef.current;
     if (hash) {
