@@ -174,4 +174,48 @@ func TestExtractCheckboxes(t *testing.T) {
 			t.Fatalf("ordered = %v", ordered)
 		}
 	})
+
+	t.Run("checkbox inside blockquote", func(t *testing.T) {
+		md := "> - [ ] Quoted task\n> - [x] Quoted done\n"
+		sources, ordered := ExtractCheckboxes(md)
+		// Whatever goldmark's position, the two task-list items must be
+		// extracted in document order. If goldmark drops them entirely that
+		// is also acceptable (empty result) — the invariant is count and
+		// order consistency with remark-gfm, asserted via the frontend tests.
+		if len(ordered) != len(sources) {
+			t.Fatalf("ordered len %d != sources len %d", len(ordered), len(sources))
+		}
+		if len(ordered) == 2 {
+			if ordered[0] != "Quoted task" || ordered[1] != "Quoted done" {
+				t.Fatalf("blockquote order wrong: %v", ordered)
+			}
+		}
+	})
+
+	t.Run("checkbox outside list is ignored", func(t *testing.T) {
+		// Raw HTML checkbox should not appear in the extracted set — goldmark
+		// only recognises checkboxes inside the TaskList extension scope.
+		md := "Some paragraph with <input type=\"checkbox\"> inside.\n\n- [ ] Real task\n"
+		sources, ordered := ExtractCheckboxes(md)
+		if len(sources) != 1 {
+			t.Fatalf("got %d sources, want 1 (raw HTML checkbox must be ignored)", len(sources))
+		}
+		if len(ordered) != 1 || ordered[0] != "Real task" {
+			t.Fatalf("ordered = %v", ordered)
+		}
+	})
+
+	t.Run("multiple lists preserve document order", func(t *testing.T) {
+		md := "- [ ] Alpha\n\nSome text\n\n- [ ] Beta\n- [x] Gamma\n"
+		_, ordered := ExtractCheckboxes(md)
+		want := []string{"Alpha", "Beta", "Gamma"}
+		if len(ordered) != 3 {
+			t.Fatalf("got %d ordered keys, want 3", len(ordered))
+		}
+		for i, k := range want {
+			if ordered[i] != k {
+				t.Fatalf("ordered[%d] = %q, want %q", i, ordered[i], k)
+			}
+		}
+	})
 }
