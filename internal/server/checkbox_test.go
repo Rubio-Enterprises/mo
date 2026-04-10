@@ -45,12 +45,12 @@ func TestComputeCheckboxKey(t *testing.T) {
 	})
 }
 
-func TestExtractCheckboxSources(t *testing.T) {
-	t.Run("basic items", func(t *testing.T) {
+func TestExtractCheckboxes(t *testing.T) {
+	t.Run("basic items return map and ordered keys", func(t *testing.T) {
 		md := "- [ ] First item\n- [x] Second item\n"
-		sources := ExtractCheckboxSources(md)
+		sources, ordered := ExtractCheckboxes(md)
 		if len(sources) != 2 {
-			t.Fatalf("got %d entries, want 2", len(sources))
+			t.Fatalf("got %d sources, want 2", len(sources))
 		}
 		if sources["First item"] != false {
 			t.Fatal("First item should be false")
@@ -58,22 +58,28 @@ func TestExtractCheckboxSources(t *testing.T) {
 		if sources["Second item"] != true {
 			t.Fatal("Second item should be true")
 		}
+		if len(ordered) != 2 {
+			t.Fatalf("got %d ordered keys, want 2", len(ordered))
+		}
+		if ordered[0] != "First item" || ordered[1] != "Second item" {
+			t.Fatalf("ordered keys out of order: %v", ordered)
+		}
 	})
 
-	t.Run("duplicate labels", func(t *testing.T) {
+	t.Run("duplicate labels are disambiguated in order", func(t *testing.T) {
 		md := "- [ ] TODO\n- [ ] TODO\n- [x] TODO\n"
-		sources := ExtractCheckboxSources(md)
+		sources, ordered := ExtractCheckboxes(md)
 		if len(sources) != 3 {
-			t.Fatalf("got %d entries, want 3", len(sources))
+			t.Fatalf("got %d sources, want 3", len(sources))
 		}
-		if _, ok := sources["TODO"]; !ok {
-			t.Fatal("missing key TODO")
+		want := []string{"TODO", "TODO#2", "TODO#3"}
+		if len(ordered) != 3 {
+			t.Fatalf("got %d ordered keys, want 3", len(ordered))
 		}
-		if _, ok := sources["TODO#2"]; !ok {
-			t.Fatal("missing key TODO#2")
-		}
-		if _, ok := sources["TODO#3"]; !ok {
-			t.Fatal("missing key TODO#3")
+		for i, k := range want {
+			if ordered[i] != k {
+				t.Fatalf("ordered[%d] = %q, want %q", i, ordered[i], k)
+			}
 		}
 		if sources["TODO#3"] != true {
 			t.Fatal("TODO#3 should be true")
@@ -82,38 +88,50 @@ func TestExtractCheckboxSources(t *testing.T) {
 
 	t.Run("strips inline formatting", func(t *testing.T) {
 		md := "- [ ] **bold** and *italic* text\n"
-		sources := ExtractCheckboxSources(md)
+		sources, ordered := ExtractCheckboxes(md)
 		if _, ok := sources["bold and italic text"]; !ok {
-			t.Fatalf("expected key 'bold and italic text', got keys: %v", sources)
+			t.Fatalf("expected key 'bold and italic text', got: %v", sources)
+		}
+		if len(ordered) != 1 || ordered[0] != "bold and italic text" {
+			t.Fatalf("ordered = %v", ordered)
 		}
 	})
 
 	t.Run("strips code spans and links", func(t *testing.T) {
 		md := "- [ ] Use `fetch` to call [the API](https://example.com)\n"
-		sources := ExtractCheckboxSources(md)
+		sources, ordered := ExtractCheckboxes(md)
 		if _, ok := sources["Use fetch to call the API"]; !ok {
-			t.Fatalf("expected key 'Use fetch to call the API', got keys: %v", sources)
+			t.Fatalf("expected key 'Use fetch to call the API', got: %v", sources)
+		}
+		if len(ordered) != 1 || ordered[0] != "Use fetch to call the API" {
+			t.Fatalf("ordered = %v", ordered)
 		}
 	})
 
-	t.Run("empty markdown returns empty map", func(t *testing.T) {
-		sources := ExtractCheckboxSources("")
+	t.Run("empty markdown returns empty map and slice", func(t *testing.T) {
+		sources, ordered := ExtractCheckboxes("")
 		if len(sources) != 0 {
-			t.Fatalf("got %d entries, want 0", len(sources))
+			t.Fatalf("got %d sources, want 0", len(sources))
+		}
+		if len(ordered) != 0 {
+			t.Fatalf("got %d ordered keys, want 0", len(ordered))
 		}
 	})
 
-	t.Run("no checkboxes returns empty map", func(t *testing.T) {
+	t.Run("no checkboxes returns empty map and slice", func(t *testing.T) {
 		md := "# Hello\n\n- Regular list\n- Another item\n"
-		sources := ExtractCheckboxSources(md)
+		sources, ordered := ExtractCheckboxes(md)
 		if len(sources) != 0 {
-			t.Fatalf("got %d entries, want 0", len(sources))
+			t.Fatalf("got %d sources, want 0", len(sources))
+		}
+		if len(ordered) != 0 {
+			t.Fatalf("got %d ordered keys, want 0", len(ordered))
 		}
 	})
 
 	t.Run("uppercase X is checked", func(t *testing.T) {
 		md := "- [X] Done\n"
-		sources := ExtractCheckboxSources(md)
+		sources, _ := ExtractCheckboxes(md)
 		if sources["Done"] != true {
 			t.Fatal("uppercase X should be checked")
 		}
@@ -121,32 +139,39 @@ func TestExtractCheckboxSources(t *testing.T) {
 
 	t.Run("nested list excluded from label", func(t *testing.T) {
 		md := "- [ ] Parent\n  - [ ] Child\n"
-		sources := ExtractCheckboxSources(md)
+		sources, ordered := ExtractCheckboxes(md)
 		if _, ok := sources["Parent"]; !ok {
 			t.Fatal("missing key Parent")
 		}
 		if _, ok := sources["Child"]; !ok {
 			t.Fatal("missing key Child")
 		}
+		// Document order: Parent before Child.
+		if len(ordered) != 2 || ordered[0] != "Parent" || ordered[1] != "Child" {
+			t.Fatalf("ordered = %v", ordered)
+		}
 	})
 
 	t.Run("soft line break preserved in key", func(t *testing.T) {
 		md := "- [ ] First line\n  continued text\n"
-		sources := ExtractCheckboxSources(md)
+		sources, _ := ExtractCheckboxes(md)
 		want := "First line\ncontinued text"
 		if _, ok := sources[want]; !ok {
-			t.Fatalf("expected key %q, got keys: %v", want, sources)
+			t.Fatalf("expected key %q, got: %v", want, sources)
 		}
 	})
 
 	t.Run("loose list uses only first paragraph", func(t *testing.T) {
 		md := "- [ ] Task A\n\n  More details\n\n- [ ] Task B\n"
-		sources := ExtractCheckboxSources(md)
+		sources, ordered := ExtractCheckboxes(md)
 		if _, ok := sources["Task A"]; !ok {
-			t.Fatalf("expected key 'Task A', got keys: %v", sources)
+			t.Fatalf("expected key 'Task A', got: %v", sources)
 		}
 		if _, ok := sources["Task B"]; !ok {
-			t.Fatalf("expected key 'Task B', got keys: %v", sources)
+			t.Fatalf("expected key 'Task B', got: %v", sources)
+		}
+		if len(ordered) != 2 || ordered[0] != "Task A" || ordered[1] != "Task B" {
+			t.Fatalf("ordered = %v", ordered)
 		}
 	})
 }

@@ -81,10 +81,11 @@ func extractCheckboxLabel(listItem ast.Node, source []byte) string {
 	return extractNodeText(listItem, source)
 }
 
-// ExtractCheckboxSources parses markdown content and returns a map of
-// checkbox key to source checked state. Keys are computed using the same
-// algorithm as the frontend rehypeCheckboxKeys plugin.
-func ExtractCheckboxSources(content string) map[string]bool {
+// ExtractCheckboxes parses markdown content and returns a map of checkbox key
+// to source checked state alongside an ordered slice of keys in document order.
+// Keys are computed using the same algorithm as the frontend (content-derived,
+// with `#N` disambiguation for duplicates).
+func ExtractCheckboxes(content string) (map[string]bool, []string) {
 	source := []byte(content)
 	md := goldmark.New(goldmark.WithExtensions(extension.TaskList))
 	reader := text.NewReader(source)
@@ -92,6 +93,7 @@ func ExtractCheckboxSources(content string) map[string]bool {
 
 	occurrences := map[string]int{}
 	result := map[string]bool{}
+	ordered := make([]string, 0)
 
 	ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
@@ -125,14 +127,13 @@ func ExtractCheckboxSources(content string) map[string]bool {
 			return ast.WalkContinue, nil
 		}
 
-		// Extract label text from the first block of the list item,
-		// excluding nested lists and the checkbox node itself.
 		labelText := extractCheckboxLabel(n, source)
 		key := computeCheckboxKey(labelText, occurrences)
 		result[key] = checkbox.IsChecked
+		ordered = append(ordered, key)
 
 		return ast.WalkContinue, nil
 	})
 
-	return result
+	return result, ordered
 }

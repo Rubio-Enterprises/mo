@@ -310,7 +310,7 @@ func (s *State) AddFile(absPath, groupName string) (*FileEntry, error) {
 	var checkboxSrc map[string]bool
 	if fileType == FileTypeMarkdown {
 		if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
-			checkboxSrc = ExtractCheckboxSources(string(fullContent))
+			checkboxSrc, _ = ExtractCheckboxes(string(fullContent))
 		}
 	}
 
@@ -396,7 +396,7 @@ func (s *State) AddUploadedFile(name, content, groupName string) *FileEntry {
 	g.Files = append(g.Files, entry)
 
 	if entry.Type == FileTypeMarkdown {
-		sources := ExtractCheckboxSources(content)
+		sources, _ := ExtractCheckboxes(content)
 		if len(sources) > 0 {
 			s.checkboxSources[entry.ID] = sources
 		}
@@ -1051,7 +1051,7 @@ func (s *State) notifyFileChangedByPath(absPath string) {
 	var newCheckboxSrc map[string]bool
 	if ft := DetectFileType(absPath); ft == FileTypeMarkdown {
 		if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
-			newCheckboxSrc = ExtractCheckboxSources(string(fullContent))
+			newCheckboxSrc, _ = ExtractCheckboxes(string(fullContent))
 		}
 	}
 
