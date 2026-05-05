@@ -56,7 +56,7 @@ jobs:
       - name: Checkout tap
         uses: actions/checkout@v4
         with:
-          repository: strubio-ray/homebrew-tap
+          repository: Rubio-Enterprises/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
 
