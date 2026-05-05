@@ -102,7 +102,7 @@ jobs:
           cat > /tmp/mo.rb << FORMULA
           class Mo < Formula
             desc "Markdown viewer that opens .md files in a browser"
-            homepage "https://github.com/strubio-ray/mo"
+            homepage "https://github.com/Rubio-Enterprises/mo"
             version "$VERSION"
             license "MIT"
 
@@ -142,8 +142,8 @@ jobs:
           # Remove heredoc indentation
           sed -i 's/^          //' /tmp/mo.rb
 
-          gh api repos/strubio-ray/homebrew-tap/contents/Formula/mo.rb \
+          gh api repos/Rubio-Enterprises/homebrew-tap/contents/Formula/mo.rb \
             --method PUT \
             --field message="feat: bump mo to $TAG" \
             --field content="$(base64 -w0 /tmp/mo.rb)" \
-            --field sha="$(gh api repos/strubio-ray/homebrew-tap/contents/Formula/mo.rb --jq '.sha')"
+            --field sha="$(gh api repos/Rubio-Enterprises/homebrew-tap/contents/Formula/mo.rb --jq '.sha')"
