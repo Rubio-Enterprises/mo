@@ -144,7 +144,7 @@ export const test = base.extend<Fixtures>({
       const t = setTimeout(() => {
         proc.kill("SIGKILL");
         r();
-      }, 2000);
+      }, 1000);
       proc.once("exit", () => {
         clearTimeout(t);
         r();

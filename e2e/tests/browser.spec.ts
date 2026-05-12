@@ -7,16 +7,6 @@
 
 import { test, expect, testdata } from "./fixtures";
 
-async function openSidebarIfClosed(page: import("playwright").Page) {
-  const toggle = page.getByRole("button", { name: "Sidebar" });
-  if (await toggle.isVisible()) {
-    const expanded = await toggle.getAttribute("aria-expanded");
-    if (expanded !== "true") {
-      await toggle.click();
-    }
-  }
-}
-
 test.describe("mo SPA in the browser", () => {
   test("loads the default group and renders the initial file", async ({ moServer, page }) => {
     await page.goto(moServer.baseURL);
@@ -95,6 +85,3 @@ test.describe("mo SPA in the browser", () => {
       .not.toBe(initial);
   });
 });
-
-// Keep a reference for the unused helper so it doesn't get flagged by lint.
-void openSidebarIfClosed;

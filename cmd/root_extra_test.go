@@ -727,10 +727,9 @@ func startStatusServerOnLogPort(t *testing.T, status statusResponse) (port int) 
 	return p
 }
 
-// splitHostPort is a small wrapper around net.SplitHostPort that returns the
-// numeric port directly.
+// splitHostPort wraps net.SplitHostPort and parses the port to int.
 func splitHostPort(addr string) (host string, port int, err error) {
-	h, p, err := splitHostPortStr(addr)
+	h, p, err := net.SplitHostPort(addr)
 	if err != nil {
 		return "", 0, err
 	}
@@ -739,14 +738,6 @@ func splitHostPort(addr string) (host string, port int, err error) {
 		return "", 0, err
 	}
 	return h, pi, nil
-}
-
-func splitHostPortStr(addr string) (string, string, error) {
-	i := strings.LastIndex(addr, ":")
-	if i < 0 {
-		return "", "", fmt.Errorf("no port in %q", addr)
-	}
-	return addr[:i], addr[i+1:], nil
 }
 
 // logfileDir returns the same path logfile.Dir() returns by reading XDG.
@@ -786,8 +777,7 @@ func TestDoStatusWithRunningServer(t *testing.T) {
 		},
 	}
 
-	p := startStatusServerOnLogPort(t, status)
-	_ = p
+	startStatusServerOnLogPort(t, status)
 
 	t.Run("text mode prints groups, files, and patterns", func(t *testing.T) {
 		jsonOutput = false
@@ -1658,6 +1648,3 @@ func TestJSONServeOutputShape(t *testing.T) {
 		t.Fatalf("unexpected JSON: %s", string(b2))
 	}
 }
-
-// Ensure unused symbols imported into the file actually get referenced.
-var _ = fmt.Sprintf
