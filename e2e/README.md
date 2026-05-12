@@ -26,6 +26,10 @@ make build
 A Playwright-compatible Chromium browser must be available. In Playwright's standard install
 locations (`~/.cache/ms-playwright`) or via `PLAYWRIGHT_BROWSERS_PATH`.
 
+> **POSIX only.** The mo server fixture in `tests/fixtures.ts` spawns the binary and tears
+> it down with `SIGTERM`/`SIGKILL`. Windows semantics differ (SIGTERM is forced terminate
+> with no graceful shutdown), so this suite assumes macOS or Linux.
+
 ## Running
 
 From the repo root:

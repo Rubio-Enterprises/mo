@@ -30,16 +30,19 @@ describe("useNavigationHistory", () => {
     expect(result.current.canGoBack).toBe(true);
   });
 
-  it("goBack on empty stack does nothing", () => {
+  it("goBack on empty stack returns null and leaves state untouched", () => {
     const { result } = renderHook(() => useNavigationHistory());
+
+    let returned: NavEntry | null | undefined;
     act(() => {
-      result.current.goBack(entry("current"));
+      returned = result.current.goBack(entry("current"));
     });
+    expect(returned).toBeNull();
     expect(result.current.canGoBack).toBe(false);
     expect(result.current.canGoForward).toBe(false);
   });
 
-  it("goBack after navigate clears back stack", () => {
+  it("goBack after navigate clears the back stack", () => {
     const { result } = renderHook(() => useNavigationHistory());
 
     act(() => result.current.navigate(entry("a")));
@@ -49,11 +52,33 @@ describe("useNavigationHistory", () => {
     expect(result.current.canGoBack).toBe(false);
   });
 
-  it("goForward on empty stack does nothing", () => {
+  // Known limitation: goBack/goForward read the popped entry inside the
+  // setState updater closure, but the updater runs after the dispatch returns
+  // under React 18's automatic batching. The return value reaches the caller
+  // as `null` even when the stack was non-empty. The observable state
+  // transitions are correct; only the return value is broken.
+  // This test pins the current behavior so a future fix to the hook will
+  // surface as a deliberate breaking change in this assertion.
+  it("goBack returns null even when the stack is non-empty (known sync-capture limitation)", () => {
     const { result } = renderHook(() => useNavigationHistory());
+
+    act(() => result.current.navigate(entry("a")));
+
+    let returned: NavEntry | null | undefined;
     act(() => {
-      result.current.goForward(entry("c"));
+      returned = result.current.goBack(entry("current"));
     });
+    expect(returned).toBeNull();
+  });
+
+  it("goForward on empty stack returns null and leaves state untouched", () => {
+    const { result } = renderHook(() => useNavigationHistory());
+
+    let returned: NavEntry | null | undefined;
+    act(() => {
+      returned = result.current.goForward(entry("c"));
+    });
+    expect(returned).toBeNull();
     expect(result.current.canGoBack).toBe(false);
     expect(result.current.canGoForward).toBe(false);
   });

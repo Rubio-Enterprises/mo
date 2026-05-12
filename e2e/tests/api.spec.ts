@@ -138,4 +138,55 @@ test.describe("mo HTTP API", () => {
     expect(res.status()).toBeGreaterThanOrEqual(400);
     expect(res.status()).toBeLessThan(500);
   });
+
+  test("GET /_/events emits an update event when a file is added", async ({ moServer }) => {
+    // Open the SSE stream first, then add a file, and verify the
+    // 'update' event arrives within a few seconds.
+    const events: string[] = [];
+    const controller = new AbortController();
+
+    const streamPromise = (async () => {
+      const res = await fetch(`${moServer.baseURL}/_/events`, {
+        signal: controller.signal,
+      });
+      if (!res.body) throw new Error("no SSE body");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {
+          chunk = await reader.read();
+        } catch {
+          return;
+        }
+        if (chunk.done) return;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        // SSE events are separated by blank lines.
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+        for (const part of parts) {
+          const match = part.match(/^event:\s*(\S+)/m);
+          if (match) events.push(match[1]);
+        }
+        if (events.includes("update")) return;
+      }
+    })();
+
+    // Give the server a tick to register the subscriber before triggering.
+    await new Promise((r) => setTimeout(r, 100));
+    await moServer.addFile(testdata("basic.md"));
+
+    // Wait for the stream to see the event, or time out.
+    const timeout = new Promise<void>((_, rej) =>
+      setTimeout(() => rej(new Error("SSE timeout")), 5_000),
+    );
+    try {
+      await Promise.race([streamPromise, timeout]);
+    } finally {
+      controller.abort();
+    }
+
+    expect(events).toContain("update");
+  });
 });

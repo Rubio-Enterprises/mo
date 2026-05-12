@@ -4,13 +4,22 @@ import userEvent from "@testing-library/user-event";
 import { RestartButton } from "./RestartButton";
 
 describe("RestartButton", () => {
+  let originalLocation: Location;
+
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    originalLocation = window.location;
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    Object.defineProperty(window, "location", {
+      value: originalLocation,
+      writable: true,
+      configurable: true,
+    });
   });
 
   function mockFetch(handler: (url: string, init?: RequestInit) => Promise<Response>) {

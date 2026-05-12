@@ -22,17 +22,8 @@ func newTCPListener() (net.Listener, error) {
 	return net.Listen("tcp", "127.0.0.1:0")
 }
 
-func contextWithTimeout(t *testing.T, seconds time.Duration) (context.Context, context.CancelFunc) {
-	t.Helper()
-	return context.WithTimeout(context.Background(), seconds*time.Second)
-}
-
-func timeAfter(seconds time.Duration) <-chan time.Time {
-	return time.After(seconds * time.Second)
-}
-
-func waitForServerUp(addr string, timeoutSeconds time.Duration) error {
-	deadline := time.Now().Add(timeoutSeconds * time.Second)
+func waitForServerUp(addr string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 200 * time.Millisecond}
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(fmt.Sprintf("http://%s/_/api/status", addr))
@@ -912,14 +903,15 @@ func TestRun_StatusFlag(t *testing.T) {
 }
 
 func TestRun_ShutdownFlagNoServer(t *testing.T) {
+	prevShutdown, prevPort, prevBind := shutdownServer, port, bind
+	t.Cleanup(func() {
+		shutdownServer = prevShutdown
+		port = prevPort
+		bind = prevBind
+	})
 	shutdownServer = true
 	port = 1 // tiny, unlikely-listened port
 	bind = "127.0.0.1"
-	defer func() {
-		shutdownServer = false
-		port = 6275
-		bind = "localhost"
-	}()
 
 	err := run(rootCmd, nil)
 	if err == nil {
@@ -931,14 +923,15 @@ func TestRun_ShutdownFlagNoServer(t *testing.T) {
 }
 
 func TestRun_RestartFlagNoServer(t *testing.T) {
+	prevRestart, prevPort, prevBind := restartServer, port, bind
+	t.Cleanup(func() {
+		restartServer = prevRestart
+		port = prevPort
+		bind = prevBind
+	})
 	restartServer = true
 	port = 1
 	bind = "127.0.0.1"
-	defer func() {
-		restartServer = false
-		port = 6275
-		bind = "localhost"
-	}()
 
 	err := run(rootCmd, nil)
 	if err == nil {
@@ -1017,18 +1010,17 @@ func TestRun_RestoreCorrupted(t *testing.T) {
 
 func TestRun_InvalidTargetWithNoFiles(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	prev := target
+	prevTarget, prevForeground, prevPort, prevBind := target, foreground, port, bind
+	t.Cleanup(func() {
+		target = prevTarget
+		foreground = prevForeground
+		port = prevPort
+		bind = prevBind
+	})
 	target = "bad?name"
-	prevForeground := foreground
 	foreground = true
 	port = 1
 	bind = "127.0.0.1"
-	defer func() {
-		target = prev
-		foreground = prevForeground
-		port = 6275
-		bind = "localhost"
-	}()
 
 	err := run(rootCmd, nil)
 	if err == nil {
@@ -1041,17 +1033,17 @@ func TestRun_InvalidTargetWithNoFiles(t *testing.T) {
 
 func TestRun_ClearNoBackupNoServer(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	prevClear, prevForeground, prevPort, prevBind := clearBackup, foreground, port, bind
+	t.Cleanup(func() {
+		clearBackup = prevClear
+		foreground = prevForeground
+		port = prevPort
+		bind = prevBind
+	})
 	clearBackup = true
-	prevForeground := foreground
 	foreground = true
 	port = 65535 // unlikely to be in use
 	bind = "127.0.0.1"
-	defer func() {
-		clearBackup = false
-		foreground = prevForeground
-		port = 6275
-		bind = "localhost"
-	}()
 
 	out := captureStderr(t, func() {
 		if err := run(rootCmd, nil); err != nil {
@@ -1156,7 +1148,7 @@ func TestStartServerLifecycle(t *testing.T) {
 		jsonOutput = prevJSON
 	}()
 
-	ctx, cancel := contextWithTimeout(t, 5)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -1171,12 +1163,10 @@ func TestStartServerLifecycle(t *testing.T) {
 		})
 	}()
 
-	// Wait for the server to come up by probing /_/api/status.
-	if err := waitForServerUp(addr, 5); err != nil {
+	if err := waitForServerUp(addr, 5*time.Second); err != nil {
 		t.Fatalf("server did not come up: %v", err)
 	}
 
-	// Trigger graceful shutdown.
 	cancel()
 
 	select {
@@ -1184,7 +1174,7 @@ func TestStartServerLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatalf("startServer returned: %v", err)
 		}
-	case <-timeAfter(5):
+	case <-time.After(5 * time.Second):
 		t.Fatal("startServer did not return after context cancel")
 	}
 }
@@ -1210,7 +1200,7 @@ func TestStartServerListenError(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	ctx, cancel := contextWithTimeout(t, 5)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	err = captureStderrErr(t, func() error {
@@ -1237,7 +1227,7 @@ func TestStartServerAllFilesSkipped(t *testing.T) {
 	dir := t.TempDir()
 
 	addr := fmt.Sprintf("127.0.0.1:%d", findFreePort(t))
-	ctx, cancel := contextWithTimeout(t, 5)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	err := captureStderrErr(t, func() error {
@@ -1326,7 +1316,7 @@ func TestRun_RestoreHappyPath(t *testing.T) {
 		noOpen = prevNoOpen
 	}()
 
-	ctx, cancel := contextWithTimeout(t, 3)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	rootCmd.SetContext(ctx)
 
@@ -1340,7 +1330,7 @@ func TestRun_RestoreHappyPath(t *testing.T) {
 	}()
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	if err := waitForServerUp(addr, 4); err != nil {
+	if err := waitForServerUp(addr, 4*time.Second); err != nil {
 		t.Fatalf("server did not start: %v", err)
 	}
 	cancel()
@@ -1349,7 +1339,7 @@ func TestRun_RestoreHappyPath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("run --restore returned: %v", err)
 		}
-	case <-timeAfter(5):
+	case <-time.After(5 * time.Second):
 		t.Fatal("run did not return after context cancel")
 	}
 }
@@ -1477,6 +1467,16 @@ func TestRun_ClearWithBackupNoServer(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", stateDir)
 
+	prevClear, prevForeground, prevBind, prevPort := clearBackup, foreground, bind, port
+	origStdin := os.Stdin
+	t.Cleanup(func() {
+		clearBackup = prevClear
+		foreground = prevForeground
+		bind = prevBind
+		port = prevPort
+		os.Stdin = origStdin
+	})
+
 	// Write a backup file directly so --clear has something to remove.
 	backupDir := filepath.Join(stateDir, "mo", "backup")
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
@@ -1489,26 +1489,15 @@ func TestRun_ClearWithBackupNoServer(t *testing.T) {
 	}
 
 	clearBackup = true
-	prevForeground := foreground
 	foreground = true
-	prevBind := bind
 	bind = "127.0.0.1"
-	// Simulate user typing "y\n" on stdin.
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("Pipe: %v", err)
 	}
 	w.WriteString("y\n")
 	w.Close()
-	origStdin := os.Stdin
 	os.Stdin = r
-	defer func() {
-		clearBackup = false
-		foreground = prevForeground
-		bind = prevBind
-		port = 6275
-		os.Stdin = origStdin
-	}()
 
 	out := captureStderr(t, func() {
 		if err := run(rootCmd, nil); err != nil {
@@ -1528,6 +1517,16 @@ func TestRun_ClearCancellation(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", stateDir)
 
+	prevClear, prevForeground, prevBind, prevPort := clearBackup, foreground, bind, port
+	origStdin := os.Stdin
+	t.Cleanup(func() {
+		clearBackup = prevClear
+		foreground = prevForeground
+		bind = prevBind
+		port = prevPort
+		os.Stdin = origStdin
+	})
+
 	port = findFreePort(t)
 	backupDir := filepath.Join(stateDir, "mo", "backup")
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
@@ -1539,26 +1538,15 @@ func TestRun_ClearCancellation(t *testing.T) {
 	}
 
 	clearBackup = true
-	prevForeground := foreground
 	foreground = true
-	prevBind := bind
 	bind = "127.0.0.1"
-	// User answers "n" to the confirmation.
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("Pipe: %v", err)
 	}
 	w.WriteString("n\n")
 	w.Close()
-	origStdin := os.Stdin
 	os.Stdin = r
-	defer func() {
-		clearBackup = false
-		foreground = prevForeground
-		bind = prevBind
-		port = 6275
-		os.Stdin = origStdin
-	}()
 
 	out := captureStderr(t, func() {
 		if err := run(rootCmd, nil); err != nil {
@@ -1601,7 +1589,7 @@ func TestRun_DangerouslyAllowRemoteAccessSkipsPrompt(t *testing.T) {
 		dangerouslyAllowRemoteAccess = prevDangerous
 	}()
 
-	ctx, cancel := contextWithTimeout(t, 3)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	rootCmd.SetContext(ctx)
 
@@ -1616,7 +1604,7 @@ func TestRun_DangerouslyAllowRemoteAccessSkipsPrompt(t *testing.T) {
 
 	// Let the server come up, then cancel.
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
-	if err := waitForServerUp(addr, 4); err != nil {
+	if err := waitForServerUp(addr, 4*time.Second); err != nil {
 		t.Fatalf("server did not start: %v", err)
 	}
 	cancel()
@@ -1625,7 +1613,7 @@ func TestRun_DangerouslyAllowRemoteAccessSkipsPrompt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("run returned: %v", err)
 		}
-	case <-timeAfter(5):
+	case <-time.After(5 * time.Second):
 		t.Fatal("run did not exit after context cancel")
 	}
 }

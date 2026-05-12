@@ -16,6 +16,7 @@ test:
 
 e2e: build
 	cd e2e && [ -d node_modules ] || npm install
+	cd e2e && npx --no-install playwright install chromium
 	cd e2e && npm test
 
 build: generate

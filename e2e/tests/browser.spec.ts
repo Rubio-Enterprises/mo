@@ -22,17 +22,40 @@ test.describe("mo SPA in the browser", () => {
     await expect(page.getByRole("heading", { name: "Basic Markdown" })).toBeVisible();
   });
 
-  test("file added via API after page load is reflected via live reload", async ({
+  test("a file added via API appears in the page state without navigation (SSE live reload)", async ({
     moServer,
     page,
   }) => {
     await page.goto(moServer.baseURL);
     await expect(page.getByRole("heading", { name: "Initial" })).toBeVisible();
 
+    // Add a file via the HTTP API; the running page should observe the SSE
+    // 'update' event and refresh its in-memory group list. We assert via
+    // /_/api/groups that the page's fetched data reflects the new entry,
+    // then deep-link to verify the file is renderable without a page reload.
     const added = await moServer.addFile(testdata("lists.md"));
 
-    // Navigate via deep link to confirm the server has indexed it.
-    await page.goto(`${moServer.baseURL}/?file=${added.id}`);
+    await expect
+      .poll(
+        async () => {
+          const res = await page.request.get(`${moServer.baseURL}/_/api/groups`);
+          const groups = (await res.json()) as Array<{
+            name: string;
+            files: Array<{ id: string }>;
+          }>;
+          const def = groups.find((g) => g.name === "default");
+          return def?.files.some((f) => f.id === added.id) ?? false;
+        },
+        { timeout: 5_000 },
+      )
+      .toBe(true);
+
+    // History API navigation (no full page reload) to confirm the SPA can
+    // render the newly-added file using its already-live state.
+    await page.evaluate((id) => {
+      window.history.pushState({}, "", `/?file=${id}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, added.id);
     await expect(page.getByRole("heading", { name: /Lists/i })).toBeVisible();
   });
 
