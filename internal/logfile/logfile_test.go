@@ -290,10 +290,15 @@ func TestRotateAfterWriteCloseDoesNotPanic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newRotatingWriter: %v", err)
 	}
+	// Writing 20 bytes with maxSize=10 must trigger rotation — the rotated
+	// backup is written as <filename>.1 (see rotatingWriter.backupName).
 	if _, err := w.Write([]byte("12345678901234567890")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("close: %v", err)
+	}
+	if _, err := os.Stat(filename + ".1"); err != nil {
+		t.Fatalf("expected rotated backup %q to exist: %v", filename+".1", err)
 	}
 }

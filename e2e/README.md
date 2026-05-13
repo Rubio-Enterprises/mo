@@ -48,7 +48,7 @@ real session.
 
 ## Adding tests
 
-- Prefer `test` from `./fixtures` (not the raw `playwright/test`) so each spec gets the
+- Prefer `test` from `./fixtures` (not the raw `@playwright/test`) so each spec gets the
   `moServer` fixture automatically.
 - Use `testdata("file.md")` to refer to fixtures in `<repo>/testdata`.
 - Use `moServer.addFile(absPath, group?)` to register files after the server has started.

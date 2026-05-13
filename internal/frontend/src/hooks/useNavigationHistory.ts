@@ -16,31 +16,27 @@ export function useNavigationHistory() {
     setForwardStack([]);
   }, []);
 
-  const goBack = useCallback((current: NavEntry): NavEntry | null => {
-    let entry: NavEntry | null = null;
-    setBackStack((prev) => {
-      if (prev.length === 0) return prev;
-      entry = prev[prev.length - 1];
-      return prev.slice(0, -1);
-    });
-    if (entry) {
+  const goBack = useCallback(
+    (current: NavEntry): NavEntry | null => {
+      if (backStack.length === 0) return null;
+      const entry = backStack[backStack.length - 1];
+      setBackStack(backStack.slice(0, -1));
       setForwardStack((prev) => [...prev, current]);
-    }
-    return entry;
-  }, []);
+      return entry;
+    },
+    [backStack],
+  );
 
-  const goForward = useCallback((current: NavEntry): NavEntry | null => {
-    let entry: NavEntry | null = null;
-    setForwardStack((prev) => {
-      if (prev.length === 0) return prev;
-      entry = prev[prev.length - 1];
-      return prev.slice(0, -1);
-    });
-    if (entry) {
+  const goForward = useCallback(
+    (current: NavEntry): NavEntry | null => {
+      if (forwardStack.length === 0) return null;
+      const entry = forwardStack[forwardStack.length - 1];
+      setForwardStack(forwardStack.slice(0, -1));
       setBackStack((prev) => [...prev, current]);
-    }
-    return entry;
-  }, []);
+      return entry;
+    },
+    [forwardStack],
+  );
 
   return {
     navigate,

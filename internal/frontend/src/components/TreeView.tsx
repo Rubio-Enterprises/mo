@@ -264,6 +264,7 @@ function FileNodeItem({
         style={{ paddingLeft: `${depth * 16 + 12}px` }}
         onClick={() => onFileSelect(file.id)}
         title={file.uploaded ? file.name : file.path}
+        aria-current={isActive ? "page" : undefined}
       >
         <FileIcon uploaded={file.uploaded} />
         <span className="overflow-hidden text-ellipsis whitespace-nowrap pr-6">

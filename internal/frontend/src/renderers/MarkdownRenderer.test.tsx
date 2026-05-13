@@ -92,13 +92,18 @@ describe("MarkdownRenderer", () => {
   });
 
   it("switches to raw view when isRawView is true", async () => {
-    render(
+    const { container } = render(
       <MarkdownRenderer {...baseProps} isRawView={true} content={"# Visible\n\nRaw view body"} />,
     );
     // In raw view, content is shown highlighted as plain text — the heading
     // text should not become an <h1> element.
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "Visible" })).not.toBeInTheDocument();
+    });
+    // Positive assertion: raw view should route through shiki (mocked to a
+    // <pre class="shiki"> element), so confirm the highlighted block rendered.
+    await waitFor(() => {
+      expect(container.querySelector("pre.shiki")).toBeInTheDocument();
     });
   });
 

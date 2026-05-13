@@ -4,22 +4,29 @@ import userEvent from "@testing-library/user-event";
 import { RestartButton } from "./RestartButton";
 
 describe("RestartButton", () => {
-  let originalLocation: Location;
-
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    originalLocation = window.location;
+    // jsdom marks window.location.reload as non-configurable, so spyOn fails
+    // directly. Replace window.location with a stubbed proxy that delegates
+    // everything but reload, which becomes a mock fn. unstubGlobals: true in
+    // vite.config.ts auto-restores window.location after each test.
+    const realLocation = window.location;
+    vi.stubGlobal("location", {
+      ...Object.fromEntries(
+        ["href", "origin", "protocol", "host", "hostname", "port", "pathname", "search", "hash"]
+          .map((k) => [k, realLocation[k as keyof Location]]),
+      ),
+      reload: vi.fn(),
+      assign: vi.fn(),
+      replace: vi.fn(),
+    });
   });
 
   afterEach(() => {
+    vi.clearAllTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-    Object.defineProperty(window, "location", {
-      value: originalLocation,
-      writable: true,
-      configurable: true,
-    });
   });
 
   function mockFetch(handler: (url: string, init?: RequestInit) => Promise<Response>) {
@@ -67,7 +74,7 @@ describe("RestartButton", () => {
       return new Response(null, { status: 404 });
     });
 
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTimeAsync });
     render(<RestartButton />);
     await user.click(screen.getByRole("button"));
 
@@ -85,7 +92,7 @@ describe("RestartButton", () => {
       return new Response(null, { status: 404 });
     });
 
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTimeAsync });
     render(<RestartButton />);
     await user.click(screen.getByRole("button"));
 
@@ -114,14 +121,7 @@ describe("RestartButton", () => {
       return new Response(null, { status: 404 });
     });
 
-    const reload = vi.fn();
-    Object.defineProperty(window, "location", {
-      value: { reload },
-      writable: true,
-      configurable: true,
-    });
-
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTimeAsync });
     render(<RestartButton />);
     await user.click(screen.getByRole("button"));
 
@@ -138,6 +138,6 @@ describe("RestartButton", () => {
       await vi.advanceTimersByTimeAsync(1000);
     });
 
-    await waitFor(() => expect(reload).toHaveBeenCalled());
+    await waitFor(() => expect(window.location.reload).toHaveBeenCalled());
   });
 });

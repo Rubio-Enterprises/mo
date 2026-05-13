@@ -179,7 +179,10 @@ func init() {
 }
 
 func run(cmd *cobra.Command, args []string) error {
-	if !foreground || restore != "" {
+	// Set up the log file whenever a server may be started (regardless of
+	// foreground mode) so that --status can discover it via the log directory.
+	// We skip this only for client-side commands that do not start a server.
+	if !statusServer && !shutdownServer && !restartServer && !clearBackup && !closeFiles && len(unwatchPatterns) == 0 {
 		logCleanup, err := logfile.Setup(port)
 		if err != nil {
 			slog.Warn("failed to setup log file, using stderr", "error", err)

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useActiveHeading } from "./useActiveHeading";
 
@@ -30,8 +30,7 @@ class MockIntersectionObserver {
 
 beforeEach(() => {
   activeObservers = [];
-  // @ts-expect-error - test polyfill
-  globalThis.IntersectionObserver = MockIntersectionObserver;
+  vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
 });
 
 afterEach(() => {

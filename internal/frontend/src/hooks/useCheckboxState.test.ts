@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useCheckboxState } from "./useCheckboxState";
 
@@ -9,11 +9,7 @@ function mockFetch(handler: (url: string, init?: RequestInit) => Promise<Respons
   );
 }
 
-beforeEach(() => {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
-});
 afterEach(() => {
-  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 

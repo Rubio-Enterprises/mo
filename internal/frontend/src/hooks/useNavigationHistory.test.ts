@@ -52,23 +52,17 @@ describe("useNavigationHistory", () => {
     expect(result.current.canGoBack).toBe(false);
   });
 
-  // Known limitation: goBack/goForward read the popped entry inside the
-  // setState updater closure, but the updater runs after the dispatch returns
-  // under React 18's automatic batching. The return value reaches the caller
-  // as `null` even when the stack was non-empty. The observable state
-  // transitions are correct; only the return value is broken.
-  // This test pins the current behavior so a future fix to the hook will
-  // surface as a deliberate breaking change in this assertion.
-  it("goBack returns null even when the stack is non-empty (known sync-capture limitation)", () => {
+  it("goBack returns the previously pushed entry when the stack is non-empty", () => {
     const { result } = renderHook(() => useNavigationHistory());
 
-    act(() => result.current.navigate(entry("a")));
+    const pushed = entry("a");
+    act(() => result.current.navigate(pushed));
 
     let returned: NavEntry | null | undefined;
     act(() => {
       returned = result.current.goBack(entry("current"));
     });
-    expect(returned).toBeNull();
+    expect(returned).toEqual(pushed);
   });
 
   it("goForward on empty stack returns null and leaves state untouched", () => {

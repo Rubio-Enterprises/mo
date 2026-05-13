@@ -1,4 +1,4 @@
-import { defineConfig, devices } from "playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,6 +25,8 @@ export default defineConfig({
   workers: process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? [["dot"], ["list"]] : "list",
 
+  globalSetup: "./global-setup.ts",
+
   use: {
     // BaseURL is overridden per-test via the moServer fixture.
     actionTimeout: 5_000,
@@ -32,6 +34,9 @@ export default defineConfig({
     trace: process.env.CI ? "on-first-retry" : "retain-on-failure",
     screenshot: "only-on-failure",
     video: "off",
+    // Pin colorScheme so theme-toggle tests have a deterministic starting state
+    // regardless of the host OS preference.
+    colorScheme: "light",
   },
 
   // Set REPO_ROOT for fixtures to find the binary and testdata.

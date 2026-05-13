@@ -280,36 +280,40 @@ func TestRemovePropagatesNonNotExistError(t *testing.T) {
 }
 
 func TestSaveTempFileCleanedUpOnFailure(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("running as root bypasses permission errors")
-	}
 	root := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", root)
 
-	// Make the backup directory read-only so Rename fails.
-	backupDir := filepath.Join(root, "mo", "backup")
-	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+	// Pre-create the destination path as a non-empty directory so os.Rename
+	// fails — Rename cannot replace a non-empty directory with a file.
+	dest, err := Path(123)
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+	if err := os.MkdirAll(dest, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	// Pre-populate with a file we can later check for orphans.
-	data := testData{Groups: map[string][]string{"default": {"/a.md"}}}
-	if err := Save(123, data); err != nil {
-		t.Fatalf("initial Save: %v", err)
-	}
-	// Now make the existing file path itself unwritable so Rename can't overwrite.
-	// On most filesystems Rename will succeed regardless; we just ensure no
-	// temp files are left behind in a successful overwrite.
-	if err := Save(123, data); err != nil {
-		t.Fatalf("second Save: %v", err)
+	// Put a file inside the destination dir so Rename definitely cannot
+	// replace it (an empty directory can be replaced by Rename on some
+	// platforms).
+	if err := os.WriteFile(filepath.Join(dest, "sentinel"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile sentinel: %v", err)
 	}
 
+	data := testData{Groups: map[string][]string{"default": {"/a.md"}}}
+	if err := Save(123, data); err == nil {
+		t.Fatal("Save should fail when destination is a non-empty directory")
+	}
+
+	// Confirm the temp file was cleaned up — no mo-backup-*.tmp entries
+	// should remain in the backup directory.
+	backupDir := filepath.Dir(dest)
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
 	}
 	for _, e := range entries {
-		if strings.Contains(e.Name(), "mo-backup-") {
-			t.Fatalf("temp file %q should not remain after successful Save", e.Name())
+		if strings.HasPrefix(e.Name(), "mo-backup-") {
+			t.Fatalf("temp file %q should not remain after failed Save", e.Name())
 		}
 	}
 }

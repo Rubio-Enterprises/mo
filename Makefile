@@ -15,7 +15,7 @@ test:
 	go test ./... -coverprofile=coverage.out -covermode=count -count=1
 
 e2e: build
-	cd e2e && [ -d node_modules ] || npm install
+	cd e2e && [ -d node_modules ] || npm ci
 	cd e2e && npx --no-install playwright install chromium
 	cd e2e && npm test
 

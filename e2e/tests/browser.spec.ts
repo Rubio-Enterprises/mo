@@ -22,17 +22,20 @@ test.describe("mo SPA in the browser", () => {
     await expect(page.getByRole("heading", { name: "Basic Markdown" })).toBeVisible();
   });
 
-  test("a file added via API appears in the page state without navigation (SSE live reload)", async ({
+  test("SSE update triggers auto-select of newly added file", async ({
     moServer,
     page,
   }) => {
     await page.goto(moServer.baseURL);
     await expect(page.getByRole("heading", { name: "Initial" })).toBeVisible();
 
-    // Add a file via the HTTP API; the running page should observe the SSE
-    // 'update' event and refresh its in-memory group list. We assert via
-    // /_/api/groups that the page's fetched data reflects the new entry,
-    // then deep-link to verify the file is renderable without a page reload.
+    // Add a file via the HTTP API. The running page should observe the SSE
+    // 'update' event, refresh its in-memory group list, and (per
+    // App.tsx#loadGroups) auto-select the newly-added file because it is the
+    // only new entry in the currently-active group. We first confirm via
+    // /_/api/groups that the server-side state reflects the new entry, then
+    // assert that the SPA's rendered content has switched to the new file
+    // without any explicit navigation from the test.
     const added = await moServer.addFile(testdata("lists.md"));
 
     await expect
@@ -50,13 +53,10 @@ test.describe("mo SPA in the browser", () => {
       )
       .toBe(true);
 
-    // History API navigation (no full page reload) to confirm the SPA can
-    // render the newly-added file using its already-live state.
-    await page.evaluate((id) => {
-      window.history.pushState({}, "", `/?file=${id}`);
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    }, added.id);
-    await expect(page.getByRole("heading", { name: /Lists/i })).toBeVisible();
+    // The SPA's SSE 'update' handler should auto-select the newly-added file
+    // (it is the only new entry in the active 'default' group), so the H1
+    // from lists.md ("Lists") should appear without any test-driven navigation.
+    await expect(page.getByRole("heading", { name: /^Lists$/ })).toBeVisible();
   });
 
   test("theme toggle switches the html data-theme attribute", async ({ moServer, page }) => {

@@ -148,7 +148,7 @@ describe("TreeView", () => {
     harness({ files, activeFileId: "active" });
 
     const activeBtn = screen.getByText("active.md").closest("button");
-    expect(activeBtn?.className).toContain("font-semibold");
+    expect(activeBtn).toHaveAttribute("aria-current", "page");
   });
 
   it("shows file title when showTitle is true and title is set", () => {

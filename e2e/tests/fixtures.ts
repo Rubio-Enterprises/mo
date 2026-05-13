@@ -1,4 +1,4 @@
-import { test as base } from "playwright/test";
+import { test as base } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -159,5 +159,5 @@ export const test = base.extend<Fixtures>({
   },
 });
 
-export { expect } from "playwright/test";
+export { expect } from "@playwright/test";
 export const testdata = (file: string) => join(TESTDATA, file);

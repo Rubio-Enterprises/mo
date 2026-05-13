@@ -12,10 +12,21 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/k1LoW/mo/internal/server"
+)
+
+// stdoutMu and stderrMu serialize swaps of os.Stdout / os.Stderr by the capture
+// helpers so the global FD state is mutated atomically with respect to other
+// invocations, even when one of them runs in a goroutine (see captureStdout /
+// captureStderr). Separate mutexes are used so that nesting captureStdout
+// inside captureStderr (and vice versa) does not deadlock.
+var (
+	stdoutMu sync.Mutex
+	stderrMu sync.Mutex
 )
 
 func newTCPListener() (net.Listener, error) {
@@ -40,8 +51,14 @@ func waitForServerUp(addr string, timeout time.Duration) error {
 
 // captureStdout swaps os.Stdout for an os.Pipe, runs fn, and returns whatever
 // was written. Helpful for asserting on text/JSON output.
+//
+// The package-level stdMu lock makes the swap-and-restore atomic with respect
+// to any other capture helper invocation, so tests can safely run these from
+// goroutines without racing on os.Stdout/os.Stderr.
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
+	stdoutMu.Lock()
+	defer stdoutMu.Unlock()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
@@ -62,6 +79,8 @@ func captureStdout(t *testing.T, fn func()) string {
 
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
+	stderrMu.Lock()
+	defer stderrMu.Unlock()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
@@ -287,7 +306,7 @@ func TestDoShutdownAndDoRestart(t *testing.T) {
 		t.Run(tc.name+" happy path", func(t *testing.T) {
 			mux := http.NewServeMux()
 			mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
-				w.Write(statusJSON(nil))
+				w.Write(statusJSON(nil)) //nolint:errcheck
 			})
 			mux.HandleFunc(tc.path, func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusAccepted)
@@ -304,7 +323,7 @@ func TestDoShutdownAndDoRestart(t *testing.T) {
 		t.Run(tc.name+" unexpected status returns error", func(t *testing.T) {
 			mux := http.NewServeMux()
 			mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
-				w.Write(statusJSON(nil))
+				w.Write(statusJSON(nil)) //nolint:errcheck
 			})
 			mux.HandleFunc(tc.path, func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -441,7 +460,7 @@ func TestTryAddToExisting(t *testing.T) {
 		var postedFiles int
 		mux := http.NewServeMux()
 		mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
-			w.Write(statusJSON([]map[string]any{{"name": "default"}}))
+			w.Write(statusJSON([]map[string]any{{"name": "default"}})) //nolint:errcheck
 		})
 		mux.HandleFunc("/_/api/files", func(w http.ResponseWriter, r *http.Request) {
 			postedFiles++
@@ -453,8 +472,12 @@ func TestTryAddToExisting(t *testing.T) {
 		// Force no browser
 		prev := noOpen
 		noOpen = true
-		t.Cleanup(func() { noOpen = prev })
+		prevTarget := target
 		target = "default"
+		t.Cleanup(func() {
+			noOpen = prev
+			target = prevTarget
+		})
 
 		captureStderr(t, func() {
 			captureStdout(t, func() {
@@ -474,7 +497,7 @@ func TestDoUnwatch(t *testing.T) {
 	t.Run("happy path returns no error", func(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
-			w.Write(statusJSON(nil))
+			w.Write(statusJSON(nil)) //nolint:errcheck
 		})
 		mux.HandleFunc("/_/api/patterns", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodDelete {
@@ -497,7 +520,7 @@ func TestDoUnwatch(t *testing.T) {
 	t.Run("404 response returns descriptive error", func(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
-			w.Write(statusJSON(nil))
+			w.Write(statusJSON(nil)) //nolint:errcheck
 		})
 		mux.HandleFunc("/_/api/patterns", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
@@ -514,7 +537,7 @@ func TestDoUnwatch(t *testing.T) {
 	t.Run("unexpected status returns error", func(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
-			w.Write(statusJSON(nil))
+			w.Write(statusJSON(nil)) //nolint:errcheck
 		})
 		mux.HandleFunc("/_/api/patterns", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -557,7 +580,7 @@ func TestDoClose(t *testing.T) {
 	t.Run("happy path returns closed paths", func(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
-			w.Write(statusBody())
+			w.Write(statusBody()) //nolint:errcheck
 		})
 		mux.HandleFunc("/_/api/files/id1", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodDelete {
@@ -580,7 +603,7 @@ func TestDoClose(t *testing.T) {
 	t.Run("file not in group returns aggregated error", func(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
-			w.Write(statusBody())
+			w.Write(statusBody()) //nolint:errcheck
 		})
 		srv := newFullFakeServer(t, mux)
 		addr := strings.TrimPrefix(srv.URL, "http://")
@@ -604,7 +627,7 @@ func TestDoClose(t *testing.T) {
 	t.Run("404 on delete returns error", func(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
-			w.Write(statusBody())
+			w.Write(statusBody()) //nolint:errcheck
 		})
 		mux.HandleFunc("/_/api/files/id1", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
@@ -1495,7 +1518,10 @@ func TestRun_ClearWithBackupNoServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Pipe: %v", err)
 	}
-	w.WriteString("y\n")
+	t.Cleanup(func() { r.Close() })
+	if _, err := w.WriteString("y\n"); err != nil {
+		t.Fatalf("WriteString: %v", err)
+	}
 	w.Close()
 	os.Stdin = r
 
@@ -1544,7 +1570,10 @@ func TestRun_ClearCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Pipe: %v", err)
 	}
-	w.WriteString("n\n")
+	t.Cleanup(func() { r.Close() })
+	if _, err := w.WriteString("n\n"); err != nil {
+		t.Fatalf("WriteString: %v", err)
+	}
 	w.Close()
 	os.Stdin = r
 

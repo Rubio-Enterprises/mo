@@ -133,8 +133,20 @@ test.describe("mo HTTP API", () => {
     expect(res.status()).toBe(404);
   });
 
-  test("POST /_/api/files with missing body returns 4xx", async ({ moServer, request }) => {
-    const res = await request.post(`${moServer.baseURL}/_/api/files`, { data: {} });
+  test("POST /_/api/files with a non-existent path returns 4xx", async ({
+    moServer,
+    request,
+  }) => {
+    // handleAddFile in internal/server/server.go calls os.Stat on the resolved
+    // absolute path and returns 400 "file not found" when the path does not
+    // exist. This is a deterministic invalid-request case (unlike an empty
+    // body, which resolves to the server's CWD and happens to be a directory).
+    const res = await request.post(`${moServer.baseURL}/_/api/files`, {
+      data: {
+        path: "/__nonexistent_path_for_e2e__/missing.md",
+        group: "default",
+      },
+    });
     expect(res.status()).toBeGreaterThanOrEqual(400);
     expect(res.status()).toBeLessThan(500);
   });
