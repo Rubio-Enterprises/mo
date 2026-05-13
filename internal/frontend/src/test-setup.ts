@@ -28,4 +28,6 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
+  sessionStorage.clear();
 });

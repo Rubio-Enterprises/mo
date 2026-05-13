@@ -73,6 +73,9 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     environment: "jsdom",
     setupFiles: ["src/test-setup.ts"],
+    // Auto-restore globals stubbed via vi.stubGlobal so tests can't bleed
+    // mocked fetch/window state into each other.
+    unstubGlobals: true,
     coverage: {
       provider: "v8",
       include: ["src/utils/**", "src/hooks/**", "src/components/**", "src/renderers/**"],

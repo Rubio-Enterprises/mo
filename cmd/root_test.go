@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -413,24 +412,13 @@ func TestEmitServeOutput(t *testing.T) {
 		jsonOutput = true
 		defer func() { jsonOutput = false }()
 
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		oldStdout := os.Stdout
-		os.Stdout = w
-
-		emitServeOutput("localhost:6275", entries, true)
-
-		w.Close()
-		os.Stdout = oldStdout
-
-		var buf bytes.Buffer
-		buf.ReadFrom(r) //nolint:errcheck
+		out := captureStdout(t, func() {
+			emitServeOutput("localhost:6275", entries, true)
+		})
 
 		var output jsonServeOutput
-		if err := json.Unmarshal(buf.Bytes(), &output); err != nil {
-			t.Fatalf("invalid JSON: %v\noutput: %s", err, buf.String())
+		if err := json.Unmarshal([]byte(out), &output); err != nil {
+			t.Fatalf("invalid JSON: %v\noutput: %s", err, out)
 		}
 		if output.URL != "http://localhost:6275" {
 			t.Errorf("got URL %q, want %q", output.URL, "http://localhost:6275")
@@ -446,54 +434,30 @@ func TestEmitServeOutput(t *testing.T) {
 	t.Run("text mode with printURL prints URL line", func(t *testing.T) {
 		jsonOutput = false
 
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
+		out := captureStdout(t, func() {
+			emitServeOutput("localhost:6275", entries, true)
+		})
+
+		if !strings.Contains(out, "http://localhost:6275\n") {
+			t.Errorf("expected URL line in output, got %q", out)
 		}
-		oldStdout := os.Stdout
-		os.Stdout = w
-
-		emitServeOutput("localhost:6275", entries, true)
-
-		w.Close()
-		os.Stdout = oldStdout
-
-		var buf bytes.Buffer
-		buf.ReadFrom(r) //nolint:errcheck
-
-		output := buf.String()
-		if !strings.Contains(output, "http://localhost:6275\n") {
-			t.Errorf("expected URL line in output, got %q", output)
-		}
-		if !strings.Contains(output, "README.md") {
-			t.Errorf("expected deeplink in output, got %q", output)
+		if !strings.Contains(out, "README.md") {
+			t.Errorf("expected deeplink in output, got %q", out)
 		}
 	})
 
 	t.Run("text mode without printURL omits URL line", func(t *testing.T) {
 		jsonOutput = false
 
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
+		out := captureStdout(t, func() {
+			emitServeOutput("localhost:6275", entries, false)
+		})
+
+		if strings.Contains(out, "http://localhost:6275\n") {
+			t.Errorf("URL line should not appear, got %q", out)
 		}
-		oldStdout := os.Stdout
-		os.Stdout = w
-
-		emitServeOutput("localhost:6275", entries, false)
-
-		w.Close()
-		os.Stdout = oldStdout
-
-		var buf bytes.Buffer
-		buf.ReadFrom(r) //nolint:errcheck
-
-		output := buf.String()
-		if strings.Contains(output, "http://localhost:6275\n") {
-			t.Errorf("URL line should not appear, got %q", output)
-		}
-		if !strings.Contains(output, "README.md") {
-			t.Errorf("expected deeplink in output, got %q", output)
+		if !strings.Contains(out, "README.md") {
+			t.Errorf("expected deeplink in output, got %q", out)
 		}
 	})
 
@@ -505,23 +469,12 @@ func TestEmitServeOutput(t *testing.T) {
 			{URL: "http://localhost:6275/?file=xyz", Path: "", Name: "upload.md"},
 		}
 
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		oldStdout := os.Stdout
-		os.Stdout = w
-
-		emitServeOutput("localhost:6275", uploaded, true)
-
-		w.Close()
-		os.Stdout = oldStdout
-
-		var buf bytes.Buffer
-		buf.ReadFrom(r) //nolint:errcheck
+		out := captureStdout(t, func() {
+			emitServeOutput("localhost:6275", uploaded, true)
+		})
 
 		var output jsonServeOutput
-		if err := json.Unmarshal(buf.Bytes(), &output); err != nil {
+		if err := json.Unmarshal([]byte(out), &output); err != nil {
 			t.Fatalf("invalid JSON: %v", err)
 		}
 		if output.Files[0].Path != "" {

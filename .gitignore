@@ -3,6 +3,9 @@ internal/static/dist/**/*
 internal/frontend/CREDITS_FRONTEND
 coverage.out
 mo
+e2e/node_modules
+e2e/test-results
+e2e/playwright-report
 
 # BEGIN agent-sandbox managed
 .DS_Store

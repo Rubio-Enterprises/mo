@@ -14,6 +14,11 @@ test:
 	cd internal/frontend && pnpm install && pnpm run test:coverage
 	go test ./... -coverprofile=coverage.out -covermode=count -count=1
 
+e2e: build
+	cd e2e && [ -d node_modules ] || npm ci
+	cd e2e && npx --no-install playwright install chromium
+	cd e2e && npm test
+
 build: generate
 	go build -ldflags=$(BUILD_LDFLAGS) -trimpath -o mo .
 
@@ -47,4 +52,4 @@ credits: depsdev generate
 prerelease_for_tagpr: credits
 	git add CHANGELOG.md CREDITS go.mod go.sum
 
-.PHONY: default ci generate test build dev screenshot lint fmt fmt-check depsdev credits prerelease_for_tagpr
+.PHONY: default ci generate test e2e build dev screenshot lint fmt fmt-check depsdev credits prerelease_for_tagpr
