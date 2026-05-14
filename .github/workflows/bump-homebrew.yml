@@ -54,7 +54,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Rubio-Enterprises/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
