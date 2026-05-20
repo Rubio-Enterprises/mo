@@ -17,12 +17,14 @@
 ### Phase 1: Backend
 
 #### New Files
+
 | File | Responsibility |
 |------|---------------|
 | `internal/server/filetype.go` | `FileType` named string type, constants, `DetectFileType()` extension mapping |
 | `internal/server/filetype_test.go` | Unit tests for type detection |
 
 #### Modified Files
+
 | File | Changes |
 |------|---------|
 | `internal/server/server.go` | Add `Type` field to `FileEntry`, rework `AddFile` binary check, add `handleFileServe` endpoint, rename `handleFileRaw` → `handleFileAsset`, add content endpoint type guard, update CSP, update route registration |
@@ -31,6 +33,7 @@
 ### Phase 2: Frontend Extraction
 
 #### New Files
+
 | File | Responsibility |
 |------|---------------|
 | `internal/frontend/src/renderers/registry.ts` | Renderer registry: type definitions, feature flags, registry map |
@@ -43,6 +46,7 @@
 | `internal/frontend/src/components/FileViewer.test.tsx` | Dispatcher tests |
 
 #### Modified Files
+
 | File | Changes |
 |------|---------|
 | `internal/frontend/src/hooks/useApi.ts` | Add `type` field to `FileEntry`, add `rawFileUrl()` builder, add `FileType` type export |
@@ -51,6 +55,7 @@
 | `internal/frontend/src/components/App.tsx` | Replace `MarkdownViewer` with `FileViewer`, update imports, pass features-aware props |
 
 #### Deleted Files
+
 | File | Reason |
 |------|--------|
 | `internal/frontend/src/components/MarkdownViewer.tsx` | Replaced by FileViewer + MarkdownRenderer + CodeRenderer |
@@ -58,6 +63,7 @@
 ### Phase 3: PDF Support
 
 #### New Files
+
 | File | Responsibility |
 |------|---------------|
 | `internal/frontend/src/renderers/PdfRenderer.tsx` | PDF rendering via react-pdf, lazy-loaded |
@@ -68,6 +74,7 @@
 | `testdata/sample.pdf` | Test PDF file |
 
 #### Modified Files
+
 | File | Changes |
 |------|---------|
 | `internal/frontend/package.json` | Add `react-pdf` dependency |
@@ -80,6 +87,7 @@
 ### Task 1: File Type Detection
 
 **Files:**
+
 - Create: `internal/server/filetype.go`
 - Create: `internal/server/filetype_test.go`
 
@@ -93,71 +101,71 @@ package server
 import "testing"
 
 func TestDetectFileType(t *testing.T) {
-	tests := []struct {
-		path string
-		want FileType
-	}{
-		// Markdown
-		{"/docs/README.md", FileTypeMarkdown},
-		{"/docs/page.mdx", FileTypeMarkdown},
-		{"/docs/notes.markdown", FileTypeMarkdown},
-		{"/docs/notes.mdown", FileTypeMarkdown},
-		{"/docs/notes.mkdn", FileTypeMarkdown},
-		{"/docs/notes.mkd", FileTypeMarkdown},
+ tests := []struct {
+  path string
+  want FileType
+ }{
+  // Markdown
+  {"/docs/README.md", FileTypeMarkdown},
+  {"/docs/page.mdx", FileTypeMarkdown},
+  {"/docs/notes.markdown", FileTypeMarkdown},
+  {"/docs/notes.mdown", FileTypeMarkdown},
+  {"/docs/notes.mkdn", FileTypeMarkdown},
+  {"/docs/notes.mkd", FileTypeMarkdown},
 
-		// PDF
-		{"/files/report.pdf", FileTypePDF},
+  // PDF
+  {"/files/report.pdf", FileTypePDF},
 
-		// Image
-		{"/img/photo.png", FileTypeImage},
-		{"/img/photo.jpg", FileTypeImage},
-		{"/img/photo.jpeg", FileTypeImage},
-		{"/img/photo.gif", FileTypeImage},
-		{"/img/photo.webp", FileTypeImage},
-		{"/img/icon.ico", FileTypeImage},
-		{"/img/icon.bmp", FileTypeImage},
+  // Image
+  {"/img/photo.png", FileTypeImage},
+  {"/img/photo.jpg", FileTypeImage},
+  {"/img/photo.jpeg", FileTypeImage},
+  {"/img/photo.gif", FileTypeImage},
+  {"/img/photo.webp", FileTypeImage},
+  {"/img/icon.ico", FileTypeImage},
+  {"/img/icon.bmp", FileTypeImage},
 
-		// Code
-		{"/src/main.go", FileTypeCode},
-		{"/src/app.ts", FileTypeCode},
-		{"/src/style.css", FileTypeCode},
-		{"/src/config.json", FileTypeCode},
-		{"/src/data.yaml", FileTypeCode},
-		{"/src/image.svg", FileTypeCode},
-		{"/Dockerfile", FileTypeCode},
-		{"/Makefile", FileTypeCode},
+  // Code
+  {"/src/main.go", FileTypeCode},
+  {"/src/app.ts", FileTypeCode},
+  {"/src/style.css", FileTypeCode},
+  {"/src/config.json", FileTypeCode},
+  {"/src/data.yaml", FileTypeCode},
+  {"/src/image.svg", FileTypeCode},
+  {"/Dockerfile", FileTypeCode},
+  {"/Makefile", FileTypeCode},
 
-		// Unknown
-		{"/files/data.xyz", FileTypeUnknown},
-		{"/files/noext", FileTypeUnknown},
-		{"/.gitignore", FileTypeUnknown},
+  // Unknown
+  {"/files/data.xyz", FileTypeUnknown},
+  {"/files/noext", FileTypeUnknown},
+  {"/.gitignore", FileTypeUnknown},
 
-		// Case insensitivity
-		{"/docs/README.MD", FileTypeMarkdown},
-		{"/files/report.PDF", FileTypePDF},
-		{"/img/photo.PNG", FileTypeImage},
-		{"/src/main.Go", FileTypeCode},
-	}
+  // Case insensitivity
+  {"/docs/README.MD", FileTypeMarkdown},
+  {"/files/report.PDF", FileTypePDF},
+  {"/img/photo.PNG", FileTypeImage},
+  {"/src/main.Go", FileTypeCode},
+ }
 
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			got := DetectFileType(tt.path)
-			if got != tt.want {
-				t.Errorf("DetectFileType(%q) = %q, want %q", tt.path, got, tt.want)
-			}
-		})
-	}
+ for _, tt := range tests {
+  t.Run(tt.path, func(t *testing.T) {
+   got := DetectFileType(tt.path)
+   if got != tt.want {
+    t.Errorf("DetectFileType(%q) = %q, want %q", tt.path, got, tt.want)
+   }
+  })
+ }
 }
 
 func TestDetectFileType_NeverReturnsBinary(t *testing.T) {
-	// FileTypeBinary is only produced by promotion in AddFile, never by DetectFileType.
-	paths := []string{"/a.bin", "/b.exe", "/c.dll", "/d.so", "/e.dat", "/f"}
-	for _, p := range paths {
-		got := DetectFileType(p)
-		if got == FileTypeBinary {
-			t.Errorf("DetectFileType(%q) = %q, must never return FileTypeBinary", p, got)
-		}
-	}
+ // FileTypeBinary is only produced by promotion in AddFile, never by DetectFileType.
+ paths := []string{"/a.bin", "/b.exe", "/c.dll", "/d.so", "/e.dat", "/f"}
+ for _, p := range paths {
+  got := DetectFileType(p)
+  if got == FileTypeBinary {
+   t.Errorf("DetectFileType(%q) = %q, must never return FileTypeBinary", p, got)
+  }
+ }
 }
 ```
 
@@ -174,87 +182,87 @@ Create `internal/server/filetype.go`:
 package server
 
 import (
-	"path/filepath"
-	"strings"
+ "path/filepath"
+ "strings"
 )
 
 // FileType represents the category of a file for rendering purposes.
 type FileType string
 
 const (
-	FileTypeMarkdown FileType = "markdown"
-	FileTypeCode     FileType = "code"
-	FileTypePDF      FileType = "pdf"
-	FileTypeImage    FileType = "image"
-	FileTypeBinary   FileType = "binary"
-	FileTypeUnknown  FileType = "unknown"
+ FileTypeMarkdown FileType = "markdown"
+ FileTypeCode     FileType = "code"
+ FileTypePDF      FileType = "pdf"
+ FileTypeImage    FileType = "image"
+ FileTypeBinary   FileType = "binary"
+ FileTypeUnknown  FileType = "unknown"
 )
 
 // DetectFileType determines the file type from the file path's extension.
 // It never returns FileTypeBinary — that type is only produced by the
 // unknown→binary promotion in AddFile when null bytes are detected.
 func DetectFileType(path string) FileType {
-	base := filepath.Base(path)
-	lower := strings.ToLower(base)
+ base := filepath.Base(path)
+ lower := strings.ToLower(base)
 
-	// Check basename-matched types first (Dockerfile, Makefile).
-	if lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.") {
-		return FileTypeCode
-	}
-	if lower == "makefile" || lower == "gnumakefile" {
-		return FileTypeCode
-	}
+ // Check basename-matched types first (Dockerfile, Makefile).
+ if lower == "dockerfile" || strings.HasPrefix(lower, "dockerfile.") {
+  return FileTypeCode
+ }
+ if lower == "makefile" || lower == "gnumakefile" {
+  return FileTypeCode
+ }
 
-	ext := strings.ToLower(filepath.Ext(base))
-	if ext == "" {
-		return FileTypeUnknown
-	}
-	ext = ext[1:] // strip leading dot
+ ext := strings.ToLower(filepath.Ext(base))
+ if ext == "" {
+  return FileTypeUnknown
+ }
+ ext = ext[1:] // strip leading dot
 
-	if markdownExts[ext] {
-		return FileTypeMarkdown
-	}
-	if ext == "pdf" {
-		return FileTypePDF
-	}
-	if imageExts[ext] {
-		return FileTypeImage
-	}
-	if codeExts[ext] {
-		return FileTypeCode
-	}
-	return FileTypeUnknown
+ if markdownExts[ext] {
+  return FileTypeMarkdown
+ }
+ if ext == "pdf" {
+  return FileTypePDF
+ }
+ if imageExts[ext] {
+  return FileTypeImage
+ }
+ if codeExts[ext] {
+  return FileTypeCode
+ }
+ return FileTypeUnknown
 }
 
 var markdownExts = map[string]bool{
-	"md": true, "mdx": true, "markdown": true,
-	"mdown": true, "mkdn": true, "mkd": true,
+ "md": true, "mdx": true, "markdown": true,
+ "mdown": true, "mkdn": true, "mkd": true,
 }
 
 var imageExts = map[string]bool{
-	"png": true, "jpg": true, "jpeg": true, "gif": true,
-	"webp": true, "ico": true, "bmp": true,
+ "png": true, "jpg": true, "jpeg": true, "gif": true,
+ "webp": true, "ico": true, "bmp": true,
 }
 
 // codeExts mirrors the frontend detectLanguage() map in filetype.ts.
 // SVG is classified as code (syntax-highlighted XML), not image.
 var codeExts = map[string]bool{
-	"ts": true, "tsx": true, "js": true, "jsx": true, "mjs": true, "cjs": true,
-	"css": true, "scss": true, "less": true, "sass": true,
-	"html": true, "htm": true, "xml": true, "svg": true, "xsl": true,
-	"json": true, "jsonc": true, "json5": true,
-	"yaml": true, "yml": true, "toml": true, "ini": true,
-	"go": true, "rs": true, "py": true, "rb": true, "java": true, "kt": true,
-	"c": true, "cpp": true, "cc": true, "cxx": true, "h": true, "hpp": true,
-	"cs": true, "swift": true, "m": true,
-	"sh": true, "bash": true, "zsh": true, "fish": true, "ps1": true, "bat": true, "cmd": true,
-	"sql": true, "graphql": true, "gql": true,
-	"r": true, "lua": true, "perl": true, "pl": true, "php": true,
-	"ex": true, "exs": true, "erl": true, "hs": true, "clj": true, "scala": true,
-	"dart": true, "zig": true, "nim": true, "v": true,
-	"tf": true, "hcl": true, "proto": true,
-	"diff": true, "patch": true, "log": true,
-	"vue": true, "svelte": true, "astro": true,
+ "ts": true, "tsx": true, "js": true, "jsx": true, "mjs": true, "cjs": true,
+ "css": true, "scss": true, "less": true, "sass": true,
+ "html": true, "htm": true, "xml": true, "svg": true, "xsl": true,
+ "json": true, "jsonc": true, "json5": true,
+ "yaml": true, "yml": true, "toml": true, "ini": true,
+ "go": true, "rs": true, "py": true, "rb": true, "java": true, "kt": true,
+ "c": true, "cpp": true, "cc": true, "cxx": true, "h": true, "hpp": true,
+ "cs": true, "swift": true, "m": true,
+ "sh": true, "bash": true, "zsh": true, "fish": true, "ps1": true, "bat": true, "cmd": true,
+ "sql": true, "graphql": true, "gql": true,
+ "r": true, "lua": true, "perl": true, "pl": true, "php": true,
+ "ex": true, "exs": true, "erl": true, "hs": true, "clj": true, "scala": true,
+ "dart": true, "zig": true, "nim": true, "v": true,
+ "tf": true, "hcl": true, "proto": true,
+ "diff": true, "patch": true, "log": true,
+ "vue": true, "svelte": true, "astro": true,
 }
 ```
 
@@ -274,6 +282,7 @@ cd /vm-mo && git add internal/server/filetype.go internal/server/filetype_test.g
 ### Task 2: Add Type Field to FileEntry and Rework AddFile
 
 **Files:**
+
 - Modify: `internal/server/server.go:28-35` (FileEntry struct)
 - Modify: `internal/server/server.go:249-308` (AddFile method)
 - Modify: `internal/server/server_test.go:1117-1151` (TestAddFile_RejectsBinaryFile)
@@ -285,99 +294,99 @@ Add to `internal/server/server_test.go`:
 
 ```go
 func TestAddFile_SetsFileType(t *testing.T) {
-	s := newTestState(t)
-	dir := t.TempDir()
+ s := newTestState(t)
+ dir := t.TempDir()
 
-	tests := []struct {
-		name     string
-		filename string
-		content  []byte
-		wantType FileType
-		wantErr  bool
-	}{
-		{"markdown", "readme.md", []byte("# Hello"), FileTypeMarkdown, false},
-		{"code", "main.go", []byte("package main"), FileTypeCode, false},
-		{"pdf", "doc.pdf", []byte("%PDF-1.4\x00binary"), FileTypePDF, false},
-		{"image", "photo.png", []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00}, FileTypeImage, false},
-		{"unknown text", "data.xyz", []byte("some text"), FileTypeUnknown, false},
-		{"unknown binary promoted", "data.bin", []byte("has\x00null"), FileTypeBinary, false},
-		{"markdown with null bytes", "bad.md", []byte("# Hi\x00"), FileTypeMarkdown, true},
-		{"code with null bytes", "bad.go", []byte("package\x00main"), FileTypeCode, true},
-	}
+ tests := []struct {
+  name     string
+  filename string
+  content  []byte
+  wantType FileType
+  wantErr  bool
+ }{
+  {"markdown", "readme.md", []byte("# Hello"), FileTypeMarkdown, false},
+  {"code", "main.go", []byte("package main"), FileTypeCode, false},
+  {"pdf", "doc.pdf", []byte("%PDF-1.4\x00binary"), FileTypePDF, false},
+  {"image", "photo.png", []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00}, FileTypeImage, false},
+  {"unknown text", "data.xyz", []byte("some text"), FileTypeUnknown, false},
+  {"unknown binary promoted", "data.bin", []byte("has\x00null"), FileTypeBinary, false},
+  {"markdown with null bytes", "bad.md", []byte("# Hi\x00"), FileTypeMarkdown, true},
+  {"code with null bytes", "bad.go", []byte("package\x00main"), FileTypeCode, true},
+ }
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(dir, tt.filename)
-			os.WriteFile(path, tt.content, 0o600) //nolint:errcheck
+ for _, tt := range tests {
+  t.Run(tt.name, func(t *testing.T) {
+   path := filepath.Join(dir, tt.filename)
+   os.WriteFile(path, tt.content, 0o600) //nolint:errcheck
 
-			entry, err := s.AddFile(path, DefaultGroup)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if entry.Type != tt.wantType {
-				t.Errorf("Type = %q, want %q", entry.Type, tt.wantType)
-			}
+   entry, err := s.AddFile(path, DefaultGroup)
+   if tt.wantErr {
+    if err == nil {
+     t.Fatal("expected error, got nil")
+    }
+    return
+   }
+   if err != nil {
+    t.Fatalf("unexpected error: %v", err)
+   }
+   if entry.Type != tt.wantType {
+    t.Errorf("Type = %q, want %q", entry.Type, tt.wantType)
+   }
 
-			// Clean up for next test.
-			s.RemoveFile(entry.ID)
-		})
-	}
+   // Clean up for next test.
+   s.RemoveFile(entry.ID)
+  })
+ }
 }
 
 func TestAddFile_RejectsDirectoryWithPDFExtension(t *testing.T) {
-	s := newTestState(t)
-	dir := t.TempDir()
-	pdfDir := filepath.Join(dir, "something.pdf")
-	os.Mkdir(pdfDir, 0o755) //nolint:errcheck
+ s := newTestState(t)
+ dir := t.TempDir()
+ pdfDir := filepath.Join(dir, "something.pdf")
+ os.Mkdir(pdfDir, 0o755) //nolint:errcheck
 
-	_, err := s.AddFile(pdfDir, DefaultGroup)
-	if err == nil {
-		t.Fatal("expected error for directory with .pdf extension")
-	}
+ _, err := s.AddFile(pdfDir, DefaultGroup)
+ if err == nil {
+  t.Fatal("expected error for directory with .pdf extension")
+ }
 }
 
 func TestAddFile_TitleExtractionByType(t *testing.T) {
-	s := newTestState(t)
-	dir := t.TempDir()
+ s := newTestState(t)
+ dir := t.TempDir()
 
-	// Markdown gets title.
-	mdPath := filepath.Join(dir, "doc.md")
-	os.WriteFile(mdPath, []byte("# My Title"), 0o600) //nolint:errcheck
-	entry, err := s.AddFile(mdPath, DefaultGroup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if entry.Title != "My Title" {
-		t.Errorf("markdown Title = %q, want %q", entry.Title, "My Title")
-	}
+ // Markdown gets title.
+ mdPath := filepath.Join(dir, "doc.md")
+ os.WriteFile(mdPath, []byte("# My Title"), 0o600) //nolint:errcheck
+ entry, err := s.AddFile(mdPath, DefaultGroup)
+ if err != nil {
+  t.Fatal(err)
+ }
+ if entry.Title != "My Title" {
+  t.Errorf("markdown Title = %q, want %q", entry.Title, "My Title")
+ }
 
-	// Code with # comment also gets title (preserves existing behavior).
-	goPath := filepath.Join(dir, "script.sh")
-	os.WriteFile(goPath, []byte("# Setup Script"), 0o600) //nolint:errcheck
-	entry2, err := s.AddFile(goPath, DefaultGroup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if entry2.Title != "Setup Script" {
-		t.Errorf("code Title = %q, want %q", entry2.Title, "Setup Script")
-	}
+ // Code with # comment also gets title (preserves existing behavior).
+ goPath := filepath.Join(dir, "script.sh")
+ os.WriteFile(goPath, []byte("# Setup Script"), 0o600) //nolint:errcheck
+ entry2, err := s.AddFile(goPath, DefaultGroup)
+ if err != nil {
+  t.Fatal(err)
+ }
+ if entry2.Title != "Setup Script" {
+  t.Errorf("code Title = %q, want %q", entry2.Title, "Setup Script")
+ }
 
-	// PDF skips title extraction.
-	pdfPath := filepath.Join(dir, "doc.pdf")
-	os.WriteFile(pdfPath, []byte("%PDF-1.4\x00binary"), 0o600) //nolint:errcheck
-	entry3, err := s.AddFile(pdfPath, DefaultGroup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if entry3.Title != "" {
-		t.Errorf("pdf Title = %q, want empty", entry3.Title)
-	}
+ // PDF skips title extraction.
+ pdfPath := filepath.Join(dir, "doc.pdf")
+ os.WriteFile(pdfPath, []byte("%PDF-1.4\x00binary"), 0o600) //nolint:errcheck
+ entry3, err := s.AddFile(pdfPath, DefaultGroup)
+ if err != nil {
+  t.Fatal(err)
+ }
+ if entry3.Title != "" {
+  t.Errorf("pdf Title = %q, want empty", entry3.Title)
+ }
 }
 ```
 
@@ -392,13 +401,13 @@ In `internal/server/server.go`, replace the FileEntry struct (lines 28-35):
 
 ```go
 type FileEntry struct {
-	Name     string   `json:"name"`
-	ID       string   `json:"id"`
-	Path     string   `json:"path"`
-	Title    string   `json:"title,omitempty"`
-	Uploaded bool     `json:"uploaded,omitempty"`
-	Type     FileType `json:"type"`
-	content  string
+ Name     string   `json:"name"`
+ ID       string   `json:"id"`
+ Path     string   `json:"path"`
+ Title    string   `json:"title,omitempty"`
+ Uploaded bool     `json:"uploaded,omitempty"`
+ Type     FileType `json:"type"`
+ content  string
 }
 ```
 
@@ -408,93 +417,93 @@ In `internal/server/server.go`, replace the AddFile method body (lines 249-308).
 
 ```go
 func (s *State) AddFile(absPath, groupName string) (*FileEntry, error) {
-	// Check for duplicates before doing any I/O.
-	s.mu.RLock()
-	if g, ok := s.groups[groupName]; ok {
-		for _, f := range g.Files {
-			if f.Path == absPath {
-				s.mu.RUnlock()
-				return f, nil
-			}
-		}
-	}
-	s.mu.RUnlock()
+ // Check for duplicates before doing any I/O.
+ s.mu.RLock()
+ if g, ok := s.groups[groupName]; ok {
+  for _, f := range g.Files {
+   if f.Path == absPath {
+    s.mu.RUnlock()
+    return f, nil
+   }
+  }
+ }
+ s.mu.RUnlock()
 
-	fileType := DetectFileType(absPath)
+ fileType := DetectFileType(absPath)
 
-	var head []byte
-	var title string
+ var head []byte
+ var title string
 
-	switch fileType {
-	case FileTypePDF, FileTypeImage:
-		// Binary types: verify regular file, skip content checks.
-		fi, err := os.Stat(absPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				// Allow non-existent files (existing behavior).
-				break
-			}
-			return nil, fmt.Errorf("failed to stat file %s: %w", absPath, err)
-		}
-		if !fi.Mode().IsRegular() {
-			return nil, fmt.Errorf("not a regular file: %s", absPath)
-		}
-	default:
-		// Text types: read head for binary check and title extraction.
-		var err error
-		head, err = readFileHead(absPath)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				return nil, fmt.Errorf("failed to read file %s: %w", absPath, err)
-			}
-		} else if len(head) > 0 && bytes.IndexByte(head, 0) >= 0 {
-			if fileType == FileTypeUnknown {
-				fileType = FileTypeBinary
-			} else {
-				return nil, fmt.Errorf("%s: %w", absPath, ErrBinaryFile)
-			}
-		}
+ switch fileType {
+ case FileTypePDF, FileTypeImage:
+  // Binary types: verify regular file, skip content checks.
+  fi, err := os.Stat(absPath)
+  if err != nil {
+   if os.IsNotExist(err) {
+    // Allow non-existent files (existing behavior).
+    break
+   }
+   return nil, fmt.Errorf("failed to stat file %s: %w", absPath, err)
+  }
+  if !fi.Mode().IsRegular() {
+   return nil, fmt.Errorf("not a regular file: %s", absPath)
+  }
+ default:
+  // Text types: read head for binary check and title extraction.
+  var err error
+  head, err = readFileHead(absPath)
+  if err != nil {
+   if !os.IsNotExist(err) {
+    return nil, fmt.Errorf("failed to read file %s: %w", absPath, err)
+   }
+  } else if len(head) > 0 && bytes.IndexByte(head, 0) >= 0 {
+   if fileType == FileTypeUnknown {
+    fileType = FileTypeBinary
+   } else {
+    return nil, fmt.Errorf("%s: %w", absPath, ErrBinaryFile)
+   }
+  }
 
-		if fileType != FileTypeBinary {
-			title = extractTitle(string(head))
-		}
-	}
+  if fileType != FileTypeBinary {
+   title = extractTitle(string(head))
+  }
+ }
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+ s.mu.Lock()
+ defer s.mu.Unlock()
 
-	g, ok := s.groups[groupName]
-	if !ok {
-		g = &Group{Name: groupName}
-		s.groups[groupName] = g
-	}
+ g, ok := s.groups[groupName]
+ if !ok {
+  g = &Group{Name: groupName}
+  s.groups[groupName] = g
+ }
 
-	// Re-check after re-acquiring the lock.
-	for _, f := range g.Files {
-		if f.Path == absPath {
-			return f, nil
-		}
-	}
+ // Re-check after re-acquiring the lock.
+ for _, f := range g.Files {
+  if f.Path == absPath {
+   return f, nil
+  }
+ }
 
-	entry := &FileEntry{
-		Name:  filepath.Base(absPath),
-		ID:    FileID(absPath),
-		Path:  absPath,
-		Title: title,
-		Type:  fileType,
-	}
-	g.Files = append(g.Files, entry)
+ entry := &FileEntry{
+  Name:  filepath.Base(absPath),
+  ID:    FileID(absPath),
+  Path:  absPath,
+  Title: title,
+  Type:  fileType,
+ }
+ g.Files = append(g.Files, entry)
 
-	if s.watcher != nil {
-		if err := s.watcher.Add(absPath); err != nil {
-			slog.Warn("failed to watch file", "path", absPath, "error", err)
-		}
-	}
+ if s.watcher != nil {
+  if err := s.watcher.Add(absPath); err != nil {
+   slog.Warn("failed to watch file", "path", absPath, "error", err)
+  }
+ }
 
-	slog.Info("file added", "path", absPath, "group", groupName, "id", entry.ID)
+ slog.Info("file added", "path", absPath, "group", groupName, "id", entry.ID)
 
-	s.sendEvent(sseEvent{Name: eventUpdate, Data: "{}"})
-	return entry, nil
+ s.sendEvent(sseEvent{Name: eventUpdate, Data: "{}"})
+ return entry, nil
 }
 ```
 
@@ -504,50 +513,50 @@ In `internal/server/server_test.go`, replace `TestAddFile_RejectsBinaryFile` (li
 
 ```go
 func TestAddFile_RejectsBinaryFile(t *testing.T) {
-	s := newTestState(t)
-	dir := t.TempDir()
+ s := newTestState(t)
+ dir := t.TempDir()
 
-	// Binary file with known code extension is still rejected.
-	binFile := filepath.Join(dir, "bad.go")
-	os.WriteFile(binFile, []byte("package\x00main"), 0o600) //nolint:errcheck
+ // Binary file with known code extension is still rejected.
+ binFile := filepath.Join(dir, "bad.go")
+ os.WriteFile(binFile, []byte("package\x00main"), 0o600) //nolint:errcheck
 
-	_, err := s.AddFile(binFile, DefaultGroup)
-	if err == nil {
-		t.Fatal("expected error for binary code file, got nil")
-	}
-	if !errors.Is(err, ErrBinaryFile) {
-		t.Fatalf("expected ErrBinaryFile, got: %v", err)
-	}
+ _, err := s.AddFile(binFile, DefaultGroup)
+ if err == nil {
+  t.Fatal("expected error for binary code file, got nil")
+ }
+ if !errors.Is(err, ErrBinaryFile) {
+  t.Fatalf("expected ErrBinaryFile, got: %v", err)
+ }
 
-	// Binary file with unknown extension is accepted as FileTypeBinary.
-	unknownBin := filepath.Join(dir, "data.bin")
-	os.WriteFile(unknownBin, []byte("has\x00null"), 0o600) //nolint:errcheck
+ // Binary file with unknown extension is accepted as FileTypeBinary.
+ unknownBin := filepath.Join(dir, "data.bin")
+ os.WriteFile(unknownBin, []byte("has\x00null"), 0o600) //nolint:errcheck
 
-	entry, err := s.AddFile(unknownBin, DefaultGroup)
-	if err != nil {
-		t.Fatalf("unexpected error for unknown binary: %v", err)
-	}
-	if entry.Type != FileTypeBinary {
-		t.Errorf("Type = %q, want %q", entry.Type, FileTypeBinary)
-	}
+ entry, err := s.AddFile(unknownBin, DefaultGroup)
+ if err != nil {
+  t.Fatalf("unexpected error for unknown binary: %v", err)
+ }
+ if entry.Type != FileTypeBinary {
+  t.Errorf("Type = %q, want %q", entry.Type, FileTypeBinary)
+ }
 
-	// Text file should succeed.
-	txtFile := filepath.Join(dir, "readme.md")
-	os.WriteFile(txtFile, []byte("# Hello"), 0o600) //nolint:errcheck
+ // Text file should succeed.
+ txtFile := filepath.Join(dir, "readme.md")
+ os.WriteFile(txtFile, []byte("# Hello"), 0o600) //nolint:errcheck
 
-	entry, err = s.AddFile(txtFile, DefaultGroup)
-	if err != nil {
-		t.Fatalf("unexpected error for text file: %v", err)
-	}
-	if entry == nil {
-		t.Fatal("expected non-nil entry for text file")
-	}
+ entry, err = s.AddFile(txtFile, DefaultGroup)
+ if err != nil {
+  t.Fatalf("unexpected error for text file: %v", err)
+ }
+ if entry == nil {
+  t.Fatal("expected non-nil entry for text file")
+ }
 
-	// Non-existent file should not error.
-	_, err = s.AddFile(filepath.Join(dir, "nonexistent.md"), DefaultGroup)
-	if err != nil {
-		t.Fatalf("unexpected error for non-existent file: %v", err)
-	}
+ // Non-existent file should not error.
+ _, err = s.AddFile(filepath.Join(dir, "nonexistent.md"), DefaultGroup)
+ if err != nil {
+  t.Fatalf("unexpected error for non-existent file: %v", err)
+ }
 }
 ```
 
@@ -555,89 +564,89 @@ Update the binary subtest of `TestHandleAddFile_RejectsBinaryFile` (lines 1216-1
 
 ```go
 func TestHandleAddFile_RejectsBinaryFile(t *testing.T) {
-	dir := t.TempDir()
+ dir := t.TempDir()
 
-	t.Run("returns 400 for binary code file", func(t *testing.T) {
-		s := newTestState(t)
-		handler := NewHandler(s)
+ t.Run("returns 400 for binary code file", func(t *testing.T) {
+  s := newTestState(t)
+  handler := NewHandler(s)
 
-		binFile := filepath.Join(dir, "bad.go")
-		os.WriteFile(binFile, []byte("package\x00main"), 0o600) //nolint:errcheck
+  binFile := filepath.Join(dir, "bad.go")
+  os.WriteFile(binFile, []byte("package\x00main"), 0o600) //nolint:errcheck
 
-		body, err := json.Marshal(addFileRequest{Path: binFile, Group: DefaultGroup})
-		if err != nil {
-			t.Fatal(err)
-		}
-		req := httptest.NewRequest("POST", "/_/api/files", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
+  body, err := json.Marshal(addFileRequest{Path: binFile, Group: DefaultGroup})
+  if err != nil {
+   t.Fatal(err)
+  }
+  req := httptest.NewRequest("POST", "/_/api/files", bytes.NewReader(body))
+  req.Header.Set("Content-Type", "application/json")
+  rec := httptest.NewRecorder()
 
-		handler.ServeHTTP(rec, req)
+  handler.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
-		}
-	})
+  if rec.Code != http.StatusBadRequest {
+   t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+  }
+ })
 
-	t.Run("returns 200 for unknown binary file", func(t *testing.T) {
-		s := newTestState(t)
-		handler := NewHandler(s)
+ t.Run("returns 200 for unknown binary file", func(t *testing.T) {
+  s := newTestState(t)
+  handler := NewHandler(s)
 
-		binFile := filepath.Join(dir, "data.bin")
-		os.WriteFile(binFile, []byte("has\x00null"), 0o600) //nolint:errcheck
+  binFile := filepath.Join(dir, "data.bin")
+  os.WriteFile(binFile, []byte("has\x00null"), 0o600) //nolint:errcheck
 
-		body, err := json.Marshal(addFileRequest{Path: binFile, Group: DefaultGroup})
-		if err != nil {
-			t.Fatal(err)
-		}
-		req := httptest.NewRequest("POST", "/_/api/files", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
+  body, err := json.Marshal(addFileRequest{Path: binFile, Group: DefaultGroup})
+  if err != nil {
+   t.Fatal(err)
+  }
+  req := httptest.NewRequest("POST", "/_/api/files", bytes.NewReader(body))
+  req.Header.Set("Content-Type", "application/json")
+  rec := httptest.NewRecorder()
 
-		handler.ServeHTTP(rec, req)
+  handler.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusOK {
-			t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
-		}
+  if rec.Code != http.StatusOK {
+   t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+  }
 
-		var entry FileEntry
-		if err := json.NewDecoder(rec.Body).Decode(&entry); err != nil {
-			t.Fatal(err)
-		}
-		if entry.Type != FileTypeBinary {
-			t.Errorf("Type = %q, want %q", entry.Type, FileTypeBinary)
-		}
-	})
+  var entry FileEntry
+  if err := json.NewDecoder(rec.Body).Decode(&entry); err != nil {
+   t.Fatal(err)
+  }
+  if entry.Type != FileTypeBinary {
+   t.Errorf("Type = %q, want %q", entry.Type, FileTypeBinary)
+  }
+ })
 
-	t.Run("returns 200 for text file", func(t *testing.T) {
-		s := newTestState(t)
-		handler := NewHandler(s)
+ t.Run("returns 200 for text file", func(t *testing.T) {
+  s := newTestState(t)
+  handler := NewHandler(s)
 
-		txtFile := filepath.Join(dir, "readme.md")
-		os.WriteFile(txtFile, []byte("# Hello"), 0o600) //nolint:errcheck
+  txtFile := filepath.Join(dir, "readme.md")
+  os.WriteFile(txtFile, []byte("# Hello"), 0o600) //nolint:errcheck
 
-		body, err := json.Marshal(addFileRequest{Path: txtFile, Group: DefaultGroup})
-		if err != nil {
-			t.Fatal(err)
-		}
-		req := httptest.NewRequest("POST", "/_/api/files", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
+  body, err := json.Marshal(addFileRequest{Path: txtFile, Group: DefaultGroup})
+  if err != nil {
+   t.Fatal(err)
+  }
+  req := httptest.NewRequest("POST", "/_/api/files", bytes.NewReader(body))
+  req.Header.Set("Content-Type", "application/json")
+  rec := httptest.NewRecorder()
 
-		handler.ServeHTTP(rec, req)
+  handler.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusOK {
-			t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
-		}
+  if rec.Code != http.StatusOK {
+   t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+  }
 
-		var entry FileEntry
-		if err := json.NewDecoder(rec.Body).Decode(&entry); err != nil {
-			t.Fatal(err)
-		}
-		if entry.Name != "readme.md" {
-			t.Fatalf("got name %q, want %q", entry.Name, "readme.md")
-		}
-	})
+  var entry FileEntry
+  if err := json.NewDecoder(rec.Body).Decode(&entry); err != nil {
+   t.Fatal(err)
+  }
+  if entry.Name != "readme.md" {
+   t.Fatalf("got name %q, want %q", entry.Name, "readme.md")
+  }
+ })
 }
 ```
 
@@ -657,6 +666,7 @@ cd /vm-mo && git add internal/server/server.go internal/server/server_test.go &&
 ### Task 3: Add handleFileServe Endpoint and Rename handleFileRaw
 
 **Files:**
+
 - Modify: `internal/server/server.go:1200-1222` (route registration)
 - Modify: `internal/server/server.go:1226-1236` (CSP header)
 - Modify: `internal/server/server.go:1388-1424` (handleFileContent — add type guard)
@@ -669,150 +679,150 @@ Add to `internal/server/server_test.go`:
 
 ```go
 func TestHandleFileServe(t *testing.T) {
-	dir := t.TempDir()
+ dir := t.TempDir()
 
-	t.Run("serves PDF with correct content type", func(t *testing.T) {
-		s := newTestState(t)
-		handler := NewHandler(s)
+ t.Run("serves PDF with correct content type", func(t *testing.T) {
+  s := newTestState(t)
+  handler := NewHandler(s)
 
-		pdfFile := filepath.Join(dir, "doc.pdf")
-		os.WriteFile(pdfFile, []byte("%PDF-1.4\x00test content"), 0o600) //nolint:errcheck
+  pdfFile := filepath.Join(dir, "doc.pdf")
+  os.WriteFile(pdfFile, []byte("%PDF-1.4\x00test content"), 0o600) //nolint:errcheck
 
-		entry, err := s.AddFile(pdfFile, DefaultGroup)
-		if err != nil {
-			t.Fatal(err)
-		}
+  entry, err := s.AddFile(pdfFile, DefaultGroup)
+  if err != nil {
+   t.Fatal(err)
+  }
 
-		req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw", nil)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+  req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw", nil)
+  rec := httptest.NewRecorder()
+  handler.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusOK {
-			t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
-		}
-		ct := rec.Header().Get("Content-Type")
-		if !strings.Contains(ct, "application/pdf") {
-			t.Errorf("Content-Type = %q, want application/pdf", ct)
-		}
-		if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
-			t.Error("missing X-Content-Type-Options: nosniff header")
-		}
-	})
+  if rec.Code != http.StatusOK {
+   t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+  }
+  ct := rec.Header().Get("Content-Type")
+  if !strings.Contains(ct, "application/pdf") {
+   t.Errorf("Content-Type = %q, want application/pdf", ct)
+  }
+  if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+   t.Error("missing X-Content-Type-Options: nosniff header")
+  }
+ })
 
-	t.Run("returns 404 for unknown ID", func(t *testing.T) {
-		s := newTestState(t)
-		handler := NewHandler(s)
+ t.Run("returns 404 for unknown ID", func(t *testing.T) {
+  s := newTestState(t)
+  handler := NewHandler(s)
 
-		req := httptest.NewRequest("GET", "/_/api/files/nonexistent/raw", nil)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+  req := httptest.NewRequest("GET", "/_/api/files/nonexistent/raw", nil)
+  rec := httptest.NewRecorder()
+  handler.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("got status %d, want %d", rec.Code, http.StatusNotFound)
-		}
-	})
+  if rec.Code != http.StatusNotFound {
+   t.Fatalf("got status %d, want %d", rec.Code, http.StatusNotFound)
+  }
+ })
 
-	t.Run("returns 404 for uploaded file", func(t *testing.T) {
-		s := newTestState(t)
-		handler := NewHandler(s)
+ t.Run("returns 404 for uploaded file", func(t *testing.T) {
+  s := newTestState(t)
+  handler := NewHandler(s)
 
-		s.AddUploadedFile("test.md", "# Hello", DefaultGroup) //nolint:errcheck
+  s.AddUploadedFile("test.md", "# Hello", DefaultGroup) //nolint:errcheck
 
-		entry := s.Groups()[0].Files[0]
-		req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw", nil)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+  entry := s.Groups()[0].Files[0]
+  req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw", nil)
+  rec := httptest.NewRecorder()
+  handler.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("got status %d, want %d", rec.Code, http.StatusNotFound)
-		}
-	})
+  if rec.Code != http.StatusNotFound {
+   t.Fatalf("got status %d, want %d", rec.Code, http.StatusNotFound)
+  }
+ })
 
-	t.Run("cache busting param does not affect response", func(t *testing.T) {
-		s := newTestState(t)
-		handler := NewHandler(s)
+ t.Run("cache busting param does not affect response", func(t *testing.T) {
+  s := newTestState(t)
+  handler := NewHandler(s)
 
-		txtFile := filepath.Join(dir, "hello.md")
-		os.WriteFile(txtFile, []byte("# Hello"), 0o600) //nolint:errcheck
+  txtFile := filepath.Join(dir, "hello.md")
+  os.WriteFile(txtFile, []byte("# Hello"), 0o600) //nolint:errcheck
 
-		entry, err := s.AddFile(txtFile, DefaultGroup)
-		if err != nil {
-			t.Fatal(err)
-		}
+  entry, err := s.AddFile(txtFile, DefaultGroup)
+  if err != nil {
+   t.Fatal(err)
+  }
 
-		req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw?v=42", nil)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
+  req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw?v=42", nil)
+  rec := httptest.NewRecorder()
+  handler.ServeHTTP(rec, req)
 
-		if rec.Code != http.StatusOK {
-			t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
-		}
-		if !strings.Contains(rec.Body.String(), "# Hello") {
-			t.Error("response body does not contain file content")
-		}
-	})
+  if rec.Code != http.StatusOK {
+   t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+  }
+  if !strings.Contains(rec.Body.String(), "# Hello") {
+   t.Error("response body does not contain file content")
+  }
+ })
 }
 
 func TestHandleFileServe_RouteCoexistence(t *testing.T) {
-	dir := t.TempDir()
-	s := newTestState(t)
-	handler := NewHandler(s)
+ dir := t.TempDir()
+ s := newTestState(t)
+ handler := NewHandler(s)
 
-	mdFile := filepath.Join(dir, "readme.md")
-	os.WriteFile(mdFile, []byte("# Hello"), 0o600) //nolint:errcheck
+ mdFile := filepath.Join(dir, "readme.md")
+ os.WriteFile(mdFile, []byte("# Hello"), 0o600) //nolint:errcheck
 
-	// Create a sibling image file.
-	imgFile := filepath.Join(dir, "image.png")
-	os.WriteFile(imgFile, []byte("fakepng"), 0o600) //nolint:errcheck
+ // Create a sibling image file.
+ imgFile := filepath.Join(dir, "image.png")
+ os.WriteFile(imgFile, []byte("fakepng"), 0o600) //nolint:errcheck
 
-	entry, err := s.AddFile(mdFile, DefaultGroup)
-	if err != nil {
-		t.Fatal(err)
-	}
+ entry, err := s.AddFile(mdFile, DefaultGroup)
+ if err != nil {
+  t.Fatal(err)
+ }
 
-	// /raw → handleFileServe (serves the file itself).
-	req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("/raw: got status %d, want %d", rec.Code, http.StatusOK)
-	}
-	if !strings.Contains(rec.Body.String(), "# Hello") {
-		t.Error("/raw: expected file content")
-	}
+ // /raw → handleFileServe (serves the file itself).
+ req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw", nil)
+ rec := httptest.NewRecorder()
+ handler.ServeHTTP(rec, req)
+ if rec.Code != http.StatusOK {
+  t.Fatalf("/raw: got status %d, want %d", rec.Code, http.StatusOK)
+ }
+ if !strings.Contains(rec.Body.String(), "# Hello") {
+  t.Error("/raw: expected file content")
+ }
 
-	// /raw/image.png → handleFileAsset (serves sibling asset).
-	req = httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw/image.png", nil)
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("/raw/image.png: got status %d, want %d", rec.Code, http.StatusOK)
-	}
-	if !strings.Contains(rec.Body.String(), "fakepng") {
-		t.Error("/raw/image.png: expected sibling asset content")
-	}
+ // /raw/image.png → handleFileAsset (serves sibling asset).
+ req = httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw/image.png", nil)
+ rec = httptest.NewRecorder()
+ handler.ServeHTTP(rec, req)
+ if rec.Code != http.StatusOK {
+  t.Fatalf("/raw/image.png: got status %d, want %d", rec.Code, http.StatusOK)
+ }
+ if !strings.Contains(rec.Body.String(), "fakepng") {
+  t.Error("/raw/image.png: expected sibling asset content")
+ }
 }
 
 func TestHandleFileContent_RejectsBinaryTypes(t *testing.T) {
-	dir := t.TempDir()
-	s := newTestState(t)
-	handler := NewHandler(s)
+ dir := t.TempDir()
+ s := newTestState(t)
+ handler := NewHandler(s)
 
-	pdfFile := filepath.Join(dir, "doc.pdf")
-	os.WriteFile(pdfFile, []byte("%PDF-1.4\x00binary"), 0o600) //nolint:errcheck
+ pdfFile := filepath.Join(dir, "doc.pdf")
+ os.WriteFile(pdfFile, []byte("%PDF-1.4\x00binary"), 0o600) //nolint:errcheck
 
-	entry, err := s.AddFile(pdfFile, DefaultGroup)
-	if err != nil {
-		t.Fatal(err)
-	}
+ entry, err := s.AddFile(pdfFile, DefaultGroup)
+ if err != nil {
+  t.Fatal(err)
+ }
 
-	req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/content", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+ req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/content", nil)
+ rec := httptest.NewRecorder()
+ handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnsupportedMediaType {
-		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnsupportedMediaType)
-	}
+ if rec.Code != http.StatusUnsupportedMediaType {
+  t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnsupportedMediaType)
+ }
 }
 ```
 
@@ -827,27 +837,27 @@ Add to `internal/server/server.go` after the existing `handleFileRaw` function:
 
 ```go
 func handleFileServe(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if id == "" {
-			http.Error(w, "missing file id", http.StatusBadRequest)
-			return
-		}
+ return func(w http.ResponseWriter, r *http.Request) {
+  id := r.PathValue("id")
+  if id == "" {
+   http.Error(w, "missing file id", http.StatusBadRequest)
+   return
+  }
 
-		entry := state.FindFile(id)
-		if entry == nil {
-			http.Error(w, "file not found", http.StatusNotFound)
-			return
-		}
+  entry := state.FindFile(id)
+  if entry == nil {
+   http.Error(w, "file not found", http.StatusNotFound)
+   return
+  }
 
-		if entry.Uploaded {
-			http.Error(w, "raw serving not available for uploaded files", http.StatusNotFound)
-			return
-		}
+  if entry.Uploaded {
+   http.Error(w, "raw serving not available for uploaded files", http.StatusNotFound)
+   return
+  }
 
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		http.ServeFile(w, r, entry.Path)
-	}
+  w.Header().Set("X-Content-Type-Options", "nosniff")
+  http.ServeFile(w, r, entry.Path)
+ }
 }
 ```
 
@@ -860,11 +870,11 @@ Change `func handleFileRaw(state *State) http.HandlerFunc {` to `func handleFile
 Add empty path guard at the start of the handler body (after the `entry.Uploaded` check):
 
 ```go
-		relPath := r.PathValue("path")
-		if relPath == "" {
-			http.Error(w, "missing asset path", http.StatusBadRequest)
-			return
-		}
+  relPath := r.PathValue("path")
+  if relPath == "" {
+   http.Error(w, "missing asset path", http.StatusBadRequest)
+   return
+  }
 ```
 
 - [ ] **Step 5: Add type guard to handleFileContent**
@@ -872,12 +882,12 @@ Add empty path guard at the start of the handler body (after the `entry.Uploaded
 In `internal/server/server.go`, add after the `entry == nil` check in `handleFileContent` (around line 1400):
 
 ```go
-		// Reject binary file types — their content cannot be JSON-serialized.
-		switch entry.Type {
-		case FileTypePDF, FileTypeImage, FileTypeBinary:
-			http.Error(w, "content endpoint not supported for binary file types; use the raw endpoint", http.StatusUnsupportedMediaType)
-			return
-		}
+  // Reject binary file types — their content cannot be JSON-serialized.
+  switch entry.Type {
+  case FileTypePDF, FileTypeImage, FileTypeBinary:
+   http.Error(w, "content endpoint not supported for binary file types; use the raw endpoint", http.StatusUnsupportedMediaType)
+   return
+  }
 ```
 
 - [ ] **Step 6: Update route registration**
@@ -885,9 +895,9 @@ In `internal/server/server.go`, add after the `entry == nil` check in `handleFil
 In `internal/server/server.go` `NewHandler` function (around line 1208-1210), update:
 
 ```go
-	mux.HandleFunc("GET /_/api/files/{id}/content", handleFileContent(state))
-	mux.HandleFunc("GET /_/api/files/{id}/raw", handleFileServe(state))
-	mux.HandleFunc("GET /_/api/files/{id}/raw/{path...}", handleFileAsset(state))
+ mux.HandleFunc("GET /_/api/files/{id}/content", handleFileContent(state))
+ mux.HandleFunc("GET /_/api/files/{id}/raw", handleFileServe(state))
+ mux.HandleFunc("GET /_/api/files/{id}/raw/{path...}", handleFileAsset(state))
 ```
 
 - [ ] **Step 7: Update CSP header**
@@ -895,18 +905,18 @@ In `internal/server/server.go` `NewHandler` function (around line 1208-1210), up
 In `internal/server/server.go` `withCSP` function (around line 1226), add `worker-src 'self' blob:` to the CSP string. Update the connect-src line:
 
 ```go
-	w.Header().Set("Content-Security-Policy",
-		"default-src 'self'; "+
-			"script-src 'self' 'unsafe-eval'; "+
-			"style-src 'self' 'unsafe-inline'; "+
-			"img-src 'self' https: data:; "+
-			"font-src 'self' data:; "+
-			"connect-src 'self'; "+
-			"worker-src 'self' blob:; "+
-			"object-src 'none'; "+
-			"base-uri 'self'; "+
-			"form-action 'self'; "+
-			"frame-ancestors 'none'")
+ w.Header().Set("Content-Security-Policy",
+  "default-src 'self'; "+
+   "script-src 'self' 'unsafe-eval'; "+
+   "style-src 'self' 'unsafe-inline'; "+
+   "img-src 'self' https: data:; "+
+   "font-src 'self' data:; "+
+   "connect-src 'self'; "+
+   "worker-src 'self' blob:; "+
+   "object-src 'none'; "+
+   "base-uri 'self'; "+
+   "form-action 'self'; "+
+   "frame-ancestors 'none'")
 ```
 
 - [ ] **Step 8: Run all tests**
@@ -932,6 +942,7 @@ cd /vm-mo && git add internal/server/server.go internal/server/server_test.go &&
 ### Task 4: Update Frontend FileEntry and API Layer
 
 **Files:**
+
 - Modify: `internal/frontend/src/hooks/useApi.ts:1-7`
 - Modify: `internal/frontend/src/utils/filetype.ts`
 - Modify: `internal/frontend/src/utils/filetype.test.ts`
@@ -1013,6 +1024,7 @@ cd /vm-mo && git add internal/frontend/src/hooks/useApi.ts internal/frontend/src
 ### Task 5: Create Renderer Registry
 
 **Files:**
+
 - Create: `internal/frontend/src/renderers/registry.ts`
 - Create: `internal/frontend/src/renderers/registry.test.ts`
 
@@ -1190,6 +1202,7 @@ cd /vm-mo && git add internal/frontend/src/renderers/ && git commit -m "feat: ad
 ### Task 6: Extract MarkdownRenderer
 
 **Files:**
+
 - Create: `internal/frontend/src/renderers/MarkdownRenderer.tsx`
 - Modify: `internal/frontend/src/renderers/registry.ts`
 
@@ -1216,6 +1229,7 @@ import type { TextRendererProps } from "./registry";
 ```
 
 The component must:
+
 1. Accept `TextRendererProps` (narrowing on `contentSource: "text"`)
 2. Parse frontmatter from `content`
 3. Render via `react-markdown` with all existing rehype/remark plugins
@@ -1257,6 +1271,7 @@ cd /vm-mo && git add internal/frontend/src/renderers/ && git commit -m "refactor
 ### Task 7: Extract CodeRenderer
 
 **Files:**
+
 - Create: `internal/frontend/src/renderers/CodeRenderer.tsx`
 - Modify: `internal/frontend/src/renderers/registry.ts`
 
@@ -1356,6 +1371,7 @@ cd /vm-mo && git add internal/frontend/src/renderers/ && git commit -m "refactor
 ### Task 8: Create FileViewer Dispatcher
 
 **Files:**
+
 - Create: `internal/frontend/src/components/FileViewer.tsx`
 - Modify: `internal/frontend/src/components/App.tsx`
 - Delete: `internal/frontend/src/components/MarkdownViewer.tsx`
@@ -1580,6 +1596,7 @@ Expected: PASS — frontend builds, Go binary compiles.
 Run: `cd /vm-mo && make dev ARGS="testdata/basic.md"`
 
 Verify:
+
 - Markdown file renders correctly with all formatting
 - ToC toggle works and shows headings
 - Raw view toggle works
@@ -1599,6 +1616,7 @@ cd /vm-mo && git add -A && git commit -m "refactor: replace MarkdownViewer with 
 ### Task 9: Add FileViewer Tests
 
 **Files:**
+
 - Create: `internal/frontend/src/components/FileViewer.test.tsx`
 
 - [ ] **Step 1: Write FileViewer tests**
@@ -1729,6 +1747,7 @@ cd /vm-mo && git add internal/frontend/src/components/FileViewer.test.tsx && git
 ### Task 10: Install react-pdf
 
 **Files:**
+
 - Modify: `internal/frontend/package.json`
 
 - [ ] **Step 1: Install react-pdf**
@@ -1742,6 +1761,7 @@ cd /vm-mo/internal/frontend && pnpm add react-pdf
 ```bash
 cd /vm-mo/internal/frontend && node -e "require('react-pdf'); console.log('OK')"
 ```
+
 Expected: `OK`
 
 - [ ] **Step 3: Commit**
@@ -1755,6 +1775,7 @@ cd /vm-mo && git add internal/frontend/package.json internal/frontend/pnpm-lock.
 ### Task 11: Create PdfRenderer
 
 **Files:**
+
 - Create: `internal/frontend/src/renderers/PdfRenderer.tsx`
 - Create: `internal/frontend/src/renderers/PdfRenderer.test.tsx`
 - Modify: `internal/frontend/src/renderers/registry.ts`
@@ -1942,6 +1963,7 @@ cd /vm-mo && git add internal/frontend/src/renderers/PdfRenderer.tsx internal/fr
 ### Task 12: Create GenericRenderer and ImageRenderer
 
 **Files:**
+
 - Create: `internal/frontend/src/renderers/GenericRenderer.tsx`
 - Create: `internal/frontend/src/renderers/GenericRenderer.test.tsx`
 - Create: `internal/frontend/src/renderers/ImageRenderer.tsx`
@@ -2072,6 +2094,7 @@ cd /vm-mo && git add internal/frontend/src/renderers/GenericRenderer.tsx interna
 ### Task 13: Wire All Renderers into Registry
 
 **Files:**
+
 - Modify: `internal/frontend/src/renderers/registry.ts`
 
 - [ ] **Step 1: Update registry with real components**
@@ -2149,6 +2172,7 @@ cd /vm-mo && git add internal/frontend/src/renderers/registry.ts && git commit -
 ### Task 14: End-to-End Verification
 
 **Files:**
+
 - Create: `testdata/sample.pdf`
 
 - [ ] **Step 1: Add test PDF**
@@ -2174,6 +2198,7 @@ Expected: PASS
 Run: `cd /vm-mo && make dev ARGS="--foreground testdata/sample.pdf"`
 
 Verify:
+
 - PDF renders in the browser with page content visible
 - No console errors
 - Switching between PDF and markdown files works

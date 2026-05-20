@@ -110,6 +110,7 @@ Serves the file entry itself as raw bytes with correct `Content-Type` header.
 Handler: `handleFileServe` (new function, distinct from existing handler).
 
 Behavior:
+
 - Looks up `FileEntry` by ID
 - For filesystem files: `http.ServeFile` (handles range requests, Last-Modified, ETag automatically)
 - For uploaded files: returns 404 (binary uploads not supported in v1, consistent with existing `handleFileRaw` behavior)
@@ -305,6 +306,7 @@ The `RendererFeatures` object is static per file type. This is an intentional si
 ## Extension Map Consistency
 
 A shared `extensions.json` manifest maps extensions to file types. Both sides import it:
+
 - Go: `go:embed` in `internal/server/filetype.go`
 - TypeScript: standard import in `src/utils/filetype.ts` (via Vite alias or relative path)
 
@@ -319,6 +321,7 @@ Note: the frontend's `detectLanguage()` (extension → Shiki language name) rema
 ### Backend Tests (`internal/server/`)
 
 **`filetype_test.go` (new):**
+
 - Known extensions map to correct types
 - Unknown extensions → `FileTypeUnknown`
 - No extension → `FileTypeUnknown`
@@ -328,6 +331,7 @@ Note: the frontend's `detectLanguage()` (extension → Shiki language name) rema
 **`server_test.go` (extended):**
 
 AddFile flow:
+
 - PDF file accepted (not rejected as binary)
 - Image file accepted
 - Unknown binary file promoted to `FileTypeBinary`
@@ -340,12 +344,14 @@ AddFile flow:
 - Title extracted for markdown, code, and unknown text files; skipped for pdf, image, binary
 
 handleFileContent (guard):
+
 - Returns 415 for PDF file type
 - Returns 415 for image file type
 - Returns 415 for binary file type
 - Continues to return content JSON for markdown, code, unknown types
 
 handleFileServe:
+
 - Returns raw bytes with correct Content-Type (`.pdf` → `application/pdf`)
 - Returns 404 for unknown file ID
 - Returns 404 for uploaded files (consistent with existing pattern)
@@ -353,35 +359,42 @@ handleFileServe:
 - Cache-busting query param (`?v=2`) does not affect response content
 
 handleFileAsset (renamed):
+
 - Existing tests pass (behavior unchanged, URL unchanged)
 - Empty path value returns 400
 
 Route coexistence:
+
 - `/_/api/files/{id}/raw` → handleFileServe
 - `/_/api/files/{id}/raw/image.png` → handleFileAsset
 - `/_/api/files/{id}/raw/` (trailing slash) handled safely
 
 Glob patterns:
+
 - Pattern matches PDF and image files, adds them successfully
 
 ### Frontend Tests (`internal/frontend/`)
 
 **`src/renderers/registry.test.ts` (new):**
+
 - Every `FileType` value has a registry entry
 - `contentSource` values are valid
 - Feature flags are boolean
 
 **`src/utils/filetype.test.ts` (update):**
+
 - Remove tests for deleted `isMarkdownFile()`
 - Keep `detectLanguage()` tests unchanged
 
 **`src/renderers/PdfRenderer.test.tsx` (new):**
+
 - Mock `react-pdf` module (`vi.mock`) — jsdom lacks canvas and Web Worker support
 - Test loading state rendered via Suspense fallback
 - Test error handling (corrupt PDF, network error)
 - Test page count display after successful load
 
 **`src/components/FileViewer.test.tsx` (new):**
+
 - Dispatches to correct renderer based on file type
 - Text types: fetches content endpoint, passes `content` prop
 - Raw types: builds URL via `rawFileUrl()`, passes `rawUrl` prop
@@ -390,6 +403,7 @@ Glob patterns:
 - Headings cleared (`onHeadingsChange([])`) when switching to a non-heading file type
 
 **Playwright E2E (Phase 4):**
+
 - Start mo in foreground mode with a test PDF
 - Verify page loads and PDF canvas renders
 - Verify live-reload: modify PDF on disk, confirm browser updates
@@ -428,6 +442,7 @@ Pure structural refactor. Identical user-facing behavior. No new features.
 7. Add `FileViewer.test.tsx` and `registry.test.ts`
 
 **Gate before proceeding to Phase 3:**
+
 - All existing tests pass (`make test`)
 - Manual visual regression: sidebar, ToC, raw toggle, theme, width toggle, resize handles
 - SSE live-reload verified (edit watched file, confirm browser updates)

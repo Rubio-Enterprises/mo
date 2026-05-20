@@ -23,5 +23,21 @@
   // multiple consecutive blank lines (between version sections) that trip
   // MD012/no-multiple-blanks; the file is machine-owned and editing it to
   // satisfy markdownlint would be reverted on the next release commit.
-  "ignores": ["node_modules", ".astro", "dist", "build", "playwright-report", "test-results", "CHANGELOG.md"]
+  //
+  // testdata/ is excluded because the files there are intentional markdown
+  // fixtures fed to mo's own rendering engine in tests (e.g. testdata/mermaid-error.md
+  // exercises invalid mermaid fallback, testdata/code-blocks.md uses hard tabs
+  // inside fenced code to verify tab-rendering, testdata/html-raw.md exercises
+  // raw HTML/blockquote edge cases). They are test inputs, not project prose,
+  // and "fixing" the violations would defeat the test's purpose.
+  "ignores": [
+    "node_modules",
+    ".astro",
+    "dist",
+    "build",
+    "playwright-report",
+    "test-results",
+    "CHANGELOG.md",
+    "testdata"
+  ]
 }

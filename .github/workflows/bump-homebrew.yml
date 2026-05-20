@@ -13,7 +13,10 @@ on:
 jobs:
   bump:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch'
+        || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push') }}
     steps:
       - name: Resolve tag
         id: tag
@@ -92,7 +95,11 @@ jobs:
           def replace_sha(arch_suffix, ext, new_sha):
               global src
               pattern = re.compile(
-                  r'(url\s+"[^"]*' + re.escape(arch_suffix) + r'\.' + re.escape(ext) + r'"\s*\n\s*sha256\s+")[a-f0-9]{64}(")',
+                  r'(url\s+"[^"]*'
+                  + re.escape(arch_suffix)
+                  + r'\.'
+                  + re.escape(ext)
+                  + r'"\s*\n\s*sha256\s+")[a-f0-9]{64}(")',
                   re.M,
               )
               src = pattern.sub(lambda m: f'{m.group(1)}{new_sha}{m.group(2)}', src)

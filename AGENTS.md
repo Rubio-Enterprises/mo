@@ -4,7 +4,6 @@ This repo follows Rubio-Enterprises standards. Run `/audit-standards` from a Cla
 
 ---
 
-
 ## What is mo
 
 `mo` is a CLI tool that opens Markdown files in a browser with live-reload. It runs a Go HTTP server that embeds a React SPA as a single binary. The Go module is `github.com/k1LoW/mo`.
@@ -117,6 +116,7 @@ cd internal/frontend && pnpm run dev
 All internal endpoints use `/_/api/` prefix and SSE uses `/_/events`. The `/_/` prefix avoids collisions with user-facing group name routes.
 
 Key endpoints:
+
 - `GET /_/api/groups` — List all groups with files
 - `POST /_/api/files` — Add file
 - `DELETE /_/api/files/{id}` — Remove file
@@ -149,6 +149,7 @@ Frontend: ESLint via `pnpm run lint` in `internal/frontend/`. Formatting via `pn
 This fork uses **`strubio-v*`** tags (e.g., `strubio-v0.21.0`) to trigger the release workflow in `.github/workflows/tagpr.yml`. The workflow strips the `strubio-v` prefix to derive the semver version.
 
 To release:
+
 1. Update `version/version.go` with the new version
 2. Commit and push
 3. Create and push a tag: `git tag strubio-v<VERSION> && git push origin strubio-v<VERSION>`

@@ -62,8 +62,8 @@ changelog:
   sort: asc
   filters:
     exclude:
-    - '^docs:'
-    - '^test:'
+      - '^docs:'
+      - '^test:'
 nfpms:
   -
     id: mo-nfpms

@@ -44,6 +44,7 @@ Backend changes ship first because the new `orderedKeys` field is additive on th
 ### Task 1: Backend — `ExtractCheckboxes` returns ordered keys
 
 **Files:**
+
 - Modify: `internal/server/checkbox.go`
 - Modify: `internal/server/checkbox_test.go`
 
@@ -53,134 +54,134 @@ Add this test at the top of `internal/server/checkbox_test.go`, replacing the ex
 
 ```go
 func TestExtractCheckboxes(t *testing.T) {
-	t.Run("basic items return map and ordered keys", func(t *testing.T) {
-		md := "- [ ] First item\n- [x] Second item\n"
-		sources, ordered := ExtractCheckboxes(md)
-		if len(sources) != 2 {
-			t.Fatalf("got %d sources, want 2", len(sources))
-		}
-		if sources["First item"] != false {
-			t.Fatal("First item should be false")
-		}
-		if sources["Second item"] != true {
-			t.Fatal("Second item should be true")
-		}
-		if len(ordered) != 2 {
-			t.Fatalf("got %d ordered keys, want 2", len(ordered))
-		}
-		if ordered[0] != "First item" || ordered[1] != "Second item" {
-			t.Fatalf("ordered keys out of order: %v", ordered)
-		}
-	})
+ t.Run("basic items return map and ordered keys", func(t *testing.T) {
+  md := "- [ ] First item\n- [x] Second item\n"
+  sources, ordered := ExtractCheckboxes(md)
+  if len(sources) != 2 {
+   t.Fatalf("got %d sources, want 2", len(sources))
+  }
+  if sources["First item"] != false {
+   t.Fatal("First item should be false")
+  }
+  if sources["Second item"] != true {
+   t.Fatal("Second item should be true")
+  }
+  if len(ordered) != 2 {
+   t.Fatalf("got %d ordered keys, want 2", len(ordered))
+  }
+  if ordered[0] != "First item" || ordered[1] != "Second item" {
+   t.Fatalf("ordered keys out of order: %v", ordered)
+  }
+ })
 
-	t.Run("duplicate labels are disambiguated in order", func(t *testing.T) {
-		md := "- [ ] TODO\n- [ ] TODO\n- [x] TODO\n"
-		sources, ordered := ExtractCheckboxes(md)
-		if len(sources) != 3 {
-			t.Fatalf("got %d sources, want 3", len(sources))
-		}
-		want := []string{"TODO", "TODO#2", "TODO#3"}
-		if len(ordered) != 3 {
-			t.Fatalf("got %d ordered keys, want 3", len(ordered))
-		}
-		for i, k := range want {
-			if ordered[i] != k {
-				t.Fatalf("ordered[%d] = %q, want %q", i, ordered[i], k)
-			}
-		}
-		if sources["TODO#3"] != true {
-			t.Fatal("TODO#3 should be true")
-		}
-	})
+ t.Run("duplicate labels are disambiguated in order", func(t *testing.T) {
+  md := "- [ ] TODO\n- [ ] TODO\n- [x] TODO\n"
+  sources, ordered := ExtractCheckboxes(md)
+  if len(sources) != 3 {
+   t.Fatalf("got %d sources, want 3", len(sources))
+  }
+  want := []string{"TODO", "TODO#2", "TODO#3"}
+  if len(ordered) != 3 {
+   t.Fatalf("got %d ordered keys, want 3", len(ordered))
+  }
+  for i, k := range want {
+   if ordered[i] != k {
+    t.Fatalf("ordered[%d] = %q, want %q", i, ordered[i], k)
+   }
+  }
+  if sources["TODO#3"] != true {
+   t.Fatal("TODO#3 should be true")
+  }
+ })
 
-	t.Run("strips inline formatting", func(t *testing.T) {
-		md := "- [ ] **bold** and *italic* text\n"
-		sources, ordered := ExtractCheckboxes(md)
-		if _, ok := sources["bold and italic text"]; !ok {
-			t.Fatalf("expected key 'bold and italic text', got: %v", sources)
-		}
-		if len(ordered) != 1 || ordered[0] != "bold and italic text" {
-			t.Fatalf("ordered = %v", ordered)
-		}
-	})
+ t.Run("strips inline formatting", func(t *testing.T) {
+  md := "- [ ] **bold** and *italic* text\n"
+  sources, ordered := ExtractCheckboxes(md)
+  if _, ok := sources["bold and italic text"]; !ok {
+   t.Fatalf("expected key 'bold and italic text', got: %v", sources)
+  }
+  if len(ordered) != 1 || ordered[0] != "bold and italic text" {
+   t.Fatalf("ordered = %v", ordered)
+  }
+ })
 
-	t.Run("strips code spans and links", func(t *testing.T) {
-		md := "- [ ] Use `fetch` to call [the API](https://example.com)\n"
-		sources, ordered := ExtractCheckboxes(md)
-		if _, ok := sources["Use fetch to call the API"]; !ok {
-			t.Fatalf("expected key 'Use fetch to call the API', got: %v", sources)
-		}
-		if len(ordered) != 1 || ordered[0] != "Use fetch to call the API" {
-			t.Fatalf("ordered = %v", ordered)
-		}
-	})
+ t.Run("strips code spans and links", func(t *testing.T) {
+  md := "- [ ] Use `fetch` to call [the API](https://example.com)\n"
+  sources, ordered := ExtractCheckboxes(md)
+  if _, ok := sources["Use fetch to call the API"]; !ok {
+   t.Fatalf("expected key 'Use fetch to call the API', got: %v", sources)
+  }
+  if len(ordered) != 1 || ordered[0] != "Use fetch to call the API" {
+   t.Fatalf("ordered = %v", ordered)
+  }
+ })
 
-	t.Run("empty markdown returns empty map and slice", func(t *testing.T) {
-		sources, ordered := ExtractCheckboxes("")
-		if len(sources) != 0 {
-			t.Fatalf("got %d sources, want 0", len(sources))
-		}
-		if len(ordered) != 0 {
-			t.Fatalf("got %d ordered keys, want 0", len(ordered))
-		}
-	})
+ t.Run("empty markdown returns empty map and slice", func(t *testing.T) {
+  sources, ordered := ExtractCheckboxes("")
+  if len(sources) != 0 {
+   t.Fatalf("got %d sources, want 0", len(sources))
+  }
+  if len(ordered) != 0 {
+   t.Fatalf("got %d ordered keys, want 0", len(ordered))
+  }
+ })
 
-	t.Run("no checkboxes returns empty map and slice", func(t *testing.T) {
-		md := "# Hello\n\n- Regular list\n- Another item\n"
-		sources, ordered := ExtractCheckboxes(md)
-		if len(sources) != 0 {
-			t.Fatalf("got %d sources, want 0", len(sources))
-		}
-		if len(ordered) != 0 {
-			t.Fatalf("got %d ordered keys, want 0", len(ordered))
-		}
-	})
+ t.Run("no checkboxes returns empty map and slice", func(t *testing.T) {
+  md := "# Hello\n\n- Regular list\n- Another item\n"
+  sources, ordered := ExtractCheckboxes(md)
+  if len(sources) != 0 {
+   t.Fatalf("got %d sources, want 0", len(sources))
+  }
+  if len(ordered) != 0 {
+   t.Fatalf("got %d ordered keys, want 0", len(ordered))
+  }
+ })
 
-	t.Run("uppercase X is checked", func(t *testing.T) {
-		md := "- [X] Done\n"
-		sources, _ := ExtractCheckboxes(md)
-		if sources["Done"] != true {
-			t.Fatal("uppercase X should be checked")
-		}
-	})
+ t.Run("uppercase X is checked", func(t *testing.T) {
+  md := "- [X] Done\n"
+  sources, _ := ExtractCheckboxes(md)
+  if sources["Done"] != true {
+   t.Fatal("uppercase X should be checked")
+  }
+ })
 
-	t.Run("nested list excluded from label", func(t *testing.T) {
-		md := "- [ ] Parent\n  - [ ] Child\n"
-		sources, ordered := ExtractCheckboxes(md)
-		if _, ok := sources["Parent"]; !ok {
-			t.Fatal("missing key Parent")
-		}
-		if _, ok := sources["Child"]; !ok {
-			t.Fatal("missing key Child")
-		}
-		// Document order: Parent before Child.
-		if len(ordered) != 2 || ordered[0] != "Parent" || ordered[1] != "Child" {
-			t.Fatalf("ordered = %v", ordered)
-		}
-	})
+ t.Run("nested list excluded from label", func(t *testing.T) {
+  md := "- [ ] Parent\n  - [ ] Child\n"
+  sources, ordered := ExtractCheckboxes(md)
+  if _, ok := sources["Parent"]; !ok {
+   t.Fatal("missing key Parent")
+  }
+  if _, ok := sources["Child"]; !ok {
+   t.Fatal("missing key Child")
+  }
+  // Document order: Parent before Child.
+  if len(ordered) != 2 || ordered[0] != "Parent" || ordered[1] != "Child" {
+   t.Fatalf("ordered = %v", ordered)
+  }
+ })
 
-	t.Run("soft line break preserved in key", func(t *testing.T) {
-		md := "- [ ] First line\n  continued text\n"
-		sources, _ := ExtractCheckboxes(md)
-		want := "First line\ncontinued text"
-		if _, ok := sources[want]; !ok {
-			t.Fatalf("expected key %q, got: %v", want, sources)
-		}
-	})
+ t.Run("soft line break preserved in key", func(t *testing.T) {
+  md := "- [ ] First line\n  continued text\n"
+  sources, _ := ExtractCheckboxes(md)
+  want := "First line\ncontinued text"
+  if _, ok := sources[want]; !ok {
+   t.Fatalf("expected key %q, got: %v", want, sources)
+  }
+ })
 
-	t.Run("loose list uses only first paragraph", func(t *testing.T) {
-		md := "- [ ] Task A\n\n  More details\n\n- [ ] Task B\n"
-		sources, ordered := ExtractCheckboxes(md)
-		if _, ok := sources["Task A"]; !ok {
-			t.Fatalf("expected key 'Task A', got: %v", sources)
-		}
-		if _, ok := sources["Task B"]; !ok {
-			t.Fatalf("expected key 'Task B', got: %v", sources)
-		}
-		if len(ordered) != 2 || ordered[0] != "Task A" || ordered[1] != "Task B" {
-			t.Fatalf("ordered = %v", ordered)
-		}
-	})
+ t.Run("loose list uses only first paragraph", func(t *testing.T) {
+  md := "- [ ] Task A\n\n  More details\n\n- [ ] Task B\n"
+  sources, ordered := ExtractCheckboxes(md)
+  if _, ok := sources["Task A"]; !ok {
+   t.Fatalf("expected key 'Task A', got: %v", sources)
+  }
+  if _, ok := sources["Task B"]; !ok {
+   t.Fatalf("expected key 'Task B', got: %v", sources)
+  }
+  if len(ordered) != 2 || ordered[0] != "Task A" || ordered[1] != "Task B" {
+   t.Fatalf("ordered = %v", ordered)
+  }
+ })
 }
 ```
 
@@ -199,56 +200,56 @@ In `internal/server/checkbox.go`, replace the existing `ExtractCheckboxSources` 
 // Keys are computed using the same algorithm as the frontend (content-derived,
 // with `#N` disambiguation for duplicates).
 func ExtractCheckboxes(content string) (map[string]bool, []string) {
-	source := []byte(content)
-	md := goldmark.New(goldmark.WithExtensions(extension.TaskList))
-	reader := text.NewReader(source)
-	doc := md.Parser().Parse(reader)
+ source := []byte(content)
+ md := goldmark.New(goldmark.WithExtensions(extension.TaskList))
+ reader := text.NewReader(source)
+ doc := md.Parser().Parse(reader)
 
-	occurrences := map[string]int{}
-	result := map[string]bool{}
-	ordered := make([]string, 0)
+ occurrences := map[string]int{}
+ result := map[string]bool{}
+ ordered := make([]string, 0)
 
-	ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-		if !entering {
-			return ast.WalkContinue, nil
-		}
-		if n.Kind() != ast.KindListItem {
-			return ast.WalkContinue, nil
-		}
+ ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+  if !entering {
+   return ast.WalkContinue, nil
+  }
+  if n.Kind() != ast.KindListItem {
+   return ast.WalkContinue, nil
+  }
 
-		// Find the TaskCheckBox child. In goldmark, the TaskCheckBox is an
-		// inline node inside a TextBlock (tight lists) or Paragraph (loose
-		// lists) child of the ListItem.
-		var checkbox *east.TaskCheckBox
-		for child := n.FirstChild(); child != nil; child = child.NextSibling() {
-			if child.Kind() == ast.KindParagraph || child.Kind() == ast.KindTextBlock {
-				for gc := child.FirstChild(); gc != nil; gc = gc.NextSibling() {
-					if gc.Kind() == east.KindTaskCheckBox {
-						cb, ok := gc.(*east.TaskCheckBox)
-						if ok {
-							checkbox = cb
-						}
-						break
-					}
-				}
-				if checkbox != nil {
-					break
-				}
-			}
-		}
-		if checkbox == nil {
-			return ast.WalkContinue, nil
-		}
+  // Find the TaskCheckBox child. In goldmark, the TaskCheckBox is an
+  // inline node inside a TextBlock (tight lists) or Paragraph (loose
+  // lists) child of the ListItem.
+  var checkbox *east.TaskCheckBox
+  for child := n.FirstChild(); child != nil; child = child.NextSibling() {
+   if child.Kind() == ast.KindParagraph || child.Kind() == ast.KindTextBlock {
+    for gc := child.FirstChild(); gc != nil; gc = gc.NextSibling() {
+     if gc.Kind() == east.KindTaskCheckBox {
+      cb, ok := gc.(*east.TaskCheckBox)
+      if ok {
+       checkbox = cb
+      }
+      break
+     }
+    }
+    if checkbox != nil {
+     break
+    }
+   }
+  }
+  if checkbox == nil {
+   return ast.WalkContinue, nil
+  }
 
-		labelText := extractCheckboxLabel(n, source)
-		key := computeCheckboxKey(labelText, occurrences)
-		result[key] = checkbox.IsChecked
-		ordered = append(ordered, key)
+  labelText := extractCheckboxLabel(n, source)
+  key := computeCheckboxKey(labelText, occurrences)
+  result[key] = checkbox.IsChecked
+  ordered = append(ordered, key)
 
-		return ast.WalkContinue, nil
-	})
+  return ast.WalkContinue, nil
+ })
 
-	return result, ordered
+ return result, ordered
 }
 ```
 
@@ -257,28 +258,28 @@ func ExtractCheckboxes(content string) (map[string]bool, []string) {
 In `internal/server/server.go`, change line 313 (inside `AddFile`):
 
 ```go
-		if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
-			checkboxSrc, _ = ExtractCheckboxes(string(fullContent))
-		}
+  if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
+   checkboxSrc, _ = ExtractCheckboxes(string(fullContent))
+  }
 ```
 
 And change line 399 (inside `AddUploadedFile`):
 
 ```go
-	if entry.Type == FileTypeMarkdown {
-		sources, _ := ExtractCheckboxes(content)
-		if len(sources) > 0 {
-			s.checkboxSources[entry.ID] = sources
-		}
-	}
+ if entry.Type == FileTypeMarkdown {
+  sources, _ := ExtractCheckboxes(content)
+  if len(sources) > 0 {
+   s.checkboxSources[entry.ID] = sources
+  }
+ }
 ```
 
 And change line 1054 (inside `notifyFileChangedByPath`):
 
 ```go
-		if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
-			newCheckboxSrc, _ = ExtractCheckboxes(string(fullContent))
-		}
+  if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
+   newCheckboxSrc, _ = ExtractCheckboxes(string(fullContent))
+  }
 ```
 
 (Note: this step uses `_` to discard the ordered slice temporarily. Task 2 will thread it through. This step exists only to keep the code compiling after `ExtractCheckboxSources` is deleted.)
@@ -302,6 +303,7 @@ cd /vm-mo && git add internal/server/checkbox.go internal/server/checkbox_test.g
 ### Task 2: Backend — `checkboxOrderedKeys` state field
 
 **Files:**
+
 - Modify: `internal/server/server.go` (State struct, NewState, AddFile, AddUploadedFile, RemoveFile, notifyFileChangedByPath, GetCheckboxState)
 - Modify: `internal/server/server_test.go` (newTestState helper, TestRemoveFileCleansUpCheckboxState)
 
@@ -311,38 +313,38 @@ In `internal/server/server_test.go`, update `TestRemoveFileCleansUpCheckboxState
 
 ```go
 func TestRemoveFileCleansUpCheckboxState(t *testing.T) {
-	s := newTestState(t)
-	dir := t.TempDir()
-	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] Item\n"), 0o600)
+ s := newTestState(t)
+ dir := t.TempDir()
+ mdFile := filepath.Join(dir, "tasks.md")
+ os.WriteFile(mdFile, []byte("- [ ] Item\n"), 0o600)
 
-	entry, err := s.AddFile(mdFile, DefaultGroup)
-	if err != nil {
-		t.Fatal(err)
-	}
+ entry, err := s.AddFile(mdFile, DefaultGroup)
+ if err != nil {
+  t.Fatal(err)
+ }
 
-	// Manually add an override.
-	s.mu.Lock()
-	s.checkboxOverrides[entry.ID] = map[string]bool{"Item": true}
-	s.mu.Unlock()
+ // Manually add an override.
+ s.mu.Lock()
+ s.checkboxOverrides[entry.ID] = map[string]bool{"Item": true}
+ s.mu.Unlock()
 
-	s.RemoveFile(entry.ID)
+ s.RemoveFile(entry.ID)
 
-	s.mu.RLock()
-	_, hasSources := s.checkboxSources[entry.ID]
-	_, hasOverrides := s.checkboxOverrides[entry.ID]
-	_, hasOrdered := s.checkboxOrderedKeys[entry.ID]
-	s.mu.RUnlock()
+ s.mu.RLock()
+ _, hasSources := s.checkboxSources[entry.ID]
+ _, hasOverrides := s.checkboxOverrides[entry.ID]
+ _, hasOrdered := s.checkboxOrderedKeys[entry.ID]
+ s.mu.RUnlock()
 
-	if hasSources {
-		t.Fatal("sources should be deleted after RemoveFile")
-	}
-	if hasOverrides {
-		t.Fatal("overrides should be deleted after RemoveFile")
-	}
-	if hasOrdered {
-		t.Fatal("orderedKeys should be deleted after RemoveFile")
-	}
+ if hasSources {
+  t.Fatal("sources should be deleted after RemoveFile")
+ }
+ if hasOverrides {
+  t.Fatal("overrides should be deleted after RemoveFile")
+ }
+ if hasOrdered {
+  t.Fatal("orderedKeys should be deleted after RemoveFile")
+ }
 }
 ```
 
@@ -350,26 +352,26 @@ Also add a new test after it asserting `AddFile` populates `checkboxOrderedKeys`
 
 ```go
 func TestAddFilePopulatesCheckboxOrderedKeys(t *testing.T) {
-	s := newTestState(t)
-	dir := t.TempDir()
-	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] First\n- [x] Second\n"), 0o600)
+ s := newTestState(t)
+ dir := t.TempDir()
+ mdFile := filepath.Join(dir, "tasks.md")
+ os.WriteFile(mdFile, []byte("- [ ] First\n- [x] Second\n"), 0o600)
 
-	entry, err := s.AddFile(mdFile, DefaultGroup)
-	if err != nil {
-		t.Fatal(err)
-	}
+ entry, err := s.AddFile(mdFile, DefaultGroup)
+ if err != nil {
+  t.Fatal(err)
+ }
 
-	s.mu.RLock()
-	ordered := s.checkboxOrderedKeys[entry.ID]
-	s.mu.RUnlock()
+ s.mu.RLock()
+ ordered := s.checkboxOrderedKeys[entry.ID]
+ s.mu.RUnlock()
 
-	if len(ordered) != 2 {
-		t.Fatalf("got %d ordered keys, want 2", len(ordered))
-	}
-	if ordered[0] != "First" || ordered[1] != "Second" {
-		t.Fatalf("ordered keys wrong: %v", ordered)
-	}
+ if len(ordered) != 2 {
+  t.Fatalf("got %d ordered keys, want 2", len(ordered))
+ }
+ if ordered[0] != "First" || ordered[1] != "Second" {
+  t.Fatalf("ordered keys wrong: %v", ordered)
+ }
 }
 ```
 
@@ -383,17 +385,17 @@ Expected: FAIL — `s.checkboxOrderedKeys` undefined.
 In `internal/server/server.go`, update the `State` struct around lines 196-197:
 
 ```go
-	checkboxSources     map[string]map[string]bool // fileID → checkboxKey → source checked
-	checkboxOverrides   map[string]map[string]bool // fileID → checkboxKey → overridden checked
-	checkboxOrderedKeys map[string][]string        // fileID → keys in document order
+ checkboxSources     map[string]map[string]bool // fileID → checkboxKey → source checked
+ checkboxOverrides   map[string]map[string]bool // fileID → checkboxKey → overridden checked
+ checkboxOrderedKeys map[string][]string        // fileID → keys in document order
 ```
 
 And initialize it in `NewState` around lines 221-222:
 
 ```go
-		checkboxSources:     make(map[string]map[string]bool),
-		checkboxOverrides:   make(map[string]map[string]bool),
-		checkboxOrderedKeys: make(map[string][]string),
+  checkboxSources:     make(map[string]map[string]bool),
+  checkboxOverrides:   make(map[string]map[string]bool),
+  checkboxOrderedKeys: make(map[string][]string),
 ```
 
 - [ ] **Step 4: Initialize `checkboxOrderedKeys` in the test state helper**
@@ -401,18 +403,18 @@ And initialize it in `NewState` around lines 221-222:
 In `internal/server/server_test.go`, update `newTestState` (around lines 33-43) to initialize the new map:
 
 ```go
-	s := &State{
-		groups:              make(map[string]*Group),
-		subscribers:         make(map[chan sseEvent]struct{}),
-		restartCh:           make(chan string, 1),
-		shutdownCh:          make(chan struct{}, 1),
-		watchedDirs:         make(map[string]int),
-		fileChangeDebounce:  defaultFileChangeDebounce,
-		fileChangeTimers:    make(map[string]*time.Timer),
-		checkboxSources:     make(map[string]map[string]bool),
-		checkboxOverrides:   make(map[string]map[string]bool),
-		checkboxOrderedKeys: make(map[string][]string),
-	}
+ s := &State{
+  groups:              make(map[string]*Group),
+  subscribers:         make(map[chan sseEvent]struct{}),
+  restartCh:           make(chan string, 1),
+  shutdownCh:          make(chan struct{}, 1),
+  watchedDirs:         make(map[string]int),
+  fileChangeDebounce:  defaultFileChangeDebounce,
+  fileChangeTimers:    make(map[string]*time.Timer),
+  checkboxSources:     make(map[string]map[string]bool),
+  checkboxOverrides:   make(map[string]map[string]bool),
+  checkboxOrderedKeys: make(map[string][]string),
+ }
 ```
 
 - [ ] **Step 5: Populate `checkboxOrderedKeys` in `AddFile`**
@@ -420,41 +422,45 @@ In `internal/server/server_test.go`, update `newTestState` (around lines 33-43) 
 In `internal/server/server.go`, update the `AddFile` region around lines 310-344:
 
 Replace:
+
 ```go
-	var checkboxSrc map[string]bool
-	if fileType == FileTypeMarkdown {
-		if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
-			checkboxSrc, _ = ExtractCheckboxes(string(fullContent))
-		}
-	}
+ var checkboxSrc map[string]bool
+ if fileType == FileTypeMarkdown {
+  if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
+   checkboxSrc, _ = ExtractCheckboxes(string(fullContent))
+  }
+ }
 ```
 
 With:
+
 ```go
-	var checkboxSrc map[string]bool
-	var checkboxOrdered []string
-	if fileType == FileTypeMarkdown {
-		if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
-			checkboxSrc, checkboxOrdered = ExtractCheckboxes(string(fullContent))
-		}
-	}
+ var checkboxSrc map[string]bool
+ var checkboxOrdered []string
+ if fileType == FileTypeMarkdown {
+  if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
+   checkboxSrc, checkboxOrdered = ExtractCheckboxes(string(fullContent))
+  }
+ }
 ```
 
 And further down, where the sources are assigned to state (around line 342-344), replace:
+
 ```go
-	if len(checkboxSrc) > 0 {
-		s.checkboxSources[entry.ID] = checkboxSrc
-	}
+ if len(checkboxSrc) > 0 {
+  s.checkboxSources[entry.ID] = checkboxSrc
+ }
 ```
 
 With:
+
 ```go
-	if len(checkboxSrc) > 0 {
-		s.checkboxSources[entry.ID] = checkboxSrc
-	}
-	if len(checkboxOrdered) > 0 {
-		s.checkboxOrderedKeys[entry.ID] = checkboxOrdered
-	}
+ if len(checkboxSrc) > 0 {
+  s.checkboxSources[entry.ID] = checkboxSrc
+ }
+ if len(checkboxOrdered) > 0 {
+  s.checkboxOrderedKeys[entry.ID] = checkboxOrdered
+ }
 ```
 
 - [ ] **Step 6: Populate `checkboxOrderedKeys` in `AddUploadedFile`**
@@ -462,24 +468,26 @@ With:
 In `internal/server/server.go`, update the `AddUploadedFile` block around lines 398-403:
 
 Replace:
+
 ```go
-	if entry.Type == FileTypeMarkdown {
-		sources, _ := ExtractCheckboxes(content)
-		if len(sources) > 0 {
-			s.checkboxSources[entry.ID] = sources
-		}
-	}
+ if entry.Type == FileTypeMarkdown {
+  sources, _ := ExtractCheckboxes(content)
+  if len(sources) > 0 {
+   s.checkboxSources[entry.ID] = sources
+  }
+ }
 ```
 
 With (spec: "always, not conditional" — store ordered keys even if sources is empty, so that a markdown upload with no checkboxes still has a canonical empty slice):
+
 ```go
-	if entry.Type == FileTypeMarkdown {
-		sources, ordered := ExtractCheckboxes(content)
-		if len(sources) > 0 {
-			s.checkboxSources[entry.ID] = sources
-		}
-		s.checkboxOrderedKeys[entry.ID] = ordered
-	}
+ if entry.Type == FileTypeMarkdown {
+  sources, ordered := ExtractCheckboxes(content)
+  if len(sources) > 0 {
+   s.checkboxSources[entry.ID] = sources
+  }
+  s.checkboxOrderedKeys[entry.ID] = ordered
+ }
 ```
 
 - [ ] **Step 7: Delete `checkboxOrderedKeys[id]` in `RemoveFile`**
@@ -487,10 +495,10 @@ With (spec: "always, not conditional" — store ordered keys even if sources is 
 In `internal/server/server.go`, update `RemoveFile` at lines 560-561:
 
 ```go
-				g.Files = append(g.Files[:i], g.Files[i+1:]...)
-				delete(s.checkboxSources, id)
-				delete(s.checkboxOverrides, id)
-				delete(s.checkboxOrderedKeys, id)
+    g.Files = append(g.Files[:i], g.Files[i+1:]...)
+    delete(s.checkboxSources, id)
+    delete(s.checkboxOverrides, id)
+    delete(s.checkboxOrderedKeys, id)
 ```
 
 - [ ] **Step 8: Populate `checkboxOrderedKeys` in `notifyFileChangedByPath`**
@@ -498,51 +506,55 @@ In `internal/server/server.go`, update `RemoveFile` at lines 560-561:
 In `internal/server/server.go`, update `notifyFileChangedByPath` around lines 1050-1105.
 
 Replace the extraction call (around line 1050-1056):
+
 ```go
-	// Re-extract checkbox sources for reconciliation.
-	var newCheckboxSrc map[string]bool
-	if ft := DetectFileType(absPath); ft == FileTypeMarkdown {
-		if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
-			newCheckboxSrc, _ = ExtractCheckboxes(string(fullContent))
-		}
-	}
+ // Re-extract checkbox sources for reconciliation.
+ var newCheckboxSrc map[string]bool
+ if ft := DetectFileType(absPath); ft == FileTypeMarkdown {
+  if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
+   newCheckboxSrc, _ = ExtractCheckboxes(string(fullContent))
+  }
+ }
 ```
 
 With:
+
 ```go
-	// Re-extract checkbox sources for reconciliation.
-	var newCheckboxSrc map[string]bool
-	var newCheckboxOrdered []string
-	if ft := DetectFileType(absPath); ft == FileTypeMarkdown {
-		if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
-			newCheckboxSrc, newCheckboxOrdered = ExtractCheckboxes(string(fullContent))
-		}
-	}
+ // Re-extract checkbox sources for reconciliation.
+ var newCheckboxSrc map[string]bool
+ var newCheckboxOrdered []string
+ if ft := DetectFileType(absPath); ft == FileTypeMarkdown {
+  if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
+   newCheckboxSrc, newCheckboxOrdered = ExtractCheckboxes(string(fullContent))
+  }
+ }
 ```
 
 And inside the reconciliation loop (around lines 1076-1105), replace:
+
 ```go
-					// Update sources.
-					if len(newCheckboxSrc) > 0 {
-						s.checkboxSources[entry.ID] = newCheckboxSrc
-					} else {
-						delete(s.checkboxSources, entry.ID)
-					}
+     // Update sources.
+     if len(newCheckboxSrc) > 0 {
+      s.checkboxSources[entry.ID] = newCheckboxSrc
+     } else {
+      delete(s.checkboxSources, entry.ID)
+     }
 ```
 
 With:
+
 ```go
-					// Update sources and ordered keys.
-					if len(newCheckboxSrc) > 0 {
-						s.checkboxSources[entry.ID] = newCheckboxSrc
-					} else {
-						delete(s.checkboxSources, entry.ID)
-					}
-					if len(newCheckboxOrdered) > 0 {
-						s.checkboxOrderedKeys[entry.ID] = newCheckboxOrdered
-					} else {
-						delete(s.checkboxOrderedKeys, entry.ID)
-					}
+     // Update sources and ordered keys.
+     if len(newCheckboxSrc) > 0 {
+      s.checkboxSources[entry.ID] = newCheckboxSrc
+     } else {
+      delete(s.checkboxSources, entry.ID)
+     }
+     if len(newCheckboxOrdered) > 0 {
+      s.checkboxOrderedKeys[entry.ID] = newCheckboxOrdered
+     } else {
+      delete(s.checkboxOrderedKeys, entry.ID)
+     }
 ```
 
 - [ ] **Step 9: Update `GetCheckboxState` to return ordered keys**
@@ -552,39 +564,39 @@ In `internal/server/server.go`, replace the full `GetCheckboxState` function (li
 ```go
 // GetCheckboxState returns the sources, overrides, and ordered keys for a file.
 func (s *State) GetCheckboxState(id string) (sources, overrides map[string]bool, orderedKeys []string, found bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+ s.mu.RLock()
+ defer s.mu.RUnlock()
 
-	// Verify file exists.
-	fileFound := false
-	for _, g := range s.groups {
-		for _, f := range g.Files {
-			if f.ID == id {
-				fileFound = true
-				break
-			}
-		}
-		if fileFound {
-			break
-		}
-	}
-	if !fileFound {
-		return nil, nil, nil, false
-	}
+ // Verify file exists.
+ fileFound := false
+ for _, g := range s.groups {
+  for _, f := range g.Files {
+   if f.ID == id {
+    fileFound = true
+    break
+   }
+  }
+  if fileFound {
+   break
+  }
+ }
+ if !fileFound {
+  return nil, nil, nil, false
+ }
 
-	src := s.checkboxSources[id]
-	if src == nil {
-		src = map[string]bool{}
-	}
-	ovr := s.checkboxOverrides[id]
-	if ovr == nil {
-		ovr = map[string]bool{}
-	}
-	ordered := s.checkboxOrderedKeys[id]
-	if ordered == nil {
-		ordered = []string{}
-	}
-	return src, ovr, ordered, true
+ src := s.checkboxSources[id]
+ if src == nil {
+  src = map[string]bool{}
+ }
+ ovr := s.checkboxOverrides[id]
+ if ovr == nil {
+  ovr = map[string]bool{}
+ }
+ ordered := s.checkboxOrderedKeys[id]
+ if ordered == nil {
+  ordered = []string{}
+ }
+ return src, ovr, ordered, true
 }
 ```
 
@@ -593,27 +605,30 @@ func (s *State) GetCheckboxState(id string) (sources, overrides map[string]bool,
 In `internal/server/server.go`, the only caller outside of `handleGetCheckboxes` is in `notifyFileChangedByPath` around lines 1116-1119. Replace:
 
 ```go
-	for _, cbID := range checkboxChangedIDs {
-		src, ovr, _ := s.GetCheckboxState(cbID)
-		s.broadcastCheckboxChanged(cbID, src, ovr)
-	}
+ for _, cbID := range checkboxChangedIDs {
+  src, ovr, _ := s.GetCheckboxState(cbID)
+  s.broadcastCheckboxChanged(cbID, src, ovr)
+ }
 ```
 
 With:
+
 ```go
-	for _, cbID := range checkboxChangedIDs {
-		src, ovr, ordered, _ := s.GetCheckboxState(cbID)
-		s.broadcastCheckboxChanged(cbID, src, ovr, ordered)
-	}
+ for _, cbID := range checkboxChangedIDs {
+  src, ovr, ordered, _ := s.GetCheckboxState(cbID)
+  s.broadcastCheckboxChanged(cbID, src, ovr, ordered)
+ }
 ```
 
 (Note: `broadcastCheckboxChanged`'s new signature lands in Task 3. The code will not compile at the end of Task 2 — we land these two changes in the same task below by also updating the three other callers and the function itself here. Re-reading: there are multiple callers. Let's do them all now, because the compiler error would surface mid-Task 2 anyway.)
 
 Callers of `GetCheckboxState` are:
+
 - `notifyFileChangedByPath` line 1117
 - `handleGetCheckboxes` line 2106
 
 Callers of `broadcastCheckboxChanged` are:
+
 - `notifyFileChangedByPath` line 1118
 - `SetCheckbox` line 1941
 - `UncheckAll` line 1996
@@ -622,102 +637,108 @@ Callers of `broadcastCheckboxChanged` are:
 All must be updated atomically. Apply the following updates to `server.go` in this step:
 
 In `SetCheckbox` (around lines 1931-1941), replace:
-```go
-	src := s.checkboxSources[id]
-	if src == nil {
-		src = map[string]bool{}
-	}
-	ovr := s.checkboxOverrides[id]
-	if ovr == nil {
-		ovr = map[string]bool{}
-	}
-	s.mu.Unlock()
 
-	s.broadcastCheckboxChanged(id, src, ovr)
+```go
+ src := s.checkboxSources[id]
+ if src == nil {
+  src = map[string]bool{}
+ }
+ ovr := s.checkboxOverrides[id]
+ if ovr == nil {
+  ovr = map[string]bool{}
+ }
+ s.mu.Unlock()
+
+ s.broadcastCheckboxChanged(id, src, ovr)
 ```
 
 With:
-```go
-	src := s.checkboxSources[id]
-	if src == nil {
-		src = map[string]bool{}
-	}
-	ovr := s.checkboxOverrides[id]
-	if ovr == nil {
-		ovr = map[string]bool{}
-	}
-	ordered := s.checkboxOrderedKeys[id]
-	if ordered == nil {
-		ordered = []string{}
-	}
-	s.mu.Unlock()
 
-	s.broadcastCheckboxChanged(id, src, ovr, ordered)
+```go
+ src := s.checkboxSources[id]
+ if src == nil {
+  src = map[string]bool{}
+ }
+ ovr := s.checkboxOverrides[id]
+ if ovr == nil {
+  ovr = map[string]bool{}
+ }
+ ordered := s.checkboxOrderedKeys[id]
+ if ordered == nil {
+  ordered = []string{}
+ }
+ s.mu.Unlock()
+
+ s.broadcastCheckboxChanged(id, src, ovr, ordered)
 ```
 
 In `UncheckAll` (around lines 1986-1996), replace:
-```go
-	ovr := s.checkboxOverrides[id]
-	if ovr == nil {
-		ovr = map[string]bool{}
-	}
-	srcCopy := make(map[string]bool, len(src))
-	for k, v := range src {
-		srcCopy[k] = v
-	}
-	s.mu.Unlock()
 
-	s.broadcastCheckboxChanged(id, srcCopy, ovr)
+```go
+ ovr := s.checkboxOverrides[id]
+ if ovr == nil {
+  ovr = map[string]bool{}
+ }
+ srcCopy := make(map[string]bool, len(src))
+ for k, v := range src {
+  srcCopy[k] = v
+ }
+ s.mu.Unlock()
+
+ s.broadcastCheckboxChanged(id, srcCopy, ovr)
 ```
 
 With:
-```go
-	ovr := s.checkboxOverrides[id]
-	if ovr == nil {
-		ovr = map[string]bool{}
-	}
-	srcCopy := make(map[string]bool, len(src))
-	for k, v := range src {
-		srcCopy[k] = v
-	}
-	ordered := s.checkboxOrderedKeys[id]
-	if ordered == nil {
-		ordered = []string{}
-	}
-	s.mu.Unlock()
 
-	s.broadcastCheckboxChanged(id, srcCopy, ovr, ordered)
+```go
+ ovr := s.checkboxOverrides[id]
+ if ovr == nil {
+  ovr = map[string]bool{}
+ }
+ srcCopy := make(map[string]bool, len(src))
+ for k, v := range src {
+  srcCopy[k] = v
+ }
+ ordered := s.checkboxOrderedKeys[id]
+ if ordered == nil {
+  ordered = []string{}
+ }
+ s.mu.Unlock()
+
+ s.broadcastCheckboxChanged(id, srcCopy, ovr, ordered)
 ```
 
 Make the equivalent change in `CheckAll` (around lines 2040-2050) — identical pattern, add `ordered` capture and pass it as the fourth arg.
 
 In `handleGetCheckboxes` (around lines 2099-2116), replace:
+
 ```go
-		sources, overrides, found := state.GetCheckboxState(id)
-		if !found {
-			http.Error(w, "file not found", http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(struct {
-			Sources   map[string]bool `json:"sources"`
-			Overrides map[string]bool `json:"overrides"`
-		}{Sources: sources, Overrides: overrides})
+  sources, overrides, found := state.GetCheckboxState(id)
+  if !found {
+   http.Error(w, "file not found", http.StatusNotFound)
+   return
+  }
+  w.Header().Set("Content-Type", "application/json")
+  json.NewEncoder(w).Encode(struct {
+   Sources   map[string]bool `json:"sources"`
+   Overrides map[string]bool `json:"overrides"`
+  }{Sources: sources, Overrides: overrides})
 ```
 
 With:
+
 ```go
-		sources, overrides, orderedKeys, found := state.GetCheckboxState(id)
-		if !found {
-			http.Error(w, "file not found", http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(struct {
-			Sources     map[string]bool `json:"sources"`
-			Overrides   map[string]bool `json:"overrides"`
-			OrderedKeys []string        `json:"orderedKeys"`
-		}{Sources: sources, Overrides: overrides, OrderedKeys: orderedKeys})
+  sources, overrides, orderedKeys, found := state.GetCheckboxState(id)
+  if !found {
+   http.Error(w, "file not found", http.StatusNotFound)
+   return
+  }
+  w.Header().Set("Content-Type", "application/json")
+  json.NewEncoder(w).Encode(struct {
+   Sources     map[string]bool `json:"sources"`
+   Overrides   map[string]bool `json:"overrides"`
+   OrderedKeys []string        `json:"orderedKeys"`
+  }{Sources: sources, Overrides: overrides, OrderedKeys: orderedKeys})
 ```
 
 - [ ] **Step 11: Update `broadcastCheckboxChanged` signature and payload**
@@ -726,21 +747,21 @@ In `internal/server/server.go`, replace the full `broadcastCheckboxChanged` func
 
 ```go
 func (s *State) broadcastCheckboxChanged(id string, sources, overrides map[string]bool, orderedKeys []string) {
-	b, err := json.Marshal(struct {
-		FileID      string          `json:"fileId"`
-		Sources     map[string]bool `json:"sources"`
-		Overrides   map[string]bool `json:"overrides"`
-		OrderedKeys []string        `json:"orderedKeys"`
-	}{FileID: id, Sources: sources, Overrides: overrides, OrderedKeys: orderedKeys})
-	if err != nil {
-		slog.Error("broadcastCheckboxChanged", "err", err)
-		return
-	}
-	s.sendEvent(sseEvent{
-		Name: eventCheckboxChanged,
-		Data: string(b),
-	})
-	s.markDirty()
+ b, err := json.Marshal(struct {
+  FileID      string          `json:"fileId"`
+  Sources     map[string]bool `json:"sources"`
+  Overrides   map[string]bool `json:"overrides"`
+  OrderedKeys []string        `json:"orderedKeys"`
+ }{FileID: id, Sources: sources, Overrides: overrides, OrderedKeys: orderedKeys})
+ if err != nil {
+  slog.Error("broadcastCheckboxChanged", "err", err)
+  return
+ }
+ s.sendEvent(sseEvent{
+  Name: eventCheckboxChanged,
+  Data: string(b),
+ })
+ s.markDirty()
 }
 ```
 
@@ -768,6 +789,7 @@ cd /vm-mo && git add internal/server/server.go internal/server/server_test.go &&
 ### Task 3: Backend — cross-parser ordering tests (blockquote & table)
 
 **Files:**
+
 - Modify: `internal/server/checkbox_test.go`
 
 - [ ] **Step 1: Write the failing tests for blockquote and table scopes**
@@ -775,49 +797,49 @@ cd /vm-mo && git add internal/server/server.go internal/server/server_test.go &&
 Append to the `TestExtractCheckboxes` function in `internal/server/checkbox_test.go`:
 
 ```go
-	t.Run("checkbox inside blockquote", func(t *testing.T) {
-		md := "> - [ ] Quoted task\n> - [x] Quoted done\n"
-		sources, ordered := ExtractCheckboxes(md)
-		// Whatever goldmark's position, the two task-list items must be
-		// extracted in document order. If goldmark drops them entirely that
-		// is also acceptable (empty result) — the invariant is count and
-		// order consistency with remark-gfm, asserted via the frontend tests.
-		if len(ordered) != len(sources) {
-			t.Fatalf("ordered len %d != sources len %d", len(ordered), len(sources))
-		}
-		if len(ordered) == 2 {
-			if ordered[0] != "Quoted task" || ordered[1] != "Quoted done" {
-				t.Fatalf("blockquote order wrong: %v", ordered)
-			}
-		}
-	})
+ t.Run("checkbox inside blockquote", func(t *testing.T) {
+  md := "> - [ ] Quoted task\n> - [x] Quoted done\n"
+  sources, ordered := ExtractCheckboxes(md)
+  // Whatever goldmark's position, the two task-list items must be
+  // extracted in document order. If goldmark drops them entirely that
+  // is also acceptable (empty result) — the invariant is count and
+  // order consistency with remark-gfm, asserted via the frontend tests.
+  if len(ordered) != len(sources) {
+   t.Fatalf("ordered len %d != sources len %d", len(ordered), len(sources))
+  }
+  if len(ordered) == 2 {
+   if ordered[0] != "Quoted task" || ordered[1] != "Quoted done" {
+    t.Fatalf("blockquote order wrong: %v", ordered)
+   }
+  }
+ })
 
-	t.Run("checkbox outside list is ignored", func(t *testing.T) {
-		// Raw HTML checkbox should not appear in the extracted set — goldmark
-		// only recognises checkboxes inside the TaskList extension scope.
-		md := "Some paragraph with <input type=\"checkbox\"> inside.\n\n- [ ] Real task\n"
-		sources, ordered := ExtractCheckboxes(md)
-		if len(sources) != 1 {
-			t.Fatalf("got %d sources, want 1 (raw HTML checkbox must be ignored)", len(sources))
-		}
-		if len(ordered) != 1 || ordered[0] != "Real task" {
-			t.Fatalf("ordered = %v", ordered)
-		}
-	})
+ t.Run("checkbox outside list is ignored", func(t *testing.T) {
+  // Raw HTML checkbox should not appear in the extracted set — goldmark
+  // only recognises checkboxes inside the TaskList extension scope.
+  md := "Some paragraph with <input type=\"checkbox\"> inside.\n\n- [ ] Real task\n"
+  sources, ordered := ExtractCheckboxes(md)
+  if len(sources) != 1 {
+   t.Fatalf("got %d sources, want 1 (raw HTML checkbox must be ignored)", len(sources))
+  }
+  if len(ordered) != 1 || ordered[0] != "Real task" {
+   t.Fatalf("ordered = %v", ordered)
+  }
+ })
 
-	t.Run("multiple lists preserve document order", func(t *testing.T) {
-		md := "- [ ] Alpha\n\nSome text\n\n- [ ] Beta\n- [x] Gamma\n"
-		_, ordered := ExtractCheckboxes(md)
-		want := []string{"Alpha", "Beta", "Gamma"}
-		if len(ordered) != 3 {
-			t.Fatalf("got %d ordered keys, want 3", len(ordered))
-		}
-		for i, k := range want {
-			if ordered[i] != k {
-				t.Fatalf("ordered[%d] = %q, want %q", i, ordered[i], k)
-			}
-		}
-	})
+ t.Run("multiple lists preserve document order", func(t *testing.T) {
+  md := "- [ ] Alpha\n\nSome text\n\n- [ ] Beta\n- [x] Gamma\n"
+  _, ordered := ExtractCheckboxes(md)
+  want := []string{"Alpha", "Beta", "Gamma"}
+  if len(ordered) != 3 {
+   t.Fatalf("got %d ordered keys, want 3", len(ordered))
+  }
+  for i, k := range want {
+   if ordered[i] != k {
+    t.Fatalf("ordered[%d] = %q, want %q", i, ordered[i], k)
+   }
+  }
+ })
 ```
 
 - [ ] **Step 2: Run the tests to verify them**
@@ -836,6 +858,7 @@ cd /vm-mo && git add internal/server/checkbox_test.go && git commit -m "test(ser
 ### Task 4: Frontend — add `orderedKeys` to the `CheckboxState` API type
 
 **Files:**
+
 - Modify: `internal/frontend/src/hooks/useApi.ts`
 
 - [ ] **Step 1: Update the `CheckboxState` interface**
@@ -866,6 +889,7 @@ Continue directly into Task 5 — they form a single atomic change. The commit l
 ### Task 5: Frontend — plumb `orderedKeys` through SSE
 
 **Files:**
+
 - Modify: `internal/frontend/src/hooks/useSSE.ts`
 - Modify: `internal/frontend/src/App.tsx`
 
@@ -927,6 +951,7 @@ Do not commit yet — Task 6 completes the frontend state plumbing and lands all
 ### Task 6: Frontend — `useCheckboxState` stores `orderedKeys` and `checkboxesLoaded`
 
 **Files:**
+
 - Modify: `internal/frontend/src/hooks/useCheckboxState.ts`
 
 - [ ] **Step 1: Update the hook**
@@ -1085,6 +1110,7 @@ cd /vm-mo && git add internal/frontend/src/hooks/useApi.ts internal/frontend/src
 ### Task 7: Frontend — rewrite the rehype plugin as `rehypeCheckboxIndices` (TDD)
 
 **Files:**
+
 - Create: `internal/frontend/src/plugins/rehypeCheckboxIndices.ts`
 - Create: `internal/frontend/src/plugins/rehypeCheckboxIndices.test.ts`
 - Delete: `internal/frontend/src/plugins/rehypeCheckboxKeys.ts`
@@ -1336,6 +1362,7 @@ Expected: Compile error in `MarkdownRenderer.tsx` (it still imports from `rehype
 ### Task 8: Frontend — wire the new plugin into `MarkdownRenderer` and gate on `checkboxesLoaded`
 
 **Files:**
+
 - Modify: `internal/frontend/src/renderers/MarkdownRenderer.tsx`
 
 - [ ] **Step 1: Update the plugin import**
@@ -1471,6 +1498,7 @@ Expected: `make build` completes (frontend build + Go build with embedded assets
 Run: `cd /vm-mo && make dev ARGS="testdata/basic.md"`
 
 Verify in the browser:
+
 - Checkboxes in `testdata/basic.md` (and any other file with checkboxes) render interactively on first load.
 - Clicking a checkbox toggles it; reloading the page preserves the override (server-side state).
 - Editing the file on disk (add/remove/reorder a checkbox) reconciles overrides correctly and the browser updates via SSE.

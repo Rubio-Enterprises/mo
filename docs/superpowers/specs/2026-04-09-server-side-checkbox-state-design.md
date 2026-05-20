@@ -51,6 +51,7 @@ Both `AddFile()` and `AddUploadedFile()` must call the checkbox extraction funct
 Returns overrides for a file.
 
 Response:
+
 ```json
 {
   "sources": {"Task A": false, "Task B": true, "Task C": false},
@@ -87,6 +88,7 @@ Triggers SSE event. Returns 404 if file ID doesn't exist.
 New event type: `checkbox-changed`
 
 Payload:
+
 ```json
 {"fileId": "a1b2c3d4", "sources": {"Task A": false, "Task B": true}, "overrides": {"Task B": false}}
 ```
@@ -94,6 +96,7 @@ Payload:
 Contains the full sources and overrides maps for the file (not a diff). Clients replace their local state for that file entirely on receipt.
 
 Fires on:
+
 - Toggle (PUT)
 - Uncheck all (DELETE)
 - Server-side reconciliation after file content changes
@@ -109,11 +112,13 @@ The TypeScript `rehypeCheckboxKeys` plugin operates on the parsed HAST tree (aft
 Add `github.com/yuin/goldmark` and `github.com/yuin/goldmark/extension` as Go dependencies.
 
 Key computation matches the TypeScript `computeCheckboxKey` algorithm:
+
 - Trim label text
 - Use `"__empty"` for blank labels
 - Append `#2`, `#3`, etc. for duplicate labels
 
 Go tests must verify parity with the existing TypeScript test cases:
+
 - `"- [ ] First item"` → key `"First item"`, unchecked
 - `"- [x] Second item"` → key `"Second item"`, checked
 - Duplicate labels: `"TODO"`, `"TODO#2"`, `"TODO#3"`
