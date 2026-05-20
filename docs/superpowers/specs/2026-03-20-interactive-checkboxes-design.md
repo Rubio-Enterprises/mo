@@ -139,7 +139,7 @@ Labels like `- [ ] **bold** item` produce child nodes in the HAST. The plugin ex
 
 ### Empty checkbox labels
 
-`- [ ] ` (no text) uses the key `"__empty"`, with `#N` disambiguation for multiples.
+`- [ ]` (no text) uses the key `"__empty"`, with `#N` disambiguation for multiples.
 
 ### Duplicate filenames across directories
 
@@ -160,12 +160,14 @@ Each file has its own entry in the overrides map, keyed by filename. No conflict
 ## Files to Create/Modify
 
 ### New files
+
 - `internal/frontend/src/plugins/rehypeCheckboxKeys.ts` — rehype plugin
 - `internal/frontend/src/hooks/useCheckboxOverrides.ts` — persistence hook
 - `internal/frontend/src/plugins/rehypeCheckboxKeys.test.ts` — plugin tests
 - `internal/frontend/src/hooks/useCheckboxOverrides.test.ts` — hook tests
 
 ### Key test scenarios
+
 - Basic toggle: check unchecked, uncheck checked
 - Duplicate labels: correct `#N` disambiguation
 - Inline formatting: stripped to plain text for key
@@ -175,6 +177,7 @@ Each file has its own entry in the overrides map, keyed by filename. No conflict
 - Multiple files: independent override state per filename
 
 ### Modified files
+
 - `internal/frontend/src/components/MarkdownViewer.tsx` — add plugin to pipeline, register custom `input` component, update sanitize schema
 - Sanitize schema: add `data-checkbox-key` to allowed `input` attributes
 

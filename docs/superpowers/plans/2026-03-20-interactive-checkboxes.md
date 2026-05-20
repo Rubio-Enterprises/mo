@@ -15,6 +15,7 @@
 ## File Structure
 
 ### New Files
+
 | File | Responsibility |
 |------|---------------|
 | `internal/frontend/src/plugins/rehypeCheckboxKeys.ts` | Rehype plugin: walks HAST, extracts checkbox labels, adds `data-checkbox-key` attributes, reports checkbox map via callback |
@@ -23,6 +24,7 @@
 | `internal/frontend/src/hooks/useCheckboxOverrides.test.ts` | Tests for the hook |
 
 ### Modified Files
+
 | File | Changes |
 |------|---------|
 | `internal/frontend/src/components/MarkdownViewer.tsx` | Import plugin + hook, update sanitize schema, add plugin to rehype pipeline, register custom `input` component |
@@ -32,6 +34,7 @@
 ## Task 0: Install Dependencies
 
 **Files:**
+
 - Modify: `internal/frontend/package.json`
 
 The rehype plugin needs `unist-util-visit` (for HAST tree walking) and `@types/hast` (for TypeScript types). The plugin integration tests need `remark-parse`, `remark-rehype`, and `rehype-stringify` to run a full markdown-to-HTML pipeline. These are all transitive dependencies of the rehype ecosystem but must be direct dependencies with pnpm's strict resolution.
@@ -47,6 +50,7 @@ cd internal/frontend && pnpm add unist-util-visit && pnpm add -D @types/hast rem
 ```bash
 cd internal/frontend && node -e "require('unist-util-visit'); require('rehype-stringify'); console.log('OK')"
 ```
+
 Expected: `OK`
 
 - [ ] **Step 3: Commit**
@@ -61,6 +65,7 @@ git commit -m "build: add rehype plugin dependencies"
 ## Task 1: HAST Text Extraction Utility
 
 **Files:**
+
 - Create: `internal/frontend/src/plugins/rehypeCheckboxKeys.ts` (just the `extractHastText` helper initially)
 - Test: `internal/frontend/src/plugins/rehypeCheckboxKeys.test.ts`
 
@@ -150,6 +155,7 @@ git commit -m "feat: add HAST text extraction utility for checkbox keys"
 ## Task 2: Checkbox Key Generation Logic
 
 **Files:**
+
 - Modify: `internal/frontend/src/plugins/rehypeCheckboxKeys.ts` — add `computeCheckboxKey` and key tracking
 - Test: `internal/frontend/src/plugins/rehypeCheckboxKeys.test.ts` — add key generation tests
 
@@ -222,6 +228,7 @@ git commit -m "feat: add checkbox key generation with duplicate disambiguation"
 ## Task 3: Rehype Plugin Core
 
 **Files:**
+
 - Modify: `internal/frontend/src/plugins/rehypeCheckboxKeys.ts` — add the plugin function
 - Test: `internal/frontend/src/plugins/rehypeCheckboxKeys.test.ts` — add plugin integration tests
 
@@ -412,6 +419,7 @@ git commit -m "feat: implement rehypeCheckboxKeys plugin"
 ## Task 4: useCheckboxOverrides Hook
 
 **Files:**
+
 - Create: `internal/frontend/src/hooks/useCheckboxOverrides.ts`
 - Create: `internal/frontend/src/hooks/useCheckboxOverrides.test.ts`
 
@@ -675,6 +683,7 @@ git commit -m "feat: add useCheckboxOverrides hook with localStorage persistence
 ## Task 5: Integrate into MarkdownViewer
 
 **Files:**
+
 - Modify: `internal/frontend/src/components/MarkdownViewer.tsx:27-34` — update sanitize schema
 - Modify: `internal/frontend/src/components/MarkdownViewer.tsx:448-510` — add custom `input` component
 - Modify: `internal/frontend/src/components/MarkdownViewer.tsx:532-544` — add plugin to pipeline
@@ -779,6 +788,7 @@ Expected: PASS (all tests)
 Run: `make dev ARGS="testdata/gfm.md"`
 
 Verify:
+
 1. The GFM task list checkboxes are visible and clickable
 2. Clicking a checkbox toggles its state
 3. Refresh the page — checkbox state persists
@@ -813,6 +823,7 @@ Run: `make fmt-check`
 Expected: PASS
 
 If formatting issues are found, run `make fmt` and commit:
+
 ```bash
 git add -A
 git commit -m "style: format code"

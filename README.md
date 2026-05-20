@@ -36,7 +36,7 @@
 **homebrew tap:**
 
 ```console
-$ brew install k1LoW/tap/mo
+brew install k1LoW/tap/mo
 ```
 
 **manually:**
@@ -46,9 +46,9 @@ Download binary from [releases page](https://github.com/k1LoW/mo/releases)
 ## Usage
 
 ``` console
-$ mo README.md                          # Open a single file
-$ mo README.md CHANGELOG.md docs/*.md   # Open multiple files
-$ mo spec.md --target design            # Open in a named group
+mo README.md                          # Open a single file
+mo README.md CHANGELOG.md docs/*.md   # Open multiple files
+mo spec.md --target design            # Open in a named group
 ```
 
 `mo` opens Markdown files in a browser with live-reload. When you save a file, the browser automatically reflects the changes.
@@ -58,14 +58,14 @@ $ mo spec.md --target design            # Open in a named group
 By default, `mo` runs a single server on port `6275`. If a server is already running on the same port, subsequent `mo` invocations add files to the existing session instead of starting a new one.
 
 ``` console
-$ mo README.md          # Starts a mo server in the background
-$ mo CHANGELOG.md       # Adds the file to the running mo server
+mo README.md          # Starts a mo server in the background
+mo CHANGELOG.md       # Adds the file to the running mo server
 ```
 
 To run a completely separate session, use a different port:
 
 ``` console
-$ mo draft.md -p 6276
+mo draft.md -p 6276
 ```
 
 ![Multiple files with sidebar](images/multiple-files.png)
@@ -75,9 +75,9 @@ $ mo draft.md -p 6276
 Files can be organized into named groups using the `--target` (`-t`) flag. Each group gets its own URL path and sidebar.
 
 ``` console
-$ mo spec.md --target design      # Opens at http://localhost:6275/design
-$ mo api.md --target design       # Adds to the "design" group
-$ mo notes.md --target notes      # Opens at http://localhost:6275/notes
+mo spec.md --target design      # Opens at http://localhost:6275/design
+mo api.md --target design       # Adds to the "design" group
+mo notes.md --target notes      # Opens at http://localhost:6275/notes
 ```
 
 ![Group view](images/groups.png)
@@ -87,9 +87,9 @@ $ mo notes.md --target notes      # Opens at http://localhost:6275/notes
 Use `--watch` (`-w`) to specify glob patterns. Matching files are opened automatically, and watched directories are monitored for new files.
 
 ``` console
-$ mo --watch '**/*.md'                          # Watch and open all .md files recursively
-$ mo --watch 'docs/**/*.md' --target docs       # Watch docs/ tree in "docs" group
-$ mo --watch '*.md' --watch 'docs/**/*.md'      # Multiple patterns
+mo --watch '**/*.md'                          # Watch and open all .md files recursively
+mo --watch 'docs/**/*.md' --target docs       # Watch docs/ tree in "docs" group
+mo --watch '*.md' --watch 'docs/**/*.md'      # Multiple patterns
 ```
 
 `--watch` cannot be combined with file arguments. The `**` pattern matches directories recursively.
@@ -99,9 +99,9 @@ $ mo --watch '*.md' --watch 'docs/**/*.md'      # Multiple patterns
 Use `--unwatch` to stop watching a previously registered pattern. Files already added remain in the sidebar.
 
 ``` console
-$ mo --unwatch '**/*.md'                              # Stop watching a pattern (default group)
-$ mo --unwatch 'docs/**/*.md' --target docs            # Stop watching in a specific group
-$ mo --unwatch '/Users/you/project/**/*.md'            # Stop watching by absolute path
+mo --unwatch '**/*.md'                              # Stop watching a pattern (default group)
+mo --unwatch 'docs/**/*.md' --target docs            # Stop watching in a specific group
+mo --unwatch '/Users/you/project/**/*.md'            # Stop watching by absolute path
 ```
 
 Patterns are resolved to absolute paths before matching, so you can specify either a relative glob or the full path shown by `--status`.
@@ -110,7 +110,7 @@ Patterns are resolved to absolute paths before matching, so you can specify eith
 
 The sidebar supports flat and tree view modes. Flat view shows file names only, while tree view displays the directory hierarchy.
 
-| <img src="images/icons/view-flat.svg" height="16"> Flat | <img src="images/icons/view-tree.svg" height="16"> Tree |
+| <img src="images/icons/view-flat.svg" alt="flat view icon" height="16"> Flat | <img src="images/icons/view-tree.svg" alt="tree view icon" height="16"> Tree |
 |------|------|
 | ![Flat view](images/sidebar-flat.png) | ![Tree view](images/sidebar-tree.png) |
 
@@ -142,7 +142,7 @@ $ mo --restart             # Restart the mo server on the default port
 If you need the mo server to run in the foreground (e.g. for debugging), use `--foreground`:
 
 ``` console
-$ mo --foreground README.md
+mo --foreground README.md
 ```
 
 ### Server restart
@@ -154,24 +154,24 @@ Click the <img src="images/icons/restart.svg" width="16" height="16" alt="restar
 `mo` automatically saves session state (open files and watch patterns per group) when files are added or removed. When starting a new server, the previous session is automatically restored and merged with any files specified on the command line. Restored session entries appear first, followed by newly specified files.
 
 ``` console
-$ mo README.md CHANGELOG.md       # Start with two files
-$ mo --shutdown                   # Shut down the server
-$ mo                              # Restores README.md and CHANGELOG.md
-$ mo TODO.md                      # Restores previous session + adds TODO.md
+mo README.md CHANGELOG.md       # Start with two files
+mo --shutdown                   # Shut down the server
+mo                              # Restores README.md and CHANGELOG.md
+mo TODO.md                      # Restores previous session + adds TODO.md
 ```
 
 Use `--close` to remove specific files from the running server:
 
 ``` console
-$ mo --close README.md            # Close a file from the default group
-$ mo --close docs/*.md -t docs    # Close files from the "docs" group
+mo --close README.md            # Close a file from the default group
+mo --close docs/*.md -t docs    # Close files from the "docs" group
 ```
 
 Use `--clear` to remove a saved session. If a server is running, it is automatically restarted with an empty state:
 
 ``` console
-$ mo --clear                      # Clear saved session for the default port
-$ mo --clear -p 6276              # Clear saved session for a specific port
+mo --clear                      # Clear saved session for the default port
+mo --clear -p 6276              # Clear saved session for a specific port
 ```
 
 ### JSON output
@@ -241,7 +241,7 @@ $ mo --status --json
 Requires Go and [pnpm](https://pnpm.io/).
 
 ``` console
-$ make build
+make build
 ```
 
 ## References
@@ -251,6 +251,6 @@ $ make build
 ## License
 
 - [MIT License](LICENSE)
-    - Include logo as well as source code.
-    - Only logo license can be selected [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-    - Also, if there is no alteration to the logo and it is used for technical information about mo, I would not say anything if the copyright notice is omitted.
+  - Include logo as well as source code.
+  - Only logo license can be selected [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+  - Also, if there is no alteration to the logo and it is used for technical information about mo, I would not say anything if the copyright notice is omitted.

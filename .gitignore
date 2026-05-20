@@ -22,3 +22,35 @@ Vagrantfile
 !.vm/worktree-files.yml
 !.vm/worktree-setup.sh
 # END agent-sandbox managed
+
+# >>> rubio-standards >>>
+# Managed by rubio-standards Copier template. Do not edit between sentinels —
+# `scripts/merge-gitignore.sh` rewrites this block on every `copier copy/update`.
+.DS_Store
+.envrc.local
+*.log
+node_modules/
+dist/
+build/
+coverage/
+reports/
+
+# secrets — local is plaintext+gitignored (§6.10)
+secrets.local.*
+!secrets.local.example.*
+
+# Per-archetype
+vendor/
+*.exe
+*.test
+*.out
+# <<< rubio-standards <<<
+
+# Keep the placeholder for `internal/static/dist/` so `//go:embed all:dist` in
+# internal/static/static.go matches at least one file before `go generate`
+# runs. Must come AFTER the rubio-standards block above (which ignores `dist/`
+# anywhere); gitignore requires re-allowing the directory before re-allowing
+# a file inside it. The real frontend bundle is still gitignored via the
+# `internal/static/dist/**/*` rule near the top of this file.
+!internal/static/dist/
+!internal/static/dist/.gitkeep
