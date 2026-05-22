@@ -3,7 +3,10 @@
 # Per-archetype release-types are configured in release-please-config.json.
 
 name: release-please
-on:
+# `on:` is quoted to satisfy `yaml[truthy]` (yamllint + ansible-lint): without
+# quotes, YAML 1.1 parsers fold `on` into the boolean `On`. GitHub Actions
+# resolves the key by name regardless, and actionlint accepts both forms.
+"on":
   push:
     branches: [strubio]
 
