@@ -42,12 +42,14 @@ function harness(opts: {
         showTitle={opts.showTitle ?? false}
         menuOpenId={opts.menuOpenId ?? null}
         otherGroups={opts.otherGroups ?? []}
-        onFileSelect={onFileSelect}
-        onMenuToggle={onMenuToggle}
-        onOpenInNewTab={opts.onOpenInNewTab ?? vi.fn()}
-        onCopyPath={opts.onCopyPath ?? vi.fn()}
-        onMoveToGroup={opts.onMoveToGroup ?? vi.fn()}
-        onRemove={opts.onRemove ?? vi.fn()}
+        onFileSelect={onFileSelect as unknown as (id: string) => void}
+        onMenuToggle={onMenuToggle as unknown as (id: string) => void}
+        onOpenInNewTab={(opts.onOpenInNewTab ?? vi.fn()) as unknown as (id: string) => void}
+        onCopyPath={(opts.onCopyPath ?? vi.fn()) as unknown as (path: string) => void}
+        onMoveToGroup={
+          (opts.onMoveToGroup ?? vi.fn()) as unknown as (id: string, group: string) => void
+        }
+        onRemove={(opts.onRemove ?? vi.fn()) as unknown as (id: string) => void}
         menuRef={menuRef}
       />
     );

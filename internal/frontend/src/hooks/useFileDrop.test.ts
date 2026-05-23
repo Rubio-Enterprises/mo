@@ -7,11 +7,11 @@ function fireDragEvent(name: string, options: { hasFiles?: boolean; files?: File
   const { hasFiles = true, files = [] } = options;
   const types = hasFiles ? ["Files"] : [];
   const fileList = {
-    length: files.length,
     item(i: number) {
       return files[i] ?? null;
     },
     ...files,
+    length: files.length,
   };
   const event = new Event(name, { bubbles: true, cancelable: true }) as Event & {
     dataTransfer?: { types: string[]; files: typeof fileList };
