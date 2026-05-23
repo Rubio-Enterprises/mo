@@ -110,7 +110,7 @@ describe("useActiveHeading", () => {
 
     const { result, rerender } = renderHook(
       ({ root }: { root: HTMLElement | null }) => useActiveHeading(["h1"], root),
-      { initialProps: { root: container } },
+      { initialProps: { root: container as HTMLElement | null } },
     );
 
     act(() => {
