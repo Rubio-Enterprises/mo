@@ -62,13 +62,13 @@ pre-commit:
       # Pattern E migration.
       glob: "*.go"
       run: mise exec -- gofmt -w {staged_files}
-      stage_fixed: true
+      stage_fixed: false
     golangci-lint:
       # `mise exec --` so the hook resolves the aqua-pinned binary (see
       # .mise.toml.jinja's go-archetype block). Same rationale as gofmt above.
       glob: "*.go"
       run: mise exec -- golangci-lint run --new-from-rev=HEAD --fix
-      stage_fixed: true
+      stage_fixed: false
     markdownlint:
       glob: "*.md"
       run: mise exec -- markdownlint-cli2 {staged_files}
@@ -91,14 +91,14 @@ pre-commit:
         - "yarn.lock"
         - ".github/actions/**/action.yml"
       run: mise exec -- prettier --write {staged_files}
-      stage_fixed: true
+      stage_fixed: false
     shellcheck:
       glob: "*.{sh,bash}"
       run: shellcheck {staged_files}
     shfmt:
       glob: "*.{sh,bash}"
       run: shfmt -w {staged_files}
-      stage_fixed: true
+      stage_fixed: false
 
 pre-push:
   commands:
