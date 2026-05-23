@@ -64,7 +64,7 @@ describe("useCheckboxState", () => {
 
     act(() => result.current.toggle("a"));
     await waitFor(() => expect(toggleBody).not.toBeNull());
-    expect(toggleBody?.checked).toBe(true);
+    expect((toggleBody as { checked: boolean } | null)?.checked).toBe(true);
   });
 
   it("checkAll / uncheckAll call the right endpoints", async () => {

@@ -13,8 +13,17 @@ describe("RestartButton", () => {
     const realLocation = window.location;
     vi.stubGlobal("location", {
       ...Object.fromEntries(
-        ["href", "origin", "protocol", "host", "hostname", "port", "pathname", "search", "hash"]
-          .map((k) => [k, realLocation[k as keyof Location]]),
+        [
+          "href",
+          "origin",
+          "protocol",
+          "host",
+          "hostname",
+          "port",
+          "pathname",
+          "search",
+          "hash",
+        ].map((k) => [k, realLocation[k as keyof Location]]),
       ),
       reload: vi.fn(),
       assign: vi.fn(),

@@ -120,7 +120,7 @@ describe("useActiveHeading", () => {
     });
     expect(result.current).toBe("h1");
 
-    rerender({ root: null });
+    rerender({ root: null as unknown as HTMLDivElement });
     expect(result.current).toBeNull();
   });
 });
