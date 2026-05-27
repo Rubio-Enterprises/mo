@@ -35,7 +35,7 @@
 # yq — used by the `_tasks` merge-yamllint.sh hook to deep-merge consumer-side
 # .yamllint.local into the template-rendered .yamllint at copier render time.
 # Pinning universally so consumers can rely on it for their own scripts too.
-"aqua:mikefarah/yq"          = "4"
+"aqua:mikefarah/yq"          = "4.53.2"
 # golangci-lint + gotestsum back the [tasks.lint] and [tasks.test] invocations
 # below AND the lefthook `gofmt`/`golangci-lint` pre-commit hooks. The hooks
 # use `mise exec --` so they resolve via the mise-managed PATH, but the tasks
