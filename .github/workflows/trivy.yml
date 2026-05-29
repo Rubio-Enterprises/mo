@@ -3,7 +3,7 @@ name: trivy
 on:
   push:
     branches:
-      - upstream
+      - main
   pull_request:
 
 jobs:
