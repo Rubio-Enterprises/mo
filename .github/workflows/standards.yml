@@ -8,7 +8,7 @@ name: standards
   pull_request:
     types: [opened, edited, synchronize, reopened]
   push:
-    branches: [strubio]
+    branches: [main]
   schedule:
     # `0 9 * * 1` → weekly trufflehog (secret-scan tree-wide entropy scan).
     # `0 8 * * 1` → weekly copier-sync; one hour earlier so a sync PR is open

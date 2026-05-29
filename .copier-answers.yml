@@ -3,7 +3,7 @@ _commit: template/v1.25.1
 _rubio_template_version: template/v1.25.1
 _src_path: gh:Rubio-Enterprises/standards
 archetype: go-cli
-default_branch: strubio
+default_branch: main
 has_e2e: true
 is_fork: true
 project_name: mo
