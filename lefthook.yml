@@ -54,7 +54,7 @@ pre-commit:
       # bogus `--source .` which made gitleaks >= 8.x error out with
       # `unknown flag: --source` on every commit. CI was unaffected (different
       # subcommand). Reproduced under gitleaks 8.30.1.
-      run: gitleaks git --staged --redact --no-banner
+      run: mise exec -- gitleaks git --staged --redact --no-banner
     gofmt:
       # `mise exec --` so the hook resolves go's `gofmt` (shipped with the
       # `go` toolchain pinned in .tool-versions). git's commit-hook subshell
@@ -94,10 +94,10 @@ pre-commit:
       stage_fixed: false
     shellcheck:
       glob: "*.{sh,bash}"
-      run: shellcheck {staged_files}
+      run: mise exec -- shellcheck {staged_files}
     shfmt:
       glob: "*.{sh,bash}"
-      run: shfmt -w {staged_files}
+      run: mise exec -- shfmt -w {staged_files}
       stage_fixed: false
 
 pre-push:
