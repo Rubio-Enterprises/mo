@@ -1,10 +1,11 @@
 # Changes here will be overwritten by Copier; NEVER edit this file manually.
-_commit: template/v1.25.1
-_rubio_template_version: template/v1.25.1
+_commit: template/v1.30.1
+_rubio_template_version: template/v1.30.1
 _src_path: gh:Rubio-Enterprises/standards
 archetype: go-cli
 default_branch: main
 has_e2e: true
+has_embedded_web: false
 is_fork: true
 project_name: mo
 tier: experimental
