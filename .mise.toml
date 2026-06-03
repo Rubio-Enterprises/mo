@@ -43,7 +43,7 @@
 # golangci-lint major v2: v1 → v2 dropped `gosimple` (folded into `staticcheck`);
 # the rendered `.golangci.yml` template tracks this.
 "aqua:golangci/golangci-lint"           = "2"
-"aqua:gotestyourself/gotestsum"         = "1"
+"aqua:gotestyourself/gotestsum"         = "1.13.0"
 [tasks.lint]
 description = "golangci-lint v2"
 run = ["golangci-lint run"]
