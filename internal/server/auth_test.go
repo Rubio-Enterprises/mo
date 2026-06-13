@@ -95,6 +95,9 @@ func TestAuth_IssuesCookieOnSPA(t *testing.T) {
 	if !cookie.HttpOnly {
 		t.Fatal("cookie should be HttpOnly")
 	}
+	if !cookie.Secure {
+		t.Fatal("cookie should set Secure")
+	}
 }
 
 func TestAuth_HostAllowlist(t *testing.T) {

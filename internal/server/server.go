@@ -958,11 +958,16 @@ func withAuth(state *State, next http.Handler) http.Handler {
 		}
 
 		// SPA / static assets: issue the cookie so same-origin API calls (fetch,
-		// EventSource, <img>, navigations) carry it automatically.
-		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure intentionally omitted — mo serves plain HTTP on localhost; SameSite=Strict + HttpOnly provide the cross-site/leak protection.
+		// EventSource, <img>, navigations) carry it automatically. Secure is set
+		// because modern browsers treat http://localhost as a secure context and
+		// will send it there; over plain HTTP on a non-loopback bind
+		// (--dangerously-allow-remote-access) the cookie is not sent, so that
+		// explicitly unsafe mode relies on the CLI's header auth instead.
+		http.SetCookie(w, &http.Cookie{
 			Name:     authCookieName,
 			Value:    state.authToken,
 			Path:     "/",
+			Secure:   true,
 			HttpOnly: true,
 			SameSite: http.SameSiteStrictMode,
 		})
