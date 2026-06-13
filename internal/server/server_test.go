@@ -2101,7 +2101,7 @@ func TestAddFilePopulatesCheckboxSources(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] First\n- [x] Second\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] First\n- [x] Second\n"), 0o600) //nolint:errcheck
 
 	entry, err := s.AddFile(mdFile, DefaultGroup)
 	if err != nil {
@@ -2127,7 +2127,7 @@ func TestAddFileSkipsCheckboxesForNonMarkdown(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	goFile := filepath.Join(dir, "main.go")
-	os.WriteFile(goFile, []byte("package main\n"), 0o600)
+	os.WriteFile(goFile, []byte("package main\n"), 0o600) //nolint:errcheck
 
 	entry, err := s.AddFile(goFile, DefaultGroup)
 	if err != nil {
@@ -2147,7 +2147,7 @@ func TestRemoveFileCleansUpCheckboxState(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] Item\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] Item\n"), 0o600) //nolint:errcheck
 
 	entry, err := s.AddFile(mdFile, DefaultGroup)
 	if err != nil {
@@ -2182,7 +2182,7 @@ func TestAddFilePopulatesCheckboxOrderedKeys(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] First\n- [x] Second\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] First\n- [x] Second\n"), 0o600) //nolint:errcheck
 
 	entry, err := s.AddFile(mdFile, DefaultGroup)
 	if err != nil {
@@ -2205,7 +2205,7 @@ func TestHandleGetCheckboxes(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600) //nolint:errcheck
 
 	entry, _ := s.AddFile(mdFile, DefaultGroup)
 	handler := NewHandler(s)
@@ -2222,7 +2222,7 @@ func TestHandleGetCheckboxes(t *testing.T) {
 			Sources   map[string]bool `json:"sources"`
 			Overrides map[string]bool `json:"overrides"`
 		}
-		json.NewDecoder(w.Body).Decode(&resp)
+		json.NewDecoder(w.Body).Decode(&resp) //nolint:errcheck
 		if len(resp.Sources) != 2 {
 			t.Fatalf("got %d sources, want 2", len(resp.Sources))
 		}
@@ -2251,7 +2251,7 @@ func TestHandlePutCheckbox(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600) //nolint:errcheck
 
 	entry, _ := s.AddFile(mdFile, DefaultGroup)
 	handler := NewHandler(s)
@@ -2295,7 +2295,7 @@ func TestHandlePutCheckbox(t *testing.T) {
 
 	t.Run("handles URL-encoded keys", func(t *testing.T) {
 		mdFile2 := filepath.Join(dir, "spaces.md")
-		os.WriteFile(mdFile2, []byte("- [ ] Buy milk\n"), 0o600)
+		os.WriteFile(mdFile2, []byte("- [ ] Buy milk\n"), 0o600) //nolint:errcheck
 		entry2, _ := s.AddFile(mdFile2, DefaultGroup)
 
 		body := strings.NewReader(`{"checked": true}`)
@@ -2330,7 +2330,7 @@ func TestHandleDeleteCheckboxes(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [x] Gamma\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [x] Gamma\n"), 0o600) //nolint:errcheck
 
 	entry, _ := s.AddFile(mdFile, DefaultGroup)
 	handler := NewHandler(s)
@@ -2385,7 +2385,7 @@ func TestCheckboxReconciliationOnFileChange(t *testing.T) {
 
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [ ] Gamma\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [ ] Gamma\n"), 0o600) //nolint:errcheck
 
 	entry, _ := s.AddFile(mdFile, DefaultGroup)
 
@@ -2399,7 +2399,7 @@ func TestCheckboxReconciliationOnFileChange(t *testing.T) {
 	s.mu.Unlock()
 
 	// Rewrite the file: remove Gamma, change Beta to unchecked.
-	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [ ] Beta\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [ ] Beta\n"), 0o600) //nolint:errcheck
 
 	// Trigger reconciliation.
 	s.notifyFileChangedByPath(mdFile)
@@ -2431,7 +2431,7 @@ func TestRestoreCheckboxOverrides(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600) //nolint:errcheck
 
 	entry, _ := s.AddFile(mdFile, DefaultGroup)
 

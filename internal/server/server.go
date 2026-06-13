@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -33,7 +34,7 @@ type FileEntry struct {
 	Title    string   `json:"title,omitempty"`
 	Uploaded bool     `json:"uploaded,omitempty"`
 	Type     FileType `json:"type"`
-	content  string // in-memory content for uploaded files
+	content  string   // in-memory content for uploaded files
 }
 
 const headFileSizeLimit = 8192
@@ -161,8 +162,8 @@ type sseEvent struct {
 }
 
 const (
-	eventUpdate      = "update"
-	eventFileChanged    = "file-changed"
+	eventUpdate          = "update"
+	eventFileChanged     = "file-changed"
 	eventCheckboxChanged = "checkbox-changed"
 )
 
@@ -211,14 +212,14 @@ func NewState(ctx context.Context) *State {
 	}
 
 	s := &State{
-		groups:             make(map[string]*Group),
-		subscribers:        make(map[chan sseEvent]struct{}),
-		watcher:            w,
-		restartCh:          make(chan string, 1),
-		shutdownCh:         make(chan struct{}, 1),
-		watchedDirs:        make(map[string]int),
-		fileChangeDebounce: defaultFileChangeDebounce,
-		fileChangeTimers:   make(map[string]*time.Timer),
+		groups:              make(map[string]*Group),
+		subscribers:         make(map[chan sseEvent]struct{}),
+		watcher:             w,
+		restartCh:           make(chan string, 1),
+		shutdownCh:          make(chan struct{}, 1),
+		watchedDirs:         make(map[string]int),
+		fileChangeDebounce:  defaultFileChangeDebounce,
+		fileChangeTimers:    make(map[string]*time.Timer),
 		checkboxSources:     make(map[string]map[string]bool),
 		checkboxOverrides:   make(map[string]map[string]bool),
 		checkboxOrderedKeys: make(map[string][]string),
@@ -788,10 +789,10 @@ type UploadedFileData struct {
 
 // RestoreData represents the state to be persisted across restarts.
 type RestoreData struct {
-	Groups            map[string][]string          `json:"groups"`
-	Patterns          map[string][]string          `json:"patterns,omitempty"`
-	UploadedFiles     []UploadedFileData           `json:"uploadedFiles,omitempty"`
-	CheckboxOverrides map[string]map[string]bool   `json:"checkboxOverrides,omitempty"`
+	Groups            map[string][]string        `json:"groups"`
+	Patterns          map[string][]string        `json:"patterns,omitempty"`
+	UploadedFiles     []UploadedFileData         `json:"uploadedFiles,omitempty"`
+	CheckboxOverrides map[string]map[string]bool `json:"checkboxOverrides,omitempty"`
 }
 
 // WriteRestoreFile writes RestoreData to a temporary file and returns the path.
@@ -828,464 +829,6 @@ func (s *State) EnableBackup(ctx context.Context, saveFn func(RestoreData)) {
 		s.backupLoop(ctx)
 		return nil
 	})
-}
-
-// snapshotRestoreData creates a RestoreData snapshot of the current state.
-// Caller must hold s.mu (at least RLock).
-func (s *State) snapshotRestoreData() RestoreData {
-	data := RestoreData{
-		Groups: make(map[string][]string, len(s.groups)),
-	}
-	for name, g := range s.groups {
-		paths := make([]string, 0, len(g.Files))
-		for _, f := range g.Files {
-			if f.Uploaded {
-				data.UploadedFiles = append(data.UploadedFiles, UploadedFileData{
-					Name:    f.Name,
-					Content: f.content,
-					Group:   name,
-				})
-				continue
-			}
-			paths = append(paths, f.Path)
-		}
-		data.Groups[name] = paths
-	}
-
-	if len(s.patterns) > 0 {
-		data.Patterns = make(map[string][]string)
-		for _, p := range s.patterns {
-			data.Patterns[p.Group] = append(data.Patterns[p.Group], p.Pattern)
-		}
-	}
-
-	if len(s.checkboxOverrides) > 0 {
-		data.CheckboxOverrides = make(map[string]map[string]bool, len(s.checkboxOverrides))
-		for fileID, overrides := range s.checkboxOverrides {
-			if len(overrides) > 0 {
-				cp := make(map[string]bool, len(overrides))
-				for k, v := range overrides {
-					cp[k] = v
-				}
-				data.CheckboxOverrides[fileID] = cp
-			}
-		}
-	}
-
-	return data
-}
-
-// markDirty signals that state has changed and a backup save is needed.
-// Non-blocking: safe to call while holding s.mu.
-func (s *State) markDirty() {
-	if s.backupCh == nil {
-		return
-	}
-	select {
-	case s.backupCh <- struct{}{}:
-	default:
-	}
-}
-
-func (s *State) backupLoop(ctx context.Context) {
-	const debounce = 1 * time.Second
-	timer := time.NewTimer(debounce)
-	timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			s.saveBackup()
-			return
-		case _, ok := <-s.backupCh:
-			if !ok {
-				return
-			}
-			timer.Reset(debounce)
-		case <-timer.C:
-			s.saveBackup()
-		}
-	}
-}
-
-func (s *State) saveBackup() {
-	if s.backupSaveFn == nil {
-		return
-	}
-	s.mu.RLock()
-	data := s.snapshotRestoreData()
-	s.mu.RUnlock()
-	s.backupSaveFn(data)
-}
-
-// groupHasPatterns reports whether the group has any registered watch patterns.
-// Caller must hold s.mu.
-func (s *State) groupHasPatterns(groupName string) bool {
-	for _, p := range s.patterns {
-		if p.Group == groupName {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *State) walkDirsForPattern(gp *GlobPattern, fn func(string)) {
-	if s.watcher == nil {
-		return
-	}
-	if !gp.IsRecursive() {
-		fn(gp.BaseDir)
-		return
-	}
-
-	if err := filepath.WalkDir(gp.BaseDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			// Best-effort: still process this path so unwatch can decrement refcounts.
-			fn(path)
-			return fs.SkipDir
-		}
-		if d.IsDir() {
-			fn(path)
-		}
-		return nil
-	}); err != nil {
-		// BaseDir may have been deleted; still clean up the base directory entry.
-		fn(gp.BaseDir)
-		slog.Warn("failed to walk directories for pattern", "pattern", gp.Pattern, "base", gp.BaseDir, "error", err)
-	}
-}
-
-func (s *State) removeDirWatch(dir string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if count, ok := s.watchedDirs[dir]; ok {
-		count--
-		if count <= 0 {
-			delete(s.watchedDirs, dir)
-			if s.watcher != nil {
-				if err := s.watcher.Remove(dir); err != nil {
-					slog.Warn("failed to remove directory watch", "dir", dir, "error", err)
-				}
-			}
-		} else {
-			s.watchedDirs[dir] = count
-		}
-	}
-}
-
-func (s *State) watchLoop() {
-	for {
-		select {
-		case event, ok := <-s.watcher.Events:
-			if !ok {
-				return
-			}
-			ids := s.findIDsByPath(event.Name)
-			if len(ids) > 0 {
-				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
-					slog.Info("file changed", "path", event.Name)
-					s.scheduleFileChanged(event.Name)
-				}
-				// Editors using atomic save (write-to-temp + rename) cause
-				// the original inode to disappear, which removes the watch.
-				// Re-add the watch so subsequent saves are still detected.
-				if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
-					time.AfterFunc(100*time.Millisecond, func() {
-						if err := s.watcher.Add(event.Name); err != nil {
-							// File is actually gone — remove from file list
-							slog.Info("file deleted, removing from list", "path", event.Name)
-							for _, id := range ids {
-								s.RemoveFile(id)
-							}
-						} else {
-							slog.Info("re-watching file", "path", event.Name)
-							s.scheduleFileChanged(event.Name)
-						}
-					})
-				}
-			}
-			if (event.Has(fsnotify.Rename) || event.Has(fsnotify.Remove)) && s.isWatchedDir(event.Name) {
-				s.handleDirMove(event.Name)
-			}
-			if event.Has(fsnotify.Create) {
-				s.handleCreateForGlobs(event.Name)
-			}
-		case err, ok := <-s.watcher.Errors:
-			if !ok {
-				return
-			}
-			slog.Warn("file watcher error", "error", err)
-		}
-	}
-}
-
-func (s *State) scheduleFileChanged(absPath string) {
-	if s.fileChangeDebounce <= 0 {
-		s.notifyFileChangedByPath(absPath)
-		return
-	}
-
-	s.mu.Lock()
-	if timer, ok := s.fileChangeTimers[absPath]; ok {
-		timer.Stop()
-	}
-	debounce := s.fileChangeDebounce
-	var timer *time.Timer
-	timer = time.AfterFunc(debounce, func() {
-		s.mu.Lock()
-		current, ok := s.fileChangeTimers[absPath]
-		if ok && current == timer {
-			delete(s.fileChangeTimers, absPath)
-		}
-		s.mu.Unlock()
-		if ok && current == timer {
-			s.notifyFileChangedByPath(absPath)
-		}
-	})
-	s.fileChangeTimers[absPath] = timer
-	s.mu.Unlock()
-}
-
-func (s *State) notifyFileChangedByPath(absPath string) {
-	// Extract the title outside the lock (file I/O should not hold the mutex).
-	newTitle, titleOK := extractTitleFromFile(absPath)
-
-	// Re-extract checkbox sources for reconciliation.
-	var newCheckboxSrc map[string]bool
-	var newCheckboxOrdered []string
-	if ft := DetectFileType(absPath); ft == FileTypeMarkdown {
-		if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
-			newCheckboxSrc, newCheckboxOrdered = ExtractCheckboxes(string(fullContent))
-		}
-	}
-
-	// Single lock pass: collect IDs, update titles, and reconcile checkboxes.
-	var ids []string
-	titleChanged := false
-	var checkboxChangedIDs []string
-	s.mu.Lock()
-	for _, g := range s.groups {
-		for _, entry := range g.Files {
-			if entry.Path == absPath {
-				ids = append(ids, entry.ID)
-				if titleOK && entry.Title != newTitle {
-					entry.Title = newTitle
-					titleChanged = true
-				}
-			}
-		}
-	}
-
-	// Reconcile checkbox state.
-	if newCheckboxSrc != nil {
-		for _, g := range s.groups {
-			for _, entry := range g.Files {
-				if entry.Path == absPath {
-					// Update sources and ordered keys.
-					if len(newCheckboxSrc) > 0 {
-						s.checkboxSources[entry.ID] = newCheckboxSrc
-					} else {
-						delete(s.checkboxSources, entry.ID)
-					}
-					if len(newCheckboxOrdered) > 0 {
-						s.checkboxOrderedKeys[entry.ID] = newCheckboxOrdered
-					} else {
-						delete(s.checkboxOrderedKeys, entry.ID)
-					}
-
-					// Reconcile overrides.
-					if ovr, ok := s.checkboxOverrides[entry.ID]; ok {
-						for key, val := range ovr {
-							srcVal, inSrc := newCheckboxSrc[key]
-							if !inSrc || val == srcVal {
-								delete(ovr, key)
-							}
-						}
-						if len(ovr) == 0 {
-							delete(s.checkboxOverrides, entry.ID)
-						}
-					}
-
-					// Always broadcast so the frontend's sources stay in sync.
-					checkboxChangedIDs = append(checkboxChangedIDs, entry.ID)
-				}
-			}
-		}
-	}
-	s.mu.Unlock()
-
-	if len(ids) == 0 {
-		return
-	}
-	if titleChanged {
-		s.sendEvent(sseEvent{Name: eventUpdate, Data: "{}"})
-	}
-	s.notifyFileChanged(ids)
-
-	for _, cbID := range checkboxChangedIDs {
-		src, ovr, ordered, _ := s.GetCheckboxState(cbID)
-		s.broadcastCheckboxChanged(cbID, src, ovr, ordered)
-	}
-}
-
-func (s *State) notifyFileChanged(ids []string) {
-	for _, id := range ids {
-		b, err := json.Marshal(struct {
-			ID string `json:"id"`
-		}{ID: id})
-		if err != nil {
-			slog.Error("notifyFileChanged", "err", err)
-			continue
-		}
-		s.sendEvent(sseEvent{
-			Name: eventFileChanged,
-			Data: string(b),
-		})
-	}
-}
-
-func (s *State) findIDsByPath(absPath string) []string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	var ids []string
-	for _, g := range s.groups {
-		for _, f := range g.Files {
-			if f.Path == absPath {
-				ids = append(ids, f.ID)
-			}
-		}
-	}
-	return ids
-}
-
-func (s *State) findIDsByPathPrefix(dirPath string) []string {
-	prefix := dirPath + string(filepath.Separator)
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	var ids []string
-	for _, g := range s.groups {
-		for _, f := range g.Files {
-			if strings.HasPrefix(f.Path, prefix) {
-				ids = append(ids, f.ID)
-			}
-		}
-	}
-	return ids
-}
-
-func (s *State) isWatchedDir(path string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	_, ok := s.watchedDirs[path]
-	return ok
-}
-
-func (s *State) handleDirMove(dirPath string) {
-	ids := s.findIDsByPathPrefix(dirPath)
-	for _, id := range ids {
-		slog.Info("removing stale file after directory move", "dir", dirPath, "id", id)
-		s.RemoveFile(id)
-	}
-}
-
-func (s *State) sendEvent(e sseEvent) {
-	s.subMu.RLock()
-	defer s.subMu.RUnlock()
-
-	for ch := range s.subscribers {
-		select {
-		case ch <- e:
-		default:
-			slog.Warn("SSE event dropped (subscriber buffer full)", "event", e.Name)
-		}
-	}
-	if e.Name == eventUpdate {
-		s.markDirty()
-	}
-}
-
-func (s *State) watchDirsForPattern(gp *GlobPattern) {
-	s.walkDirsForPattern(gp, s.addDirWatch)
-}
-
-func (s *State) addDirWatch(dir string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.watchedDirs[dir]++
-	if s.watchedDirs[dir] == 1 && s.watcher != nil {
-		if err := s.watcher.Add(dir); err != nil {
-			delete(s.watchedDirs, dir)
-			slog.Warn("failed to watch directory", "path", dir, "error", err)
-		}
-	}
-}
-
-func (s *State) handleCreateForGlobs(path string) {
-	s.mu.RLock()
-	if len(s.patterns) == 0 {
-		s.mu.RUnlock()
-		return
-	}
-	patterns := make([]*GlobPattern, len(s.patterns))
-	copy(patterns, s.patterns)
-	s.mu.RUnlock()
-
-	info, err := os.Stat(path)
-	if err != nil {
-		return
-	}
-
-	if info.IsDir() {
-		watched := false
-		for _, gp := range patterns {
-			if !gp.IsRecursive() {
-				continue
-			}
-			if !strings.HasPrefix(path, gp.BaseDir) {
-				continue
-			}
-			if !watched {
-				s.addDirWatch(path)
-				// Scan directory contents for matching files
-				filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error { //nolint:errcheck
-					if err != nil || d.IsDir() {
-						return nil
-					}
-					s.matchAndAddFile(p, patterns)
-					return nil
-				})
-				watched = true
-			}
-		}
-		return
-	}
-
-	s.matchAndAddFile(path, patterns)
-}
-
-func (s *State) matchAndAddFile(path string, patterns []*GlobPattern) {
-	dsPath := filepath.ToSlash(path)
-	for _, gp := range patterns {
-		matched, err := doublestar.Match(gp.PatternSlash, dsPath)
-		if err != nil {
-			continue
-		}
-		if matched {
-			if _, err := s.AddFile(path, gp.Group); err != nil {
-				slog.Warn("skipping file", "path", path, "error", err)
-				return
-			}
-			slog.Info("auto-added file via glob", "path", path, "pattern", gp.Pattern, "group", gp.Group)
-			return
-		}
-	}
 }
 
 type reorderFilesRequest struct {
@@ -2010,9 +1553,7 @@ func (s *State) UncheckAll(id string) bool {
 		ovr = map[string]bool{}
 	}
 	srcCopy := make(map[string]bool, len(src))
-	for k, v := range src {
-		srcCopy[k] = v
-	}
+	maps.Copy(srcCopy, src)
 	ordered := s.checkboxOrderedKeys[id]
 	if ordered == nil {
 		ordered = []string{}
@@ -2068,9 +1609,7 @@ func (s *State) CheckAll(id string) bool {
 		ovr = map[string]bool{}
 	}
 	srcCopy := make(map[string]bool, len(src))
-	for k, v := range src {
-		srcCopy[k] = v
-	}
+	maps.Copy(srcCopy, src)
 	ordered := s.checkboxOrderedKeys[id]
 	if ordered == nil {
 		ordered = []string{}
@@ -2109,6 +1648,462 @@ func (s *State) RestoreCheckboxOverrides(overrides map[string]map[string]bool) {
 	}
 }
 
+// snapshotRestoreData creates a RestoreData snapshot of the current state.
+// Caller must hold s.mu (at least RLock).
+func (s *State) snapshotRestoreData() RestoreData {
+	data := RestoreData{
+		Groups: make(map[string][]string, len(s.groups)),
+	}
+	for name, g := range s.groups {
+		paths := make([]string, 0, len(g.Files))
+		for _, f := range g.Files {
+			if f.Uploaded {
+				data.UploadedFiles = append(data.UploadedFiles, UploadedFileData{
+					Name:    f.Name,
+					Content: f.content,
+					Group:   name,
+				})
+				continue
+			}
+			paths = append(paths, f.Path)
+		}
+		data.Groups[name] = paths
+	}
+
+	if len(s.patterns) > 0 {
+		data.Patterns = make(map[string][]string)
+		for _, p := range s.patterns {
+			data.Patterns[p.Group] = append(data.Patterns[p.Group], p.Pattern)
+		}
+	}
+
+	if len(s.checkboxOverrides) > 0 {
+		data.CheckboxOverrides = make(map[string]map[string]bool, len(s.checkboxOverrides))
+		for fileID, overrides := range s.checkboxOverrides {
+			if len(overrides) > 0 {
+				cp := make(map[string]bool, len(overrides))
+				maps.Copy(cp, overrides)
+				data.CheckboxOverrides[fileID] = cp
+			}
+		}
+	}
+
+	return data
+}
+
+// markDirty signals that state has changed and a backup save is needed.
+// Non-blocking: safe to call while holding s.mu.
+func (s *State) markDirty() {
+	if s.backupCh == nil {
+		return
+	}
+	select {
+	case s.backupCh <- struct{}{}:
+	default:
+	}
+}
+
+func (s *State) backupLoop(ctx context.Context) {
+	const debounce = 1 * time.Second
+	timer := time.NewTimer(debounce)
+	timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			s.saveBackup()
+			return
+		case _, ok := <-s.backupCh:
+			if !ok {
+				return
+			}
+			timer.Reset(debounce)
+		case <-timer.C:
+			s.saveBackup()
+		}
+	}
+}
+
+func (s *State) saveBackup() {
+	if s.backupSaveFn == nil {
+		return
+	}
+	s.mu.RLock()
+	data := s.snapshotRestoreData()
+	s.mu.RUnlock()
+	s.backupSaveFn(data)
+}
+
+// groupHasPatterns reports whether the group has any registered watch patterns.
+// Caller must hold s.mu.
+func (s *State) groupHasPatterns(groupName string) bool {
+	for _, p := range s.patterns {
+		if p.Group == groupName {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *State) walkDirsForPattern(gp *GlobPattern, fn func(string)) {
+	if s.watcher == nil {
+		return
+	}
+	if !gp.IsRecursive() {
+		fn(gp.BaseDir)
+		return
+	}
+
+	if err := filepath.WalkDir(gp.BaseDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			// Best-effort: still process this path so unwatch can decrement refcounts.
+			fn(path)
+			return fs.SkipDir
+		}
+		if d.IsDir() {
+			fn(path)
+		}
+		return nil
+	}); err != nil {
+		// BaseDir may have been deleted; still clean up the base directory entry.
+		fn(gp.BaseDir)
+		slog.Warn("failed to walk directories for pattern", "pattern", gp.Pattern, "base", gp.BaseDir, "error", err)
+	}
+}
+
+func (s *State) removeDirWatch(dir string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if count, ok := s.watchedDirs[dir]; ok {
+		count--
+		if count <= 0 {
+			delete(s.watchedDirs, dir)
+			if s.watcher != nil {
+				if err := s.watcher.Remove(dir); err != nil {
+					slog.Warn("failed to remove directory watch", "dir", dir, "error", err)
+				}
+			}
+		} else {
+			s.watchedDirs[dir] = count
+		}
+	}
+}
+
+func (s *State) watchLoop() {
+	for {
+		select {
+		case event, ok := <-s.watcher.Events:
+			if !ok {
+				return
+			}
+			ids := s.findIDsByPath(event.Name)
+			if len(ids) > 0 {
+				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
+					slog.Info("file changed", "path", event.Name)
+					s.scheduleFileChanged(event.Name)
+				}
+				// Editors using atomic save (write-to-temp + rename) cause
+				// the original inode to disappear, which removes the watch.
+				// Re-add the watch so subsequent saves are still detected.
+				if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
+					time.AfterFunc(100*time.Millisecond, func() {
+						if err := s.watcher.Add(event.Name); err != nil {
+							// File is actually gone — remove from file list
+							slog.Info("file deleted, removing from list", "path", event.Name)
+							for _, id := range ids {
+								s.RemoveFile(id)
+							}
+						} else {
+							slog.Info("re-watching file", "path", event.Name)
+							s.scheduleFileChanged(event.Name)
+						}
+					})
+				}
+			}
+			if (event.Has(fsnotify.Rename) || event.Has(fsnotify.Remove)) && s.isWatchedDir(event.Name) {
+				s.handleDirMove(event.Name)
+			}
+			if event.Has(fsnotify.Create) {
+				s.handleCreateForGlobs(event.Name)
+			}
+		case err, ok := <-s.watcher.Errors:
+			if !ok {
+				return
+			}
+			slog.Warn("file watcher error", "error", err)
+		}
+	}
+}
+
+func (s *State) scheduleFileChanged(absPath string) {
+	if s.fileChangeDebounce <= 0 {
+		s.notifyFileChangedByPath(absPath)
+		return
+	}
+
+	s.mu.Lock()
+	if timer, ok := s.fileChangeTimers[absPath]; ok {
+		timer.Stop()
+	}
+	debounce := s.fileChangeDebounce
+	var timer *time.Timer
+	timer = time.AfterFunc(debounce, func() {
+		s.mu.Lock()
+		current, ok := s.fileChangeTimers[absPath]
+		if ok && current == timer {
+			delete(s.fileChangeTimers, absPath)
+		}
+		s.mu.Unlock()
+		if ok && current == timer {
+			s.notifyFileChangedByPath(absPath)
+		}
+	})
+	s.fileChangeTimers[absPath] = timer
+	s.mu.Unlock()
+}
+
+func (s *State) notifyFileChangedByPath(absPath string) {
+	// Extract the title outside the lock (file I/O should not hold the mutex).
+	newTitle, titleOK := extractTitleFromFile(absPath)
+
+	// Re-extract checkbox sources for reconciliation.
+	var newCheckboxSrc map[string]bool
+	var newCheckboxOrdered []string
+	if ft := DetectFileType(absPath); ft == FileTypeMarkdown {
+		if fullContent, readErr := os.ReadFile(absPath); readErr == nil {
+			newCheckboxSrc, newCheckboxOrdered = ExtractCheckboxes(string(fullContent))
+		}
+	}
+
+	// Single lock pass: collect IDs, update titles, and reconcile checkboxes.
+	var ids []string
+	titleChanged := false
+	var checkboxChangedIDs []string
+	s.mu.Lock()
+	for _, g := range s.groups {
+		for _, entry := range g.Files {
+			if entry.Path == absPath {
+				ids = append(ids, entry.ID)
+				if titleOK && entry.Title != newTitle {
+					entry.Title = newTitle
+					titleChanged = true
+				}
+			}
+		}
+	}
+
+	// Reconcile checkbox state.
+	if newCheckboxSrc != nil {
+		for _, g := range s.groups {
+			for _, entry := range g.Files {
+				if entry.Path == absPath {
+					// Update sources and ordered keys.
+					if len(newCheckboxSrc) > 0 {
+						s.checkboxSources[entry.ID] = newCheckboxSrc
+					} else {
+						delete(s.checkboxSources, entry.ID)
+					}
+					if len(newCheckboxOrdered) > 0 {
+						s.checkboxOrderedKeys[entry.ID] = newCheckboxOrdered
+					} else {
+						delete(s.checkboxOrderedKeys, entry.ID)
+					}
+
+					// Reconcile overrides.
+					if ovr, ok := s.checkboxOverrides[entry.ID]; ok {
+						for key, val := range ovr {
+							srcVal, inSrc := newCheckboxSrc[key]
+							if !inSrc || val == srcVal {
+								delete(ovr, key)
+							}
+						}
+						if len(ovr) == 0 {
+							delete(s.checkboxOverrides, entry.ID)
+						}
+					}
+
+					// Always broadcast so the frontend's sources stay in sync.
+					checkboxChangedIDs = append(checkboxChangedIDs, entry.ID)
+				}
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	if len(ids) == 0 {
+		return
+	}
+	if titleChanged {
+		s.sendEvent(sseEvent{Name: eventUpdate, Data: "{}"})
+	}
+	s.notifyFileChanged(ids)
+
+	for _, cbID := range checkboxChangedIDs {
+		src, ovr, ordered, _ := s.GetCheckboxState(cbID)
+		s.broadcastCheckboxChanged(cbID, src, ovr, ordered)
+	}
+}
+
+func (s *State) notifyFileChanged(ids []string) {
+	for _, id := range ids {
+		b, err := json.Marshal(struct {
+			ID string `json:"id"`
+		}{ID: id})
+		if err != nil {
+			slog.Error("notifyFileChanged", "err", err)
+			continue
+		}
+		s.sendEvent(sseEvent{
+			Name: eventFileChanged,
+			Data: string(b),
+		})
+	}
+}
+
+func (s *State) findIDsByPath(absPath string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var ids []string
+	for _, g := range s.groups {
+		for _, f := range g.Files {
+			if f.Path == absPath {
+				ids = append(ids, f.ID)
+			}
+		}
+	}
+	return ids
+}
+
+func (s *State) findIDsByPathPrefix(dirPath string) []string {
+	prefix := dirPath + string(filepath.Separator)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var ids []string
+	for _, g := range s.groups {
+		for _, f := range g.Files {
+			if strings.HasPrefix(f.Path, prefix) {
+				ids = append(ids, f.ID)
+			}
+		}
+	}
+	return ids
+}
+
+func (s *State) isWatchedDir(path string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.watchedDirs[path]
+	return ok
+}
+
+func (s *State) handleDirMove(dirPath string) {
+	ids := s.findIDsByPathPrefix(dirPath)
+	for _, id := range ids {
+		slog.Info("removing stale file after directory move", "dir", dirPath, "id", id)
+		s.RemoveFile(id)
+	}
+}
+
+func (s *State) sendEvent(e sseEvent) {
+	s.subMu.RLock()
+	defer s.subMu.RUnlock()
+
+	for ch := range s.subscribers {
+		select {
+		case ch <- e:
+		default:
+			slog.Warn("SSE event dropped (subscriber buffer full)", "event", e.Name)
+		}
+	}
+	if e.Name == eventUpdate {
+		s.markDirty()
+	}
+}
+
+func (s *State) watchDirsForPattern(gp *GlobPattern) {
+	s.walkDirsForPattern(gp, s.addDirWatch)
+}
+
+func (s *State) addDirWatch(dir string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.watchedDirs[dir]++
+	if s.watchedDirs[dir] == 1 && s.watcher != nil {
+		if err := s.watcher.Add(dir); err != nil {
+			delete(s.watchedDirs, dir)
+			slog.Warn("failed to watch directory", "path", dir, "error", err)
+		}
+	}
+}
+
+func (s *State) handleCreateForGlobs(path string) {
+	s.mu.RLock()
+	if len(s.patterns) == 0 {
+		s.mu.RUnlock()
+		return
+	}
+	patterns := make([]*GlobPattern, len(s.patterns))
+	copy(patterns, s.patterns)
+	s.mu.RUnlock()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+
+	if info.IsDir() {
+		watched := false
+		for _, gp := range patterns {
+			if !gp.IsRecursive() {
+				continue
+			}
+			if !strings.HasPrefix(path, gp.BaseDir) {
+				continue
+			}
+			if !watched {
+				s.addDirWatch(path)
+				// Scan directory contents for matching files
+				filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error { //nolint:errcheck
+					if err != nil || d.IsDir() {
+						return nil
+					}
+					s.matchAndAddFile(p, patterns)
+					return nil
+				})
+				watched = true
+			}
+		}
+		return
+	}
+
+	s.matchAndAddFile(path, patterns)
+}
+
+func (s *State) matchAndAddFile(path string, patterns []*GlobPattern) {
+	dsPath := filepath.ToSlash(path)
+	for _, gp := range patterns {
+		matched, err := doublestar.Match(gp.PatternSlash, dsPath)
+		if err != nil {
+			continue
+		}
+		if matched {
+			if _, err := s.AddFile(path, gp.Group); err != nil {
+				slog.Warn("skipping file", "path", path, "error", err)
+				return
+			}
+			slog.Info("auto-added file via glob", "path", path, "pattern", gp.Pattern, "group", gp.Group)
+			return
+		}
+	}
+}
+
 func (s *State) broadcastCheckboxChanged(id string, sources, overrides map[string]bool, orderedKeys []string) {
 	b, err := json.Marshal(struct {
 		FileID      string          `json:"fileId"`
@@ -2140,11 +2135,13 @@ func handleGetCheckboxes(state *State) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(struct {
+		if err := json.NewEncoder(w).Encode(struct {
 			Sources     map[string]bool `json:"sources"`
 			Overrides   map[string]bool `json:"overrides"`
 			OrderedKeys []string        `json:"orderedKeys"`
-		}{Sources: sources, Overrides: overrides, OrderedKeys: orderedKeys})
+		}{Sources: sources, Overrides: overrides, OrderedKeys: orderedKeys}); err != nil {
+			slog.Error("failed to encode checkbox state response", "error", err)
+		}
 	}
 }
 
@@ -2206,4 +2203,3 @@ func handleCheckAll(state *State) http.HandlerFunc {
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
-

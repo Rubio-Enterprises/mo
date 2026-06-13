@@ -2,12 +2,13 @@ package server
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
-	east "github.com/yuin/goldmark/extension/ast"
 	"github.com/yuin/goldmark/extension"
+	east "github.com/yuin/goldmark/extension/ast"
 	"github.com/yuin/goldmark/text"
 )
 
@@ -95,7 +96,7 @@ func ExtractCheckboxes(content string) (map[string]bool, []string) {
 	result := map[string]bool{}
 	ordered := make([]string, 0)
 
-	ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+	if err := ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
 			return ast.WalkContinue, nil
 		}
@@ -133,7 +134,9 @@ func ExtractCheckboxes(content string) (map[string]bool, []string) {
 		ordered = append(ordered, key)
 
 		return ast.WalkContinue, nil
-	})
+	}); err != nil {
+		slog.Warn("failed to walk markdown AST for checkboxes", "error", err)
+	}
 
 	return result, ordered
 }
