@@ -35,7 +35,7 @@ func newTCPListener() (net.Listener, error) {
 
 func waitForServerUp(addr string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	client := &http.Client{Timeout: 200 * time.Millisecond}
+	client := &http.Client{Timeout: 200 * time.Millisecond, Transport: newTokenTransport(addr)}
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(fmt.Sprintf("http://%s/_/api/status", addr))
 		if err == nil {
@@ -132,8 +132,8 @@ func TestResolveFiles(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
-		if got != nil {
-			t.Fatalf("got %v, want nil", got)
+		if len(got) != 0 {
+			t.Fatalf("got %v, want empty", got)
 		}
 	})
 
@@ -223,11 +223,13 @@ func TestProbeServer(t *testing.T) {
 	t.Run("returns groups when status is healthy", func(t *testing.T) {
 		srv := newFakeMoServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			if err := json.NewEncoder(w).Encode(map[string]any{
 				"version": "v1.0",
 				"pid":     42,
 				"groups":  []map[string]any{{"name": "default"}, {"name": "docs"}},
-			})
+			}); err != nil {
+				return
+			}
 		})
 		addr := strings.TrimPrefix(srv.URL, "http://")
 
@@ -258,7 +260,9 @@ func TestProbeServer(t *testing.T) {
 	t.Run("returns error when response missing version", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"pid": 1}`))
+			if _, err := w.Write([]byte(`{"pid": 1}`)); err != nil {
+				return
+			}
 		}))
 		t.Cleanup(srv.Close)
 		addr := strings.TrimPrefix(srv.URL, "http://")
@@ -289,7 +293,10 @@ func statusJSON(groups []map[string]any) []byte {
 		"pid":     1,
 		"groups":  groups,
 	}
-	b, _ := json.Marshal(resp)
+	b, err := json.Marshal(resp)
+	if err != nil {
+		return []byte(`{}`)
+	}
 	return b
 }
 
@@ -362,11 +369,15 @@ func TestPostFiles(t *testing.T) {
 		mux.HandleFunc("/_/api/files", func(w http.ResponseWriter, r *http.Request) {
 			defer r.Body.Close()
 			var body map[string]string
-			_ = json.NewDecoder(r.Body).Decode(&body)
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				return
+			}
 			if body["path"] != "/a.md" || body["group"] != "default" {
 				t.Errorf("unexpected body: %v", body)
 			}
-			_ = json.NewEncoder(w).Encode(server.FileEntry{ID: "id1", Path: "/a.md"})
+			if err := json.NewEncoder(w).Encode(server.FileEntry{ID: "id1", Path: "/a.md"}); err != nil {
+				return
+			}
 		})
 		srv := newFullFakeServer(t, mux)
 		addr := strings.TrimPrefix(srv.URL, "http://")
@@ -410,12 +421,14 @@ func TestPostPatterns(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/_/api/patterns", func(w http.ResponseWriter, r *http.Request) {
 			defer r.Body.Close()
-			_ = json.NewEncoder(w).Encode(server.AddPatternResponse{
+			if err := json.NewEncoder(w).Encode(server.AddPatternResponse{
 				Files: []*server.FileEntry{
 					{ID: "id1", Path: "/a.md"},
 					{ID: "id2", Path: "/b.md"},
 				},
-			})
+			}); err != nil {
+				return
+			}
 		})
 		srv := newFullFakeServer(t, mux)
 		addr := strings.TrimPrefix(srv.URL, "http://")
@@ -464,7 +477,9 @@ func TestTryAddToExisting(t *testing.T) {
 		})
 		mux.HandleFunc("/_/api/files", func(w http.ResponseWriter, r *http.Request) {
 			postedFiles++
-			_ = json.NewEncoder(w).Encode(server.FileEntry{ID: "id1", Path: "/a.md"})
+			if err := json.NewEncoder(w).Encode(server.FileEntry{ID: "id1", Path: "/a.md"}); err != nil {
+				return
+			}
 		})
 		srv := newFullFakeServer(t, mux)
 		addr := strings.TrimPrefix(srv.URL, "http://")
@@ -679,11 +694,9 @@ func TestEmitServeOutputEmpty(t *testing.T) {
 		if got.URL != "http://localhost:6275" {
 			t.Fatalf("got URL %q", got.URL)
 		}
-		if got.Files == nil {
-			t.Fatalf("Files should be non-nil empty slice")
-		}
-		if len(got.Files) != 0 {
-			t.Fatalf("Files should be empty, got %d", len(got.Files))
+		// The Files field must serialize as an empty array, not null.
+		if !strings.Contains(out, `"files": []`) {
+			t.Fatalf("Files should be an empty, non-null array; got: %s", out)
 		}
 	})
 }
@@ -713,7 +726,9 @@ func startStatusServerOnLogPort(t *testing.T, status statusResponse) (port int) 
 	// Listen on a chosen ephemeral port via httptest.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(status)
+		if err := json.NewEncoder(w).Encode(status); err != nil {
+			return
+		}
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -863,12 +878,9 @@ func TestDoStatusNoServer(t *testing.T) {
 				t.Fatalf("doStatus: %v", err)
 			}
 		})
-		var got []jsonStatusEntry
-		if err := json.Unmarshal([]byte(out), &got); err != nil {
-			t.Fatalf("invalid JSON: %v\n%s", err, out)
-		}
-		if got == nil || len(got) != 0 {
-			t.Fatalf("expected empty array, got %v", got)
+		// The top-level output must be an empty array, not null.
+		if strings.TrimSpace(out) != "[]" {
+			t.Fatalf("expected empty array, got %q", out)
 		}
 	})
 }
@@ -896,8 +908,8 @@ func TestDiscoverPorts(t *testing.T) {
 
 	t.Run("missing dir returns nil", func(t *testing.T) {
 		t.Setenv("XDG_STATE_HOME", t.TempDir())
-		if ports := discoverPorts(); ports != nil {
-			t.Fatalf("got %v, want nil", ports)
+		if ports := discoverPorts(); len(ports) != 0 {
+			t.Fatalf("got %v, want empty", ports)
 		}
 	})
 }
@@ -1083,11 +1095,13 @@ func TestRun_OpenBrowserWhenServerAlreadyRunning(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"version": "test",
 			"pid":     1,
 			"groups":  []map[string]any{{"name": "default"}},
-		})
+		}); err != nil {
+			return
+		}
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -1280,7 +1294,9 @@ func TestWaitForReadyTimeout(t *testing.T) {
 func TestWaitForReadyHappyPath(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"version": "v1", "pid": 1, "groups": []any{}})
+		if err := json.NewEncoder(w).Encode(map[string]any{"version": "v1", "pid": 1, "groups": []any{}}); err != nil {
+			return
+		}
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -1380,18 +1396,24 @@ func TestRun_TryAddToExistingViaRun(t *testing.T) {
 	var seenPath string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"version": "test",
 			"pid":     1,
 			"groups":  []map[string]any{{"name": "default"}},
-		})
+		}); err != nil {
+			return
+		}
 	})
 	mux.HandleFunc("/_/api/files", func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		var body map[string]string
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			return
+		}
 		seenPath = body["path"]
-		_ = json.NewEncoder(w).Encode(server.FileEntry{ID: "abc", Path: body["path"]})
+		if err := json.NewEncoder(w).Encode(server.FileEntry{ID: "abc", Path: body["path"]}); err != nil {
+			return
+		}
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()

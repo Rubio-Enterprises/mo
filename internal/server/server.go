@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -33,7 +35,7 @@ type FileEntry struct {
 	Title    string   `json:"title,omitempty"`
 	Uploaded bool     `json:"uploaded,omitempty"`
 	Type     FileType `json:"type"`
-	content  string // in-memory content for uploaded files
+	content  string   // in-memory content for uploaded files
 }
 
 const headFileSizeLimit = 8192
@@ -161,8 +163,8 @@ type sseEvent struct {
 }
 
 const (
-	eventUpdate      = "update"
-	eventFileChanged    = "file-changed"
+	eventUpdate          = "update"
+	eventFileChanged     = "file-changed"
 	eventCheckboxChanged = "checkbox-changed"
 )
 
@@ -200,6 +202,9 @@ type State struct {
 	backupCh     chan struct{}     // dirty signal (buffered, size 1)
 	backupSaveFn func(RestoreData) // backup write callback
 	backupDone   chan struct{}     // closed when backupLoop exits
+
+	authToken    string              // API auth token; empty disables auth (tests/dev)
+	allowedHosts map[string]struct{} // accepted Host header values (anti DNS-rebind); empty skips the check
 }
 
 const defaultFileChangeDebounce = 200 * time.Millisecond
@@ -211,14 +216,14 @@ func NewState(ctx context.Context) *State {
 	}
 
 	s := &State{
-		groups:             make(map[string]*Group),
-		subscribers:        make(map[chan sseEvent]struct{}),
-		watcher:            w,
-		restartCh:          make(chan string, 1),
-		shutdownCh:         make(chan struct{}, 1),
-		watchedDirs:        make(map[string]int),
-		fileChangeDebounce: defaultFileChangeDebounce,
-		fileChangeTimers:   make(map[string]*time.Timer),
+		groups:              make(map[string]*Group),
+		subscribers:         make(map[chan sseEvent]struct{}),
+		watcher:             w,
+		restartCh:           make(chan string, 1),
+		shutdownCh:          make(chan struct{}, 1),
+		watchedDirs:         make(map[string]int),
+		fileChangeDebounce:  defaultFileChangeDebounce,
+		fileChangeTimers:    make(map[string]*time.Timer),
 		checkboxSources:     make(map[string]map[string]bool),
 		checkboxOverrides:   make(map[string]map[string]bool),
 		checkboxOrderedKeys: make(map[string][]string),
@@ -232,6 +237,20 @@ func NewState(ctx context.Context) *State {
 	}
 
 	return s
+}
+
+// SetAuth enables API authentication. token is required (via the mo_token cookie
+// or X-Mo-Token header) on all /_/ requests; allowedHosts, when non-empty,
+// restricts the accepted Host header (defense against DNS-rebinding). Passing an
+// empty token leaves authentication disabled.
+func (s *State) SetAuth(token string, allowedHosts []string) {
+	s.authToken = token
+	if len(allowedHosts) > 0 {
+		s.allowedHosts = make(map[string]struct{}, len(allowedHosts))
+		for _, h := range allowedHosts {
+			s.allowedHosts[h] = struct{}{}
+		}
+	}
 }
 
 // ErrBinaryFile is returned when a file is detected as binary.
@@ -788,10 +807,10 @@ type UploadedFileData struct {
 
 // RestoreData represents the state to be persisted across restarts.
 type RestoreData struct {
-	Groups            map[string][]string          `json:"groups"`
-	Patterns          map[string][]string          `json:"patterns,omitempty"`
-	UploadedFiles     []UploadedFileData           `json:"uploadedFiles,omitempty"`
-	CheckboxOverrides map[string]map[string]bool   `json:"checkboxOverrides,omitempty"`
+	Groups            map[string][]string        `json:"groups"`
+	Patterns          map[string][]string        `json:"patterns,omitempty"`
+	UploadedFiles     []UploadedFileData         `json:"uploadedFiles,omitempty"`
+	CheckboxOverrides map[string]map[string]bool `json:"checkboxOverrides,omitempty"`
 }
 
 // WriteRestoreFile writes RestoreData to a temporary file and returns the path.
@@ -830,6 +849,912 @@ func (s *State) EnableBackup(ctx context.Context, saveFn func(RestoreData)) {
 	})
 }
 
+type reorderFilesRequest struct {
+	Group   string   `json:"group"`
+	FileIDs []string `json:"fileIds"`
+}
+
+type moveFileRequest struct {
+	Group string `json:"group"`
+}
+
+type addFileRequest struct {
+	Path  string `json:"path"`
+	Group string `json:"group"`
+}
+
+type uploadFileRequest struct {
+	Name    string `json:"name"`
+	Content string `json:"content"`
+	Group   string `json:"group"`
+}
+
+type patternRequest struct {
+	Pattern string `json:"pattern"`
+	Group   string `json:"group"`
+}
+
+// AddPatternResponse is the JSON response for the add-pattern endpoint.
+type AddPatternResponse struct {
+	Matched int          `json:"matched"`
+	Files   []*FileEntry `json:"files,omitempty"`
+}
+
+type fileContentResponse struct {
+	Content string `json:"content"`
+	BaseDir string `json:"baseDir"`
+}
+
+type openFileRequest struct {
+	FileID string `json:"fileId"`
+	Path   string `json:"path"`
+}
+
+func NewHandler(state *State) http.Handler {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("POST /_/api/files", handleAddFile(state))
+	mux.HandleFunc("POST /_/api/files/upload", handleUploadFile(state))
+	mux.HandleFunc("DELETE /_/api/files/{id}", handleRemoveFile(state))
+	mux.HandleFunc("PUT /_/api/files/{id}/group", handleMoveFile(state))
+	mux.HandleFunc("GET /_/api/groups", handleGroups(state))
+	mux.HandleFunc("PUT /_/api/reorder", handleReorderFiles(state))
+	mux.HandleFunc("GET /_/api/files/{id}/content", handleFileContent(state))
+	mux.HandleFunc("GET /_/api/files/{id}/checkboxes", handleGetCheckboxes(state))
+	mux.HandleFunc("PUT /_/api/files/{id}/checkboxes/{key}", handlePutCheckbox(state))
+	mux.HandleFunc("DELETE /_/api/files/{id}/checkboxes", handleDeleteCheckboxes(state))
+	mux.HandleFunc("POST /_/api/files/{id}/checkboxes/check-all", handleCheckAll(state))
+	mux.HandleFunc("GET /_/api/files/{id}/raw", handleFileServe(state))
+	mux.HandleFunc("GET /_/api/files/{id}/raw/{path...}", handleFileAsset(state))
+	mux.HandleFunc("POST /_/api/files/open", handleOpenFile(state))
+	mux.HandleFunc("POST /_/api/patterns", handleAddPattern(state))
+	mux.HandleFunc("DELETE /_/api/patterns", handleRemovePattern(state))
+	mux.HandleFunc("POST /_/api/restart", handleRestart(state))
+	mux.HandleFunc("POST /_/api/shutdown", handleShutdown(state))
+	mux.HandleFunc("GET /_/api/status", handleStatus(state))
+	mux.HandleFunc("GET /_/api/version", handleVersion())
+	mux.HandleFunc("GET /_/events", handleSSE(state))
+	mux.HandleFunc("GET /", handleSPA())
+
+	return withAuth(state, withCSP(mux))
+}
+
+const (
+	authCookieName = "mo_token"
+	authHeaderName = "X-Mo-Token" //nolint:gosec // header name, not a credential
+)
+
+// withAuth gates the /_/ API surface behind the per-server token and (when
+// configured) a Host allowlist. The token is accepted via the X-Mo-Token header
+// (used by the CLI) or the mo_token cookie (issued to the same-origin SPA). A
+// SameSite=Strict cookie is never sent on cross-site requests and cannot be read
+// cross-origin, so a malicious web page cannot forge authenticated calls even
+// though the server binds to localhost. When no token is configured (tests/dev),
+// the middleware is a no-op.
+func withAuth(state *State, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if state.authToken == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Reject unexpected Host headers (DNS-rebinding defense) before anything
+		// else. Applies to every route, including the SPA, so a rebound origin
+		// can't even bootstrap the app.
+		if len(state.allowedHosts) > 0 {
+			if _, ok := state.allowedHosts[r.Host]; !ok {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
+
+		if strings.HasPrefix(r.URL.Path, "/_/") {
+			if !validToken(r, state.authToken) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// SPA / static assets: issue the cookie so same-origin API calls (fetch,
+		// EventSource, <img>, navigations) carry it automatically. Secure is set
+		// because modern browsers treat http://localhost as a secure context and
+		// will send it there; over plain HTTP on a non-loopback bind
+		// (--dangerously-allow-remote-access) the cookie is not sent, so that
+		// explicitly unsafe mode relies on the CLI's header auth instead.
+		http.SetCookie(w, &http.Cookie{
+			Name:     authCookieName,
+			Value:    state.authToken,
+			Path:     "/",
+			Secure:   true,
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+		})
+		next.ServeHTTP(w, r)
+	})
+}
+
+// validToken reports whether the request carries the expected token via the
+// X-Mo-Token header or the mo_token cookie, using a constant-time comparison.
+func validToken(r *http.Request, want string) bool {
+	if h := r.Header.Get(authHeaderName); h != "" &&
+		subtle.ConstantTimeCompare([]byte(h), []byte(want)) == 1 {
+		return true
+	}
+	if c, err := r.Cookie(authCookieName); err == nil &&
+		subtle.ConstantTimeCompare([]byte(c.Value), []byte(want)) == 1 {
+		return true
+	}
+	return false
+}
+
+func withCSP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy",
+			"default-src 'self'; "+
+				"script-src 'self' 'unsafe-eval'; "+
+				"style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' https: data:; "+
+				"font-src 'self' data:; "+
+				"connect-src 'self'; "+
+				"worker-src 'self' blob:; "+
+				"object-src 'none'; "+
+				"base-uri 'self'; "+
+				"form-action 'self'; "+
+				"frame-ancestors 'none'")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func handleAddFile(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req addFileRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		absPath, err := filepath.Abs(req.Path)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if _, err := os.Stat(absPath); err != nil {
+			http.Error(w, fmt.Sprintf("file not found: %s", absPath), http.StatusBadRequest)
+			return
+		}
+
+		group, err := ResolveGroupName(req.Group)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		entry, err := state.AddFile(absPath, group)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(entry); err != nil {
+			slog.Error("failed to encode response", "error", err)
+		}
+	}
+}
+
+func handleUploadFile(state *State) http.HandlerFunc {
+	const maxRequestSize = 12 << 20 // 12MB (headroom for JSON envelope)
+	const maxContentSize = 10 << 20 // 10MB
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestSize)
+		var req uploadFileRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				http.Error(w, "file too large (max 10MB)", http.StatusRequestEntityTooLarge)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if len(req.Content) > maxContentSize {
+			http.Error(w, "file too large (max 10MB)", http.StatusRequestEntityTooLarge)
+			return
+		}
+
+		if req.Name == "" {
+			http.Error(w, "missing file name", http.StatusBadRequest)
+			return
+		}
+
+		group, err := ResolveGroupName(req.Group)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		entry := state.AddUploadedFile(req.Name, req.Content, group)
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(entry); err != nil {
+			slog.Error("failed to encode response", "error", err)
+		}
+	}
+}
+
+func handleRemoveFile(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing file id", http.StatusBadRequest)
+			return
+		}
+		if !state.RemoveFile(id) {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleMoveFile(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing file id", http.StatusBadRequest)
+			return
+		}
+		var req moveFileRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		group, err := ResolveGroupName(req.Group)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := state.MoveFile(id, group); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleReorderFiles(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req reorderFilesRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		group, err := ResolveGroupName(req.Group)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if !state.ReorderFiles(group, req.FileIDs) {
+			http.Error(w, "invalid file IDs or group not found", http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleGroups(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		groups := state.Groups()
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(groups); err != nil {
+			slog.Error("failed to encode response", "error", err)
+		}
+	}
+}
+
+func handleFileContent(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing file id", http.StatusBadRequest)
+			return
+		}
+
+		entry := state.FindFile(id)
+		if entry == nil {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+
+		// Reject binary file types — their content cannot be JSON-serialized.
+		switch entry.Type {
+		case FileTypePDF, FileTypeImage, FileTypeBinary:
+			http.Error(w, "content endpoint not supported for binary file types; use the raw endpoint", http.StatusUnsupportedMediaType)
+			return
+		}
+
+		var resp fileContentResponse
+		if entry.Uploaded {
+			resp = fileContentResponse{
+				Content: entry.content,
+				BaseDir: "",
+			}
+		} else {
+			content, err := os.ReadFile(entry.Path) //nolint:gosec // Path is server-managed, not user-supplied
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			resp = fileContentResponse{
+				Content: string(content),
+				BaseDir: filepath.Dir(entry.Path),
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			slog.Error("failed to encode response", "error", err)
+		}
+	}
+}
+
+// resolveWithinBase joins rel onto base, cleans the result, and verifies it
+// does not escape base via "..". It returns the cleaned absolute path, or
+// ok=false if the resolved path would fall outside base. This guards the
+// relative-path endpoints against directory traversal.
+func resolveWithinBase(base, rel string) (string, bool) {
+	abs := filepath.Clean(filepath.Join(base, rel))
+	rp, err := filepath.Rel(base, abs)
+	if err != nil {
+		return "", false
+	}
+	if rp == ".." || strings.HasPrefix(rp, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return abs, true
+}
+
+func handleFileAsset(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing file id", http.StatusBadRequest)
+			return
+		}
+
+		entry := state.FindFile(id)
+		if entry == nil {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+
+		if entry.Uploaded {
+			http.Error(w, "raw assets not available for uploaded files", http.StatusNotFound)
+			return
+		}
+
+		relPath := r.PathValue("path")
+		if relPath == "" {
+			http.Error(w, "missing asset path", http.StatusBadRequest)
+			return
+		}
+
+		// Resolve the asset relative to the document directory, rejecting any
+		// path that escapes that directory via "..".
+		absPath, ok := resolveWithinBase(filepath.Dir(entry.Path), relPath)
+		if !ok {
+			http.Error(w, "access denied", http.StatusForbidden)
+			return
+		}
+
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		http.ServeFile(w, r, absPath)
+	}
+}
+
+func handleFileServe(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "missing file id", http.StatusBadRequest)
+			return
+		}
+
+		entry := state.FindFile(id)
+		if entry == nil {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+
+		if entry.Uploaded {
+			http.Error(w, "raw serving not available for uploaded files", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		http.ServeFile(w, r, entry.Path)
+	}
+}
+
+func handleOpenFile(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req openFileRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		entry := state.FindFile(req.FileID)
+		if entry == nil {
+			http.Error(w, "source file not found", http.StatusNotFound)
+			return
+		}
+
+		if entry.Uploaded {
+			http.Error(w, "relative links not available for uploaded files", http.StatusBadRequest)
+			return
+		}
+
+		// Resolve the linked file relative to the source document directory,
+		// rejecting any path that escapes that directory via "..".
+		absPath, ok := resolveWithinBase(filepath.Dir(entry.Path), req.Path)
+		if !ok {
+			http.Error(w, "access denied", http.StatusForbidden)
+			return
+		}
+
+		if _, err := os.Stat(absPath); err != nil {
+			if os.IsNotExist(err) {
+				http.Error(w, fmt.Sprintf("file not found: %s", absPath), http.StatusNotFound)
+			} else {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			}
+			return
+		}
+
+		groupName := state.FindGroupForFile(req.FileID)
+		if groupName == "" {
+			groupName = DefaultGroup
+		}
+
+		newEntry, err := state.AddFile(absPath, groupName)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(newEntry); err != nil {
+			slog.Error("failed to encode response", "error", err)
+		}
+	}
+}
+
+func handleAddPattern(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req patternRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		group, err := ResolveGroupName(req.Group)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		entries, err := state.AddPattern(req.Pattern, group)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(AddPatternResponse{Matched: len(entries), Files: entries}); err != nil {
+			slog.Error("failed to encode response", "error", err)
+		}
+	}
+}
+
+func handleRemovePattern(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req patternRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		group, err := ResolveGroupName(req.Group)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if !state.RemovePattern(req.Pattern, group) {
+			http.Error(w, "pattern not found", http.StatusNotFound)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleRestart(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		restoreFile, err := state.ExportState()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusAccepted)
+
+		// Send restart signal after response is written
+		select {
+		case state.restartCh <- restoreFile:
+		default:
+			os.Remove(restoreFile) //nolint:errcheck
+		}
+	}
+}
+
+func handleShutdown(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		select {
+		case state.shutdownCh <- struct{}{}:
+		default:
+		}
+	}
+}
+
+type statusGroup struct {
+	Group
+	Patterns []string `json:"patterns,omitempty"`
+}
+
+func handleStatus(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		groups := state.Groups()
+		statusGroups := make([]statusGroup, len(groups))
+		for i, g := range groups {
+			statusGroups[i] = statusGroup{
+				Group:    g,
+				Patterns: state.PatternsForGroup(g.Name),
+			}
+		}
+
+		resp := struct {
+			Version  string        `json:"version"`
+			Revision string        `json:"revision"`
+			PID      int           `json:"pid"`
+			Groups   []statusGroup `json:"groups"`
+		}{
+			Version:  version.Version,
+			Revision: version.Revision,
+			PID:      os.Getpid(),
+			Groups:   statusGroups,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			slog.Error("failed to encode status response", "error", err)
+		}
+	}
+}
+
+func handleVersion() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]string{
+			"version":  version.Version,
+			"revision": version.Revision,
+		}); err != nil {
+			slog.Error("failed to encode version response", "error", err)
+		}
+	}
+}
+
+func handleSSE(state *State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming not supported", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+
+		ch := state.Subscribe()
+		defer state.Unsubscribe(ch)
+
+		// Send server identity on connection
+		fmt.Fprintf(w, "event: started\ndata: {\"pid\":%d}\n\n", os.Getpid())
+		flusher.Flush()
+
+		ctx := r.Context()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case e, ok := <-ch:
+				if !ok {
+					return
+				}
+				fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.Name, e.Data)
+				flusher.Flush()
+			}
+		}
+	}
+}
+
+func handleSPA() http.HandlerFunc {
+	distFS, err := fs.Sub(static.Frontend, "dist")
+	if err != nil {
+		slog.Error("failed to create sub filesystem", "error", err)
+		os.Exit(1)
+	}
+	fileServer := http.FileServer(http.FS(distFS))
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Try to serve the exact file first
+		path := r.URL.Path
+		if path == "/" {
+			path = "/index.html"
+		}
+
+		f, err := distFS.Open(strings.TrimPrefix(path, "/"))
+		if err == nil {
+			f.Close()
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// SPA fallback: serve index.html for all non-file routes
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
+	}
+}
+
+// CheckboxState returns the sources, overrides, and ordered keys for a file.
+func (s *State) CheckboxState(id string) (sources, overrides map[string]bool, orderedKeys []string, found bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Verify file exists.
+	fileFound := false
+	for _, g := range s.groups {
+		for _, f := range g.Files {
+			if f.ID == id {
+				fileFound = true
+				break
+			}
+		}
+		if fileFound {
+			break
+		}
+	}
+	if !fileFound {
+		return nil, nil, nil, false
+	}
+
+	src := s.checkboxSources[id]
+	if src == nil {
+		src = map[string]bool{}
+	}
+	ovr := s.checkboxOverrides[id]
+	if ovr == nil {
+		ovr = map[string]bool{}
+	}
+	ordered := s.checkboxOrderedKeys[id]
+	if len(ordered) == 0 {
+		ordered = []string{}
+	}
+	return src, ovr, ordered, true
+}
+
+// SetCheckbox sets or removes a checkbox override for a file.
+func (s *State) SetCheckbox(id, key string, checked bool) bool {
+	s.mu.Lock()
+
+	fileFound := false
+	for _, g := range s.groups {
+		for _, f := range g.Files {
+			if f.ID == id {
+				fileFound = true
+				break
+			}
+		}
+		if fileFound {
+			break
+		}
+	}
+	if !fileFound {
+		s.mu.Unlock()
+		return false
+	}
+
+	sourceVal := false
+	if src, ok := s.checkboxSources[id]; ok {
+		sourceVal = src[key]
+	}
+
+	if checked == sourceVal {
+		// Matches source — remove override.
+		if ovr, ok := s.checkboxOverrides[id]; ok {
+			delete(ovr, key)
+			if len(ovr) == 0 {
+				delete(s.checkboxOverrides, id)
+			}
+		}
+	} else {
+		if s.checkboxOverrides[id] == nil {
+			s.checkboxOverrides[id] = make(map[string]bool)
+		}
+		s.checkboxOverrides[id][key] = checked
+	}
+
+	src := s.checkboxSources[id]
+	if src == nil {
+		src = map[string]bool{}
+	}
+	ovr := s.checkboxOverrides[id]
+	if ovr == nil {
+		ovr = map[string]bool{}
+	}
+	ordered := s.checkboxOrderedKeys[id]
+	if len(ordered) == 0 {
+		ordered = []string{}
+	}
+	s.mu.Unlock()
+
+	s.broadcastCheckboxChanged(id, src, ovr, ordered)
+	return true
+}
+
+// UncheckAll sets all checkboxes to unchecked for a file.
+func (s *State) UncheckAll(id string) bool {
+	s.mu.Lock()
+
+	fileFound := false
+	for _, g := range s.groups {
+		for _, f := range g.Files {
+			if f.ID == id {
+				fileFound = true
+				break
+			}
+		}
+		if fileFound {
+			break
+		}
+	}
+	if !fileFound {
+		s.mu.Unlock()
+		return false
+	}
+
+	src := s.checkboxSources[id]
+	if len(src) == 0 {
+		s.mu.Unlock()
+		return true
+	}
+
+	newOverrides := make(map[string]bool)
+	for key, sourceChecked := range src {
+		if sourceChecked {
+			newOverrides[key] = false
+		}
+	}
+
+	// Remove any existing overrides for source-false keys.
+	if len(newOverrides) > 0 {
+		s.checkboxOverrides[id] = newOverrides
+	} else {
+		delete(s.checkboxOverrides, id)
+	}
+
+	ovr := s.checkboxOverrides[id]
+	if ovr == nil {
+		ovr = map[string]bool{}
+	}
+	srcCopy := make(map[string]bool, len(src))
+	maps.Copy(srcCopy, src)
+	ordered := s.checkboxOrderedKeys[id]
+	if len(ordered) == 0 {
+		ordered = []string{}
+	}
+	s.mu.Unlock()
+
+	s.broadcastCheckboxChanged(id, srcCopy, ovr, ordered)
+	return true
+}
+
+// CheckAll sets all checkboxes to checked for a file.
+func (s *State) CheckAll(id string) bool {
+	s.mu.Lock()
+
+	fileFound := false
+	for _, g := range s.groups {
+		for _, f := range g.Files {
+			if f.ID == id {
+				fileFound = true
+				break
+			}
+		}
+		if fileFound {
+			break
+		}
+	}
+	if !fileFound {
+		s.mu.Unlock()
+		return false
+	}
+
+	src := s.checkboxSources[id]
+	if len(src) == 0 {
+		s.mu.Unlock()
+		return true
+	}
+
+	newOverrides := make(map[string]bool)
+	for key, sourceChecked := range src {
+		if !sourceChecked {
+			newOverrides[key] = true
+		}
+	}
+
+	if len(newOverrides) > 0 {
+		s.checkboxOverrides[id] = newOverrides
+	} else {
+		delete(s.checkboxOverrides, id)
+	}
+
+	ovr := s.checkboxOverrides[id]
+	if ovr == nil {
+		ovr = map[string]bool{}
+	}
+	srcCopy := make(map[string]bool, len(src))
+	maps.Copy(srcCopy, src)
+	ordered := s.checkboxOrderedKeys[id]
+	if len(ordered) == 0 {
+		ordered = []string{}
+	}
+	s.mu.Unlock()
+
+	s.broadcastCheckboxChanged(id, srcCopy, ovr, ordered)
+	return true
+}
+
+// RestoreCheckboxOverrides loads persisted checkbox overrides into the state.
+// Should be called after all files have been added (so checkboxSources are populated).
+func (s *State) RestoreCheckboxOverrides(overrides map[string]map[string]bool) {
+	if len(overrides) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for fileID, ovr := range overrides {
+		src := s.checkboxSources[fileID]
+		if src == nil {
+			continue // File not loaded — skip stale overrides.
+		}
+		reconciled := make(map[string]bool)
+		for key, val := range ovr {
+			srcVal, inSrc := src[key]
+			if !inSrc || val == srcVal {
+				continue // Stale or matches source.
+			}
+			reconciled[key] = val
+		}
+		if len(reconciled) > 0 {
+			s.checkboxOverrides[fileID] = reconciled
+		}
+	}
+}
+
 // snapshotRestoreData creates a RestoreData snapshot of the current state.
 // Caller must hold s.mu (at least RLock).
 func (s *State) snapshotRestoreData() RestoreData {
@@ -864,9 +1789,7 @@ func (s *State) snapshotRestoreData() RestoreData {
 		for fileID, overrides := range s.checkboxOverrides {
 			if len(overrides) > 0 {
 				cp := make(map[string]bool, len(overrides))
-				for k, v := range overrides {
-					cp[k] = v
-				}
+				maps.Copy(cp, overrides)
 				data.CheckboxOverrides[fileID] = cp
 			}
 		}
@@ -1128,7 +2051,7 @@ func (s *State) notifyFileChangedByPath(absPath string) {
 	s.notifyFileChanged(ids)
 
 	for _, cbID := range checkboxChangedIDs {
-		src, ovr, ordered, _ := s.GetCheckboxState(cbID)
+		src, ovr, ordered, _ := s.CheckboxState(cbID)
 		s.broadcastCheckboxChanged(cbID, src, ovr, ordered)
 	}
 }
@@ -1288,827 +2211,6 @@ func (s *State) matchAndAddFile(path string, patterns []*GlobPattern) {
 	}
 }
 
-type reorderFilesRequest struct {
-	Group   string   `json:"group"`
-	FileIDs []string `json:"fileIds"`
-}
-
-type moveFileRequest struct {
-	Group string `json:"group"`
-}
-
-type addFileRequest struct {
-	Path  string `json:"path"`
-	Group string `json:"group"`
-}
-
-type uploadFileRequest struct {
-	Name    string `json:"name"`
-	Content string `json:"content"`
-	Group   string `json:"group"`
-}
-
-type patternRequest struct {
-	Pattern string `json:"pattern"`
-	Group   string `json:"group"`
-}
-
-// AddPatternResponse is the JSON response for the add-pattern endpoint.
-type AddPatternResponse struct {
-	Matched int          `json:"matched"`
-	Files   []*FileEntry `json:"files,omitempty"`
-}
-
-type fileContentResponse struct {
-	Content string `json:"content"`
-	BaseDir string `json:"baseDir"`
-}
-
-type openFileRequest struct {
-	FileID string `json:"fileId"`
-	Path   string `json:"path"`
-}
-
-func NewHandler(state *State) http.Handler {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("POST /_/api/files", handleAddFile(state))
-	mux.HandleFunc("POST /_/api/files/upload", handleUploadFile(state))
-	mux.HandleFunc("DELETE /_/api/files/{id}", handleRemoveFile(state))
-	mux.HandleFunc("PUT /_/api/files/{id}/group", handleMoveFile(state))
-	mux.HandleFunc("GET /_/api/groups", handleGroups(state))
-	mux.HandleFunc("PUT /_/api/reorder", handleReorderFiles(state))
-	mux.HandleFunc("GET /_/api/files/{id}/content", handleFileContent(state))
-	mux.HandleFunc("GET /_/api/files/{id}/checkboxes", handleGetCheckboxes(state))
-	mux.HandleFunc("PUT /_/api/files/{id}/checkboxes/{key}", handlePutCheckbox(state))
-	mux.HandleFunc("DELETE /_/api/files/{id}/checkboxes", handleDeleteCheckboxes(state))
-	mux.HandleFunc("POST /_/api/files/{id}/checkboxes/check-all", handleCheckAll(state))
-	mux.HandleFunc("GET /_/api/files/{id}/raw", handleFileServe(state))
-	mux.HandleFunc("GET /_/api/files/{id}/raw/{path...}", handleFileAsset(state))
-	mux.HandleFunc("POST /_/api/files/open", handleOpenFile(state))
-	mux.HandleFunc("POST /_/api/patterns", handleAddPattern(state))
-	mux.HandleFunc("DELETE /_/api/patterns", handleRemovePattern(state))
-	mux.HandleFunc("POST /_/api/restart", handleRestart(state))
-	mux.HandleFunc("POST /_/api/shutdown", handleShutdown(state))
-	mux.HandleFunc("GET /_/api/status", handleStatus(state))
-	mux.HandleFunc("GET /_/api/version", handleVersion())
-	mux.HandleFunc("GET /_/events", handleSSE(state))
-	mux.HandleFunc("GET /", handleSPA())
-
-	return withCSP(mux)
-}
-
-func withCSP(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy",
-			"default-src 'self'; "+
-				"script-src 'self' 'unsafe-eval'; "+
-				"style-src 'self' 'unsafe-inline'; "+
-				"img-src 'self' https: data:; "+
-				"font-src 'self' data:; "+
-				"connect-src 'self'; "+
-				"worker-src 'self' blob:; "+
-				"object-src 'none'; "+
-				"base-uri 'self'; "+
-				"form-action 'self'; "+
-				"frame-ancestors 'none'")
-		next.ServeHTTP(w, r)
-	})
-}
-
-func handleAddFile(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req addFileRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		absPath, err := filepath.Abs(req.Path)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if _, err := os.Stat(absPath); err != nil {
-			http.Error(w, fmt.Sprintf("file not found: %s", absPath), http.StatusBadRequest)
-			return
-		}
-
-		group, err := ResolveGroupName(req.Group)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		entry, err := state.AddFile(absPath, group)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(entry); err != nil {
-			slog.Error("failed to encode response", "error", err)
-		}
-	}
-}
-
-func handleUploadFile(state *State) http.HandlerFunc {
-	const maxRequestSize = 12 << 20 // 12MB (headroom for JSON envelope)
-	const maxContentSize = 10 << 20 // 10MB
-	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, maxRequestSize)
-		var req uploadFileRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
-				http.Error(w, "file too large (max 10MB)", http.StatusRequestEntityTooLarge)
-				return
-			}
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if len(req.Content) > maxContentSize {
-			http.Error(w, "file too large (max 10MB)", http.StatusRequestEntityTooLarge)
-			return
-		}
-
-		if req.Name == "" {
-			http.Error(w, "missing file name", http.StatusBadRequest)
-			return
-		}
-
-		group, err := ResolveGroupName(req.Group)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		entry := state.AddUploadedFile(req.Name, req.Content, group)
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(entry); err != nil {
-			slog.Error("failed to encode response", "error", err)
-		}
-	}
-}
-
-func handleRemoveFile(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if id == "" {
-			http.Error(w, "missing file id", http.StatusBadRequest)
-			return
-		}
-		if !state.RemoveFile(id) {
-			http.Error(w, "file not found", http.StatusNotFound)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
-func handleMoveFile(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if id == "" {
-			http.Error(w, "missing file id", http.StatusBadRequest)
-			return
-		}
-		var req moveFileRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		group, err := ResolveGroupName(req.Group)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := state.MoveFile(id, group); err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
-func handleReorderFiles(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req reorderFilesRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		group, err := ResolveGroupName(req.Group)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if !state.ReorderFiles(group, req.FileIDs) {
-			http.Error(w, "invalid file IDs or group not found", http.StatusBadRequest)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
-func handleGroups(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		groups := state.Groups()
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(groups); err != nil {
-			slog.Error("failed to encode response", "error", err)
-		}
-	}
-}
-
-func handleFileContent(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if id == "" {
-			http.Error(w, "missing file id", http.StatusBadRequest)
-			return
-		}
-
-		entry := state.FindFile(id)
-		if entry == nil {
-			http.Error(w, "file not found", http.StatusNotFound)
-			return
-		}
-
-		// Reject binary file types — their content cannot be JSON-serialized.
-		switch entry.Type {
-		case FileTypePDF, FileTypeImage, FileTypeBinary:
-			http.Error(w, "content endpoint not supported for binary file types; use the raw endpoint", http.StatusUnsupportedMediaType)
-			return
-		}
-
-		var resp fileContentResponse
-		if entry.Uploaded {
-			resp = fileContentResponse{
-				Content: entry.content,
-				BaseDir: "",
-			}
-		} else {
-			content, err := os.ReadFile(entry.Path) //nolint:gosec // Path is server-managed, not user-supplied
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			resp = fileContentResponse{
-				Content: string(content),
-				BaseDir: filepath.Dir(entry.Path),
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			slog.Error("failed to encode response", "error", err)
-		}
-	}
-}
-
-func handleFileAsset(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if id == "" {
-			http.Error(w, "missing file id", http.StatusBadRequest)
-			return
-		}
-
-		entry := state.FindFile(id)
-		if entry == nil {
-			http.Error(w, "file not found", http.StatusNotFound)
-			return
-		}
-
-		if entry.Uploaded {
-			http.Error(w, "raw assets not available for uploaded files", http.StatusNotFound)
-			return
-		}
-
-		relPath := r.PathValue("path")
-		if relPath == "" {
-			http.Error(w, "missing asset path", http.StatusBadRequest)
-			return
-		}
-
-		absPath := filepath.Join(filepath.Dir(entry.Path), relPath)
-		absPath = filepath.Clean(absPath)
-
-		// Prevent directory traversal outside the base directory
-		baseDir := filepath.Dir(entry.Path)
-		if !strings.HasPrefix(absPath, baseDir) {
-			http.Error(w, "access denied", http.StatusForbidden)
-			return
-		}
-
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		http.ServeFile(w, r, absPath)
-	}
-}
-
-func handleFileServe(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if id == "" {
-			http.Error(w, "missing file id", http.StatusBadRequest)
-			return
-		}
-
-		entry := state.FindFile(id)
-		if entry == nil {
-			http.Error(w, "file not found", http.StatusNotFound)
-			return
-		}
-
-		if entry.Uploaded {
-			http.Error(w, "raw serving not available for uploaded files", http.StatusNotFound)
-			return
-		}
-
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		http.ServeFile(w, r, entry.Path)
-	}
-}
-
-func handleOpenFile(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req openFileRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		entry := state.FindFile(req.FileID)
-		if entry == nil {
-			http.Error(w, "source file not found", http.StatusNotFound)
-			return
-		}
-
-		if entry.Uploaded {
-			http.Error(w, "relative links not available for uploaded files", http.StatusBadRequest)
-			return
-		}
-
-		absPath := filepath.Join(filepath.Dir(entry.Path), req.Path)
-		absPath = filepath.Clean(absPath)
-
-		if _, err := os.Stat(absPath); err != nil {
-			if os.IsNotExist(err) {
-				http.Error(w, fmt.Sprintf("file not found: %s", absPath), http.StatusNotFound)
-			} else {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-			}
-			return
-		}
-
-		groupName := state.FindGroupForFile(req.FileID)
-		if groupName == "" {
-			groupName = DefaultGroup
-		}
-
-		newEntry, err := state.AddFile(absPath, groupName)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(newEntry); err != nil {
-			slog.Error("failed to encode response", "error", err)
-		}
-	}
-}
-
-func handleAddPattern(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req patternRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		group, err := ResolveGroupName(req.Group)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		entries, err := state.AddPattern(req.Pattern, group)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(AddPatternResponse{Matched: len(entries), Files: entries}); err != nil {
-			slog.Error("failed to encode response", "error", err)
-		}
-	}
-}
-
-func handleRemovePattern(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req patternRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		group, err := ResolveGroupName(req.Group)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if !state.RemovePattern(req.Pattern, group) {
-			http.Error(w, "pattern not found", http.StatusNotFound)
-			return
-		}
-
-		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
-func handleRestart(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		restoreFile, err := state.ExportState()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.WriteHeader(http.StatusAccepted)
-
-		// Send restart signal after response is written
-		select {
-		case state.restartCh <- restoreFile:
-		default:
-			os.Remove(restoreFile) //nolint:errcheck
-		}
-	}
-}
-
-func handleShutdown(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusAccepted)
-		select {
-		case state.shutdownCh <- struct{}{}:
-		default:
-		}
-	}
-}
-
-type statusGroup struct {
-	Group
-	Patterns []string `json:"patterns,omitempty"`
-}
-
-func handleStatus(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		groups := state.Groups()
-		statusGroups := make([]statusGroup, len(groups))
-		for i, g := range groups {
-			statusGroups[i] = statusGroup{
-				Group:    g,
-				Patterns: state.PatternsForGroup(g.Name),
-			}
-		}
-
-		resp := struct {
-			Version  string        `json:"version"`
-			Revision string        `json:"revision"`
-			PID      int           `json:"pid"`
-			Groups   []statusGroup `json:"groups"`
-		}{
-			Version:  version.Version,
-			Revision: version.Revision,
-			PID:      os.Getpid(),
-			Groups:   statusGroups,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			slog.Error("failed to encode status response", "error", err)
-		}
-	}
-}
-
-func handleVersion() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]string{
-			"version":  version.Version,
-			"revision": version.Revision,
-		}); err != nil {
-			slog.Error("failed to encode version response", "error", err)
-		}
-	}
-}
-
-func handleSSE(state *State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "streaming not supported", http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-
-		ch := state.Subscribe()
-		defer state.Unsubscribe(ch)
-
-		// Send server identity on connection
-		fmt.Fprintf(w, "event: started\ndata: {\"pid\":%d}\n\n", os.Getpid())
-		flusher.Flush()
-
-		ctx := r.Context()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case e, ok := <-ch:
-				if !ok {
-					return
-				}
-				fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.Name, e.Data)
-				flusher.Flush()
-			}
-		}
-	}
-}
-
-func handleSPA() http.HandlerFunc {
-	distFS, err := fs.Sub(static.Frontend, "dist")
-	if err != nil {
-		slog.Error("failed to create sub filesystem", "error", err)
-		os.Exit(1)
-	}
-	fileServer := http.FileServer(http.FS(distFS))
-
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Try to serve the exact file first
-		path := r.URL.Path
-		if path == "/" {
-			path = "/index.html"
-		}
-
-		f, err := distFS.Open(strings.TrimPrefix(path, "/"))
-		if err == nil {
-			f.Close()
-			fileServer.ServeHTTP(w, r)
-			return
-		}
-
-		// SPA fallback: serve index.html for all non-file routes
-		r.URL.Path = "/"
-		fileServer.ServeHTTP(w, r)
-	}
-}
-
-// GetCheckboxState returns the sources, overrides, and ordered keys for a file.
-func (s *State) GetCheckboxState(id string) (sources, overrides map[string]bool, orderedKeys []string, found bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	// Verify file exists.
-	fileFound := false
-	for _, g := range s.groups {
-		for _, f := range g.Files {
-			if f.ID == id {
-				fileFound = true
-				break
-			}
-		}
-		if fileFound {
-			break
-		}
-	}
-	if !fileFound {
-		return nil, nil, nil, false
-	}
-
-	src := s.checkboxSources[id]
-	if src == nil {
-		src = map[string]bool{}
-	}
-	ovr := s.checkboxOverrides[id]
-	if ovr == nil {
-		ovr = map[string]bool{}
-	}
-	ordered := s.checkboxOrderedKeys[id]
-	if ordered == nil {
-		ordered = []string{}
-	}
-	return src, ovr, ordered, true
-}
-
-// SetCheckbox sets or removes a checkbox override for a file.
-func (s *State) SetCheckbox(id, key string, checked bool) bool {
-	s.mu.Lock()
-
-	fileFound := false
-	for _, g := range s.groups {
-		for _, f := range g.Files {
-			if f.ID == id {
-				fileFound = true
-				break
-			}
-		}
-		if fileFound {
-			break
-		}
-	}
-	if !fileFound {
-		s.mu.Unlock()
-		return false
-	}
-
-	sourceVal := false
-	if src, ok := s.checkboxSources[id]; ok {
-		sourceVal = src[key]
-	}
-
-	if checked == sourceVal {
-		// Matches source — remove override.
-		if ovr, ok := s.checkboxOverrides[id]; ok {
-			delete(ovr, key)
-			if len(ovr) == 0 {
-				delete(s.checkboxOverrides, id)
-			}
-		}
-	} else {
-		if s.checkboxOverrides[id] == nil {
-			s.checkboxOverrides[id] = make(map[string]bool)
-		}
-		s.checkboxOverrides[id][key] = checked
-	}
-
-	src := s.checkboxSources[id]
-	if src == nil {
-		src = map[string]bool{}
-	}
-	ovr := s.checkboxOverrides[id]
-	if ovr == nil {
-		ovr = map[string]bool{}
-	}
-	ordered := s.checkboxOrderedKeys[id]
-	if ordered == nil {
-		ordered = []string{}
-	}
-	s.mu.Unlock()
-
-	s.broadcastCheckboxChanged(id, src, ovr, ordered)
-	return true
-}
-
-// UncheckAll sets all checkboxes to unchecked for a file.
-func (s *State) UncheckAll(id string) bool {
-	s.mu.Lock()
-
-	fileFound := false
-	for _, g := range s.groups {
-		for _, f := range g.Files {
-			if f.ID == id {
-				fileFound = true
-				break
-			}
-		}
-		if fileFound {
-			break
-		}
-	}
-	if !fileFound {
-		s.mu.Unlock()
-		return false
-	}
-
-	src := s.checkboxSources[id]
-	if len(src) == 0 {
-		s.mu.Unlock()
-		return true
-	}
-
-	newOverrides := make(map[string]bool)
-	for key, sourceChecked := range src {
-		if sourceChecked {
-			newOverrides[key] = false
-		}
-	}
-
-	// Remove any existing overrides for source-false keys.
-	if len(newOverrides) > 0 {
-		s.checkboxOverrides[id] = newOverrides
-	} else {
-		delete(s.checkboxOverrides, id)
-	}
-
-	ovr := s.checkboxOverrides[id]
-	if ovr == nil {
-		ovr = map[string]bool{}
-	}
-	srcCopy := make(map[string]bool, len(src))
-	for k, v := range src {
-		srcCopy[k] = v
-	}
-	ordered := s.checkboxOrderedKeys[id]
-	if ordered == nil {
-		ordered = []string{}
-	}
-	s.mu.Unlock()
-
-	s.broadcastCheckboxChanged(id, srcCopy, ovr, ordered)
-	return true
-}
-
-// CheckAll sets all checkboxes to checked for a file.
-func (s *State) CheckAll(id string) bool {
-	s.mu.Lock()
-
-	fileFound := false
-	for _, g := range s.groups {
-		for _, f := range g.Files {
-			if f.ID == id {
-				fileFound = true
-				break
-			}
-		}
-		if fileFound {
-			break
-		}
-	}
-	if !fileFound {
-		s.mu.Unlock()
-		return false
-	}
-
-	src := s.checkboxSources[id]
-	if len(src) == 0 {
-		s.mu.Unlock()
-		return true
-	}
-
-	newOverrides := make(map[string]bool)
-	for key, sourceChecked := range src {
-		if !sourceChecked {
-			newOverrides[key] = true
-		}
-	}
-
-	if len(newOverrides) > 0 {
-		s.checkboxOverrides[id] = newOverrides
-	} else {
-		delete(s.checkboxOverrides, id)
-	}
-
-	ovr := s.checkboxOverrides[id]
-	if ovr == nil {
-		ovr = map[string]bool{}
-	}
-	srcCopy := make(map[string]bool, len(src))
-	for k, v := range src {
-		srcCopy[k] = v
-	}
-	ordered := s.checkboxOrderedKeys[id]
-	if ordered == nil {
-		ordered = []string{}
-	}
-	s.mu.Unlock()
-
-	s.broadcastCheckboxChanged(id, srcCopy, ovr, ordered)
-	return true
-}
-
-// RestoreCheckboxOverrides loads persisted checkbox overrides into the state.
-// Should be called after all files have been added (so checkboxSources are populated).
-func (s *State) RestoreCheckboxOverrides(overrides map[string]map[string]bool) {
-	if len(overrides) == 0 {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for fileID, ovr := range overrides {
-		src := s.checkboxSources[fileID]
-		if src == nil {
-			continue // File not loaded — skip stale overrides.
-		}
-		reconciled := make(map[string]bool)
-		for key, val := range ovr {
-			srcVal, inSrc := src[key]
-			if !inSrc || val == srcVal {
-				continue // Stale or matches source.
-			}
-			reconciled[key] = val
-		}
-		if len(reconciled) > 0 {
-			s.checkboxOverrides[fileID] = reconciled
-		}
-	}
-}
-
 func (s *State) broadcastCheckboxChanged(id string, sources, overrides map[string]bool, orderedKeys []string) {
 	b, err := json.Marshal(struct {
 		FileID      string          `json:"fileId"`
@@ -2134,17 +2236,19 @@ func handleGetCheckboxes(state *State) http.HandlerFunc {
 			http.Error(w, "missing file id", http.StatusBadRequest)
 			return
 		}
-		sources, overrides, orderedKeys, found := state.GetCheckboxState(id)
+		sources, overrides, orderedKeys, found := state.CheckboxState(id)
 		if !found {
 			http.Error(w, "file not found", http.StatusNotFound)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(struct {
+		if err := json.NewEncoder(w).Encode(struct {
 			Sources     map[string]bool `json:"sources"`
 			Overrides   map[string]bool `json:"overrides"`
 			OrderedKeys []string        `json:"orderedKeys"`
-		}{Sources: sources, Overrides: overrides, OrderedKeys: orderedKeys})
+		}{Sources: sources, Overrides: overrides, OrderedKeys: orderedKeys}); err != nil {
+			slog.Error("failed to encode checkbox state response", "error", err)
+		}
 	}
 }
 
@@ -2206,4 +2310,3 @@ func handleCheckAll(state *State) http.HandlerFunc {
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
-

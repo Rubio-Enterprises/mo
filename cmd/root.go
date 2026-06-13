@@ -27,6 +27,7 @@ import (
 	"github.com/k1LoW/mo/internal/backup"
 	"github.com/k1LoW/mo/internal/logfile"
 	"github.com/k1LoW/mo/internal/server"
+	"github.com/k1LoW/mo/internal/token"
 	"github.com/k1LoW/mo/version"
 	"github.com/muesli/termenv"
 	"github.com/pkg/browser"
@@ -232,6 +233,11 @@ func run(cmd *cobra.Command, args []string) error {
 			if err := backup.Remove(port); err != nil {
 				return err
 			}
+		}
+
+		// Drop any stale auth token; a restarted server mints a fresh one.
+		if err := token.Remove(port); err != nil {
+			slog.Warn("failed to remove auth token", "error", err)
 		}
 
 		if wasServerRunning {
@@ -758,6 +764,66 @@ type probeResult struct {
 	groups []string
 }
 
+// authHeaderName must match the server's expected auth header.
+const authHeaderName = "X-Mo-Token" //nolint:gosec // header name, not a credential
+
+// tokenRoundTripper injects the per-server auth token on every request so all
+// CLI → server calls are authenticated without touching individual call sites.
+// The token is loaded per request so a client created before the server has
+// written its token file (e.g. while waiting for a freshly spawned server to
+// become ready) still authenticates once the file appears.
+type tokenRoundTripper struct {
+	addr string
+	base http.RoundTripper
+}
+
+func (t *tokenRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if tok := loadTokenForAddr(t.addr); tok != "" {
+		req = req.Clone(req.Context())
+		req.Header.Set(authHeaderName, tok)
+	}
+	return t.base.RoundTrip(req)
+}
+
+// newTokenTransport builds a RoundTripper that authenticates with the token of
+// the mo server listening on addr (host:port). If no token file exists, requests
+// are sent unauthenticated (e.g. when probing whether any server is present).
+func newTokenTransport(addr string) http.RoundTripper {
+	return &tokenRoundTripper{addr: addr, base: http.DefaultTransport}
+}
+
+// loadTokenForAddr reads the persisted auth token for the server on addr.
+func loadTokenForAddr(addr string) string {
+	_, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		return ""
+	}
+	prt, err := strconv.Atoi(p)
+	if err != nil {
+		return ""
+	}
+	tok, err := token.Load(prt)
+	if err != nil {
+		return ""
+	}
+	return tok
+}
+
+// allowedHostsForAddr returns the Host header values the server should accept
+// (DNS-rebinding defense). Remote-access mode may be reached via arbitrary
+// external hostnames, so it relies on the token instead of a Host allowlist.
+func allowedHostsForAddr(addr string) []string {
+	_, p, err := net.SplitHostPort(addr)
+	if err != nil || dangerouslyAllowRemoteAccess {
+		return nil
+	}
+	return []string{
+		net.JoinHostPort("localhost", p),
+		net.JoinHostPort("127.0.0.1", p),
+		net.JoinHostPort("::1", p),
+	}
+}
+
 // probeServer checks that a mo server is running on addr by calling
 // GET /_/api/status and validating the response contains a version field.
 func probeServer(addr string, timeout ...time.Duration) (*probeResult, error) {
@@ -765,7 +831,7 @@ func probeServer(addr string, timeout ...time.Duration) (*probeResult, error) {
 	if len(timeout) > 0 {
 		t = timeout[0]
 	}
-	client := &http.Client{Timeout: t}
+	client := &http.Client{Timeout: t, Transport: newTokenTransport(addr)}
 	resp, err := client.Get(fmt.Sprintf("http://%s/_/api/status", addr))
 	if err != nil {
 		return nil, fmt.Errorf("no mo server found on %s", addr)
@@ -995,12 +1061,12 @@ func doStatus() error {
 		return nil
 	}
 
-	client := &http.Client{Timeout: 2 * time.Second}
 	found := false
 	var jsonEntries []jsonStatusEntry
 
 	for i, p := range ports {
 		addr := fmt.Sprintf("localhost:%d", p)
+		client := &http.Client{Timeout: 2 * time.Second, Transport: newTokenTransport(addr)}
 		resp, err := client.Get(fmt.Sprintf("http://%s/_/api/status", addr))
 		if err != nil {
 			found = true
@@ -1120,6 +1186,25 @@ func startServer(ctx context.Context, addr string, filesByGroup map[string][]str
 	defer cleanup()
 
 	state := server.NewState(ctx)
+
+	// Generate and persist the per-server auth token, then enable auth. This
+	// gates the API to the local CLI (via the token file) and the same-origin
+	// SPA (via a SameSite=Strict cookie), without restricting which files open.
+	// MO_DISABLE_AUTH is an escape hatch for the cross-origin frontend dev proxy
+	// (pnpm run dev), where the SPA is served by Vite and never receives the
+	// cookie. Never set it in normal use.
+	if os.Getenv("MO_DISABLE_AUTH") != "1" {
+		tok, err := token.Generate()
+		if err != nil {
+			return fmt.Errorf("failed to generate auth token: %w", err)
+		}
+		if err := token.Save(port, tok); err != nil {
+			return fmt.Errorf("failed to persist auth token: %w", err)
+		}
+		state.SetAuth(tok, allowedHostsForAddr(addr))
+	} else {
+		slog.Warn("MO_DISABLE_AUTH set: API authentication is disabled")
+	}
 
 	state.EnableBackup(ctx, func(data server.RestoreData) {
 		if err := backup.Save(port, data); err != nil {
@@ -1308,7 +1393,7 @@ func openBrowser(addr string) {
 }
 
 func waitForReady(addr string, timeout time.Duration) (*statusResponse, error) {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
+	client := &http.Client{Timeout: 500 * time.Millisecond, Transport: newTokenTransport(addr)}
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
