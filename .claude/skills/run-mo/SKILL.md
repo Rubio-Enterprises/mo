@@ -125,14 +125,15 @@ go test ./...        # all packages pass (~15s); the real sanity check here
 ```
 
 `make e2e` builds the binary, downloads a Playwright Chromium, and runs the
-Playwright suite in `e2e/`. **It needs `MO_DISABLE_AUTH=1`** in this container,
-because the e2e fixture's readiness probe and `request`-based API calls hit the
-token-gated `/_/` endpoints without a token; with auth on, the fixture never
-sees a "ready" server and all specs fail in setup:
+Playwright suite in `e2e/` (browser, API, and CLI specs):
 
 ```bash
-MO_DISABLE_AUTH=1 make e2e
+make e2e        # 28 specs, all pass; runs with auth on, like production
 ```
+
+The fixtures are token-aware: they read the per-server `mo_token` and attach it
+to the API specs' `request` calls (the browser specs go through `page`, which
+gets the cookie on first navigation). No `MO_DISABLE_AUTH` needed.
 
 ## Gotchas
 
@@ -176,5 +177,6 @@ MO_DISABLE_AUTH=1 make e2e
   `domcontentloaded` (the driver does).
 - **Screenshot shows Mermaid as a fenced code block** — you didn't wait for
   `svg[aria-roledescription]`; the diagram hadn't painted yet.
-- **`make e2e`: every spec fails in fixture setup (`did not become ready`)** —
-  auth is on; prefix with `MO_DISABLE_AUTH=1`.
+- **`make e2e`: a spec fails with `did not become ready`** — the spawned mo
+  server crashed on startup (not auth — the fixtures are token-aware). Read the
+  `mo-server-log` Playwright attaches to the failed test.

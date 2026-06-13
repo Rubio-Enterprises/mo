@@ -41,7 +41,12 @@ test.describe("mo SPA in the browser", () => {
     await expect
       .poll(
         async () => {
-          const res = await page.request.get(`${moServer.baseURL}/_/api/groups`);
+          // page.request shares the browser's cookie jar, but its Node-side
+          // stack doesn't replay the Secure mo_token cookie over http://127.0.0.1
+          // the way the in-page fetches do, so pass the token explicitly here.
+          const res = await page.request.get(`${moServer.baseURL}/_/api/groups`, {
+            headers: moServer.token ? { "X-Mo-Token": moServer.token } : {},
+          });
           const groups = (await res.json()) as Array<{
             name: string;
             files: Array<{ id: string }>;
