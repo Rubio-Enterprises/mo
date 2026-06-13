@@ -2270,7 +2270,10 @@ func TestHandleGetCheckboxes(t *testing.T) {
 	mdFile := filepath.Join(dir, "tasks.md")
 	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600) //nolint:errcheck
 
-	entry, _ := s.AddFile(mdFile, DefaultGroup)
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := NewHandler(s)
 
 	t.Run("returns sources and empty overrides", func(t *testing.T) {
@@ -2316,7 +2319,10 @@ func TestHandlePutCheckbox(t *testing.T) {
 	mdFile := filepath.Join(dir, "tasks.md")
 	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600) //nolint:errcheck
 
-	entry, _ := s.AddFile(mdFile, DefaultGroup)
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := NewHandler(s)
 
 	t.Run("toggles checkbox and stores override", func(t *testing.T) {
@@ -2359,7 +2365,10 @@ func TestHandlePutCheckbox(t *testing.T) {
 	t.Run("handles URL-encoded keys", func(t *testing.T) {
 		mdFile2 := filepath.Join(dir, "spaces.md")
 		os.WriteFile(mdFile2, []byte("- [ ] Buy milk\n"), 0o600) //nolint:errcheck
-		entry2, _ := s.AddFile(mdFile2, DefaultGroup)
+		entry2, err := s.AddFile(mdFile2, DefaultGroup)
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		body := strings.NewReader(`{"checked": true}`)
 		req := httptest.NewRequest("PUT", "/_/api/files/"+entry2.ID+"/checkboxes/Buy%20milk", body)
@@ -2395,7 +2404,10 @@ func TestHandleDeleteCheckboxes(t *testing.T) {
 	mdFile := filepath.Join(dir, "tasks.md")
 	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [x] Gamma\n"), 0o600) //nolint:errcheck
 
-	entry, _ := s.AddFile(mdFile, DefaultGroup)
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := NewHandler(s)
 
 	// Toggle Alpha to true (source is false).
@@ -2450,7 +2462,10 @@ func TestCheckboxReconciliationOnFileChange(t *testing.T) {
 	mdFile := filepath.Join(dir, "tasks.md")
 	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [ ] Gamma\n"), 0o600) //nolint:errcheck
 
-	entry, _ := s.AddFile(mdFile, DefaultGroup)
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Set up overrides.
 	s.mu.Lock()
@@ -2496,7 +2511,10 @@ func TestRestoreCheckboxOverrides(t *testing.T) {
 	mdFile := filepath.Join(dir, "tasks.md")
 	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600) //nolint:errcheck
 
-	entry, _ := s.AddFile(mdFile, DefaultGroup)
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	overrides := map[string]map[string]bool{
 		entry.ID: {"Alpha": true, "Beta": true, "Deleted": false},
@@ -2527,7 +2545,10 @@ func TestHandleCheckAll(t *testing.T) {
 	mdFile := filepath.Join(dir, "tasks.md")
 	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [ ] Gamma\n"), 0o600) //nolint:errcheck
 
-	entry, _ := s.AddFile(mdFile, DefaultGroup)
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := NewHandler(s)
 
 	// Set an existing override: Beta overridden to false.

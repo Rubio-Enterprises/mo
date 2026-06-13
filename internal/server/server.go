@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -201,6 +202,9 @@ type State struct {
 	backupCh     chan struct{}     // dirty signal (buffered, size 1)
 	backupSaveFn func(RestoreData) // backup write callback
 	backupDone   chan struct{}     // closed when backupLoop exits
+
+	authToken    string              // API auth token; empty disables auth (tests/dev)
+	allowedHosts map[string]struct{} // accepted Host header values (anti DNS-rebind); empty skips the check
 }
 
 const defaultFileChangeDebounce = 200 * time.Millisecond
@@ -233,6 +237,20 @@ func NewState(ctx context.Context) *State {
 	}
 
 	return s
+}
+
+// SetAuth enables API authentication. token is required (via the mo_token cookie
+// or X-Mo-Token header) on all /_/ requests; allowedHosts, when non-empty,
+// restricts the accepted Host header (defense against DNS-rebinding). Passing an
+// empty token leaves authentication disabled.
+func (s *State) SetAuth(token string, allowedHosts []string) {
+	s.authToken = token
+	if len(allowedHosts) > 0 {
+		s.allowedHosts = make(map[string]struct{}, len(allowedHosts))
+		for _, h := range allowedHosts {
+			s.allowedHosts[h] = struct{}{}
+		}
+	}
 }
 
 // ErrBinaryFile is returned when a file is detected as binary.
@@ -898,7 +916,72 @@ func NewHandler(state *State) http.Handler {
 	mux.HandleFunc("GET /_/events", handleSSE(state))
 	mux.HandleFunc("GET /", handleSPA())
 
-	return withCSP(mux)
+	return withAuth(state, withCSP(mux))
+}
+
+const (
+	authCookieName = "mo_token"
+	authHeaderName = "X-Mo-Token" //nolint:gosec // header name, not a credential
+)
+
+// withAuth gates the /_/ API surface behind the per-server token and (when
+// configured) a Host allowlist. The token is accepted via the X-Mo-Token header
+// (used by the CLI) or the mo_token cookie (issued to the same-origin SPA). A
+// SameSite=Strict cookie is never sent on cross-site requests and cannot be read
+// cross-origin, so a malicious web page cannot forge authenticated calls even
+// though the server binds to localhost. When no token is configured (tests/dev),
+// the middleware is a no-op.
+func withAuth(state *State, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if state.authToken == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Reject unexpected Host headers (DNS-rebinding defense) before anything
+		// else. Applies to every route, including the SPA, so a rebound origin
+		// can't even bootstrap the app.
+		if len(state.allowedHosts) > 0 {
+			if _, ok := state.allowedHosts[r.Host]; !ok {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
+
+		if strings.HasPrefix(r.URL.Path, "/_/") {
+			if !validToken(r, state.authToken) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// SPA / static assets: issue the cookie so same-origin API calls (fetch,
+		// EventSource, <img>, navigations) carry it automatically.
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure intentionally omitted — mo serves plain HTTP on localhost; SameSite=Strict + HttpOnly provide the cross-site/leak protection.
+			Name:     authCookieName,
+			Value:    state.authToken,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteStrictMode,
+		})
+		next.ServeHTTP(w, r)
+	})
+}
+
+// validToken reports whether the request carries the expected token via the
+// X-Mo-Token header or the mo_token cookie, using a constant-time comparison.
+func validToken(r *http.Request, want string) bool {
+	if h := r.Header.Get(authHeaderName); h != "" &&
+		subtle.ConstantTimeCompare([]byte(h), []byte(want)) == 1 {
+		return true
+	}
+	if c, err := r.Cookie(authCookieName); err == nil &&
+		subtle.ConstantTimeCompare([]byte(c.Value), []byte(want)) == 1 {
+		return true
+	}
+	return false
 }
 
 func withCSP(next http.Handler) http.Handler {
@@ -1430,8 +1513,8 @@ func handleSPA() http.HandlerFunc {
 	}
 }
 
-// GetCheckboxState returns the sources, overrides, and ordered keys for a file.
-func (s *State) GetCheckboxState(id string) (sources, overrides map[string]bool, orderedKeys []string, found bool) {
+// CheckboxState returns the sources, overrides, and ordered keys for a file.
+func (s *State) CheckboxState(id string) (sources, overrides map[string]bool, orderedKeys []string, found bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1461,7 +1544,7 @@ func (s *State) GetCheckboxState(id string) (sources, overrides map[string]bool,
 		ovr = map[string]bool{}
 	}
 	ordered := s.checkboxOrderedKeys[id]
-	if ordered == nil {
+	if len(ordered) == 0 {
 		ordered = []string{}
 	}
 	return src, ovr, ordered, true
@@ -1517,7 +1600,7 @@ func (s *State) SetCheckbox(id, key string, checked bool) bool {
 		ovr = map[string]bool{}
 	}
 	ordered := s.checkboxOrderedKeys[id]
-	if ordered == nil {
+	if len(ordered) == 0 {
 		ordered = []string{}
 	}
 	s.mu.Unlock()
@@ -1574,7 +1657,7 @@ func (s *State) UncheckAll(id string) bool {
 	srcCopy := make(map[string]bool, len(src))
 	maps.Copy(srcCopy, src)
 	ordered := s.checkboxOrderedKeys[id]
-	if ordered == nil {
+	if len(ordered) == 0 {
 		ordered = []string{}
 	}
 	s.mu.Unlock()
@@ -1630,7 +1713,7 @@ func (s *State) CheckAll(id string) bool {
 	srcCopy := make(map[string]bool, len(src))
 	maps.Copy(srcCopy, src)
 	ordered := s.checkboxOrderedKeys[id]
-	if ordered == nil {
+	if len(ordered) == 0 {
 		ordered = []string{}
 	}
 	s.mu.Unlock()
@@ -1963,7 +2046,7 @@ func (s *State) notifyFileChangedByPath(absPath string) {
 	s.notifyFileChanged(ids)
 
 	for _, cbID := range checkboxChangedIDs {
-		src, ovr, ordered, _ := s.GetCheckboxState(cbID)
+		src, ovr, ordered, _ := s.CheckboxState(cbID)
 		s.broadcastCheckboxChanged(cbID, src, ovr, ordered)
 	}
 }
@@ -2148,7 +2231,7 @@ func handleGetCheckboxes(state *State) http.HandlerFunc {
 			http.Error(w, "missing file id", http.StatusBadRequest)
 			return
 		}
-		sources, overrides, orderedKeys, found := state.GetCheckboxState(id)
+		sources, overrides, orderedKeys, found := state.CheckboxState(id)
 		if !found {
 			http.Error(w, "file not found", http.StatusNotFound)
 			return
