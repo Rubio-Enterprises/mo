@@ -1111,6 +1111,22 @@ func handleFileContent(state *State) http.HandlerFunc {
 	}
 }
 
+// resolveWithinBase joins rel onto base, cleans the result, and verifies it
+// does not escape base via "..". It returns the cleaned absolute path, or
+// ok=false if the resolved path would fall outside base. This guards the
+// relative-path endpoints against directory traversal.
+func resolveWithinBase(base, rel string) (string, bool) {
+	abs := filepath.Clean(filepath.Join(base, rel))
+	rp, err := filepath.Rel(base, abs)
+	if err != nil {
+		return "", false
+	}
+	if rp == ".." || strings.HasPrefix(rp, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return abs, true
+}
+
 func handleFileAsset(state *State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
@@ -1136,12 +1152,10 @@ func handleFileAsset(state *State) http.HandlerFunc {
 			return
 		}
 
-		absPath := filepath.Join(filepath.Dir(entry.Path), relPath)
-		absPath = filepath.Clean(absPath)
-
-		// Prevent directory traversal outside the base directory
-		baseDir := filepath.Dir(entry.Path)
-		if !strings.HasPrefix(absPath, baseDir) {
+		// Resolve the asset relative to the document directory, rejecting any
+		// path that escapes that directory via "..".
+		absPath, ok := resolveWithinBase(filepath.Dir(entry.Path), relPath)
+		if !ok {
 			http.Error(w, "access denied", http.StatusForbidden)
 			return
 		}
@@ -1194,8 +1208,13 @@ func handleOpenFile(state *State) http.HandlerFunc {
 			return
 		}
 
-		absPath := filepath.Join(filepath.Dir(entry.Path), req.Path)
-		absPath = filepath.Clean(absPath)
+		// Resolve the linked file relative to the source document directory,
+		// rejecting any path that escapes that directory via "..".
+		absPath, ok := resolveWithinBase(filepath.Dir(entry.Path), req.Path)
+		if !ok {
+			http.Error(w, "access denied", http.StatusForbidden)
+			return
+		}
 
 		if _, err := os.Stat(absPath); err != nil {
 			if os.IsNotExist(err) {

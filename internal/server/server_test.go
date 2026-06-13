@@ -2075,6 +2075,69 @@ func TestHandleFileServe_RouteCoexistence(t *testing.T) {
 	}
 }
 
+func TestResolveWithinBase(t *testing.T) {
+	base := filepath.Join(string(filepath.Separator), "home", "user", "docs")
+	tests := []struct {
+		name    string
+		rel     string
+		wantOK  bool
+		wantAbs string
+	}{
+		{"sibling", "image.png", true, filepath.Join(base, "image.png")},
+		{"subdir", "assets/image.png", true, filepath.Join(base, "assets", "image.png")},
+		{"dot prefix", "./image.png", true, filepath.Join(base, "image.png")},
+		{"parent escape", "../secret.txt", false, ""},
+		{"deep escape", "../../../../etc/passwd", false, ""},
+		{"sneaky escape", "assets/../../secret.txt", false, ""},
+		{"absolute is contained by join", "/etc/passwd", true, filepath.Join(base, "etc", "passwd")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			abs, ok := resolveWithinBase(base, tt.rel)
+			if ok != tt.wantOK {
+				t.Fatalf("resolveWithinBase(%q, %q) ok = %v, want %v", base, tt.rel, ok, tt.wantOK)
+			}
+			if ok && abs != tt.wantAbs {
+				t.Fatalf("resolveWithinBase(%q, %q) = %q, want %q", base, tt.rel, abs, tt.wantAbs)
+			}
+		})
+	}
+}
+
+func TestHandleOpenFile_RejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestState(t)
+	handler := NewHandler(s)
+
+	// Document lives in a subdirectory so "../" escapes its directory.
+	subDir := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(subDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	mdFile := filepath.Join(subDir, "doc.md")
+	os.WriteFile(mdFile, []byte("# Doc"), 0o600) //nolint:errcheck
+	// A sensitive sibling of the document directory, outside it.
+	os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("secret"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := json.Marshal(openFileRequest{FileID: entry.ID, Path: "../secret.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/_/api/files/open", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("traversal open: got status %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
 func TestHandleFileContent_RejectsBinaryTypes(t *testing.T) {
 	dir := t.TempDir()
 	s := newTestState(t)
@@ -2508,4 +2571,3 @@ func TestHandleCheckAll(t *testing.T) {
 		}
 	})
 }
-
