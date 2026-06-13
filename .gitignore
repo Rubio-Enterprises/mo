@@ -38,6 +38,7 @@ reports/
 !.claude/hooks/
 !.claude/commands/
 !.claude/agents/
+!.claude/skills/
 
 # Per-archetype
 vendor/
