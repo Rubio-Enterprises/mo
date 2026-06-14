@@ -9,4 +9,4 @@ has_embedded_web: false
 is_fork: true
 project_name: mo
 tier: experimental
-uses_release_please: true
+uses_release_please: false
