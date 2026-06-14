@@ -147,9 +147,10 @@ gets the cookie on first navigation). No `MO_DISABLE_AUTH` needed.
   times out. The driver uses `domcontentloaded` + an explicit element wait.
 - **The `/_/` API is token-gated.** A browser *navigation* is fine — the SPA
   shell hands back a `SameSite=Strict; Secure` `mo_token` cookie, and Chromium
-  sends it because `http://localhost` is a secure context. But `curl`/`fetch`
-  must pass `X-Mo-Token: $(cat $XDG_STATE_HOME/mo/token/mo-<port>.token)`.
-  Without it you get `401`.
+  sends it over plain HTTP because it treats loopback (`127.0.0.1`/`localhost`)
+  as a secure context. But `curl`/`fetch` must pass
+  `X-Mo-Token: $(cat $XDG_STATE_HOME/mo/token/mo-<port>.token)`. Without it you
+  get `401`.
 - **Playwright browser version skew.** The frontend's Playwright (1.60) wants a
   newer Chromium build than the one prebuilt at `/opt/pw-browsers` (1194,
   pinned by the e2e suite's Playwright 1.58). The driver sidesteps this by

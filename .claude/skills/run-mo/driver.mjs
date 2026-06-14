@@ -46,16 +46,19 @@ const { chromium } = requireFromFrontend("playwright");
 function findChrome() {
   const root = process.env.PLAYWRIGHT_BROWSERS_PATH;
   if (!root || !existsSync(root)) return undefined;
-  const candidates = [];
+  // Keep full-chromium and headless-shell builds in separate lists so the
+  // stated preference (full chromium first) holds regardless of readdir order.
+  const full = [];
+  const shell = [];
   for (const dir of readdirSync(root)) {
     if (dir.startsWith("chromium-")) {
-      candidates.push(resolve(root, dir, "chrome-linux/chrome"));
+      full.push(resolve(root, dir, "chrome-linux/chrome"));
     } else if (dir.startsWith("chromium_headless_shell-")) {
-      candidates.push(resolve(root, dir, "chrome-linux/headless_shell"));
+      shell.push(resolve(root, dir, "chrome-linux/headless_shell"));
     }
   }
   // Prefer the full chromium build over the headless shell.
-  return candidates.find((p) => existsSync(p));
+  return [...full, ...shell].find((p) => existsSync(p));
 }
 
 const executablePath = findChrome();
@@ -71,9 +74,17 @@ let waitSelector = null;
 let settleMs = 0;
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i];
-  if (a === "--wait") waitSelector = process.argv[++i];
-  else if (a === "--settle") settleMs = Number(process.argv[++i]) || 0;
-  else positional.push(a);
+  if (a === "--wait" || a === "--settle") {
+    const val = process.argv[++i];
+    if (val === undefined) {
+      console.error(`[driver] ${a} requires a value`);
+      process.exit(1);
+    }
+    if (a === "--wait") waitSelector = val;
+    else settleMs = Number(val) || 0;
+  } else {
+    positional.push(a);
+  }
 }
 const url = positional[0] ?? "http://127.0.0.1:16275/";
 const out = positional[1] ?? "/tmp/mo-shots/mo.png";
