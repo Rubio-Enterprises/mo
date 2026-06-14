@@ -160,6 +160,7 @@ test.describe("mo HTTP API", () => {
     const streamPromise = (async () => {
       const res = await fetch(`${moServer.baseURL}/_/events`, {
         signal: controller.signal,
+        headers: moServer.token ? { "X-Mo-Token": moServer.token } : {},
       });
       if (!res.body) throw new Error("no SSE body");
       const reader = res.body.getReader();
