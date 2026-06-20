@@ -2075,6 +2075,69 @@ func TestHandleFileServe_RouteCoexistence(t *testing.T) {
 	}
 }
 
+func TestResolveWithinBase(t *testing.T) {
+	base := filepath.Join(string(filepath.Separator), "home", "user", "docs")
+	tests := []struct {
+		name    string
+		rel     string
+		wantOK  bool
+		wantAbs string
+	}{
+		{"sibling", "image.png", true, filepath.Join(base, "image.png")},
+		{"subdir", "assets/image.png", true, filepath.Join(base, "assets", "image.png")},
+		{"dot prefix", "./image.png", true, filepath.Join(base, "image.png")},
+		{"parent escape", "../secret.txt", false, ""},
+		{"deep escape", "../../../../etc/passwd", false, ""},
+		{"sneaky escape", "assets/../../secret.txt", false, ""},
+		{"absolute is contained by join", "/etc/passwd", true, filepath.Join(base, "etc", "passwd")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			abs, ok := resolveWithinBase(base, tt.rel)
+			if ok != tt.wantOK {
+				t.Fatalf("resolveWithinBase(%q, %q) ok = %v, want %v", base, tt.rel, ok, tt.wantOK)
+			}
+			if ok && abs != tt.wantAbs {
+				t.Fatalf("resolveWithinBase(%q, %q) = %q, want %q", base, tt.rel, abs, tt.wantAbs)
+			}
+		})
+	}
+}
+
+func TestHandleOpenFile_RejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestState(t)
+	handler := NewHandler(s)
+
+	// Document lives in a subdirectory so "../" escapes its directory.
+	subDir := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(subDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	mdFile := filepath.Join(subDir, "doc.md")
+	os.WriteFile(mdFile, []byte("# Doc"), 0o600) //nolint:errcheck
+	// A sensitive sibling of the document directory, outside it.
+	os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("secret"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := json.Marshal(openFileRequest{FileID: entry.ID, Path: "../secret.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/_/api/files/open", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("traversal open: got status %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
 func TestHandleFileContent_RejectsBinaryTypes(t *testing.T) {
 	dir := t.TempDir()
 	s := newTestState(t)
@@ -2101,7 +2164,7 @@ func TestAddFilePopulatesCheckboxSources(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] First\n- [x] Second\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] First\n- [x] Second\n"), 0o600) //nolint:errcheck
 
 	entry, err := s.AddFile(mdFile, DefaultGroup)
 	if err != nil {
@@ -2127,7 +2190,7 @@ func TestAddFileSkipsCheckboxesForNonMarkdown(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	goFile := filepath.Join(dir, "main.go")
-	os.WriteFile(goFile, []byte("package main\n"), 0o600)
+	os.WriteFile(goFile, []byte("package main\n"), 0o600) //nolint:errcheck
 
 	entry, err := s.AddFile(goFile, DefaultGroup)
 	if err != nil {
@@ -2147,7 +2210,7 @@ func TestRemoveFileCleansUpCheckboxState(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] Item\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] Item\n"), 0o600) //nolint:errcheck
 
 	entry, err := s.AddFile(mdFile, DefaultGroup)
 	if err != nil {
@@ -2182,7 +2245,7 @@ func TestAddFilePopulatesCheckboxOrderedKeys(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] First\n- [x] Second\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] First\n- [x] Second\n"), 0o600) //nolint:errcheck
 
 	entry, err := s.AddFile(mdFile, DefaultGroup)
 	if err != nil {
@@ -2205,9 +2268,12 @@ func TestHandleGetCheckboxes(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600) //nolint:errcheck
 
-	entry, _ := s.AddFile(mdFile, DefaultGroup)
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := NewHandler(s)
 
 	t.Run("returns sources and empty overrides", func(t *testing.T) {
@@ -2222,7 +2288,7 @@ func TestHandleGetCheckboxes(t *testing.T) {
 			Sources   map[string]bool `json:"sources"`
 			Overrides map[string]bool `json:"overrides"`
 		}
-		json.NewDecoder(w.Body).Decode(&resp)
+		json.NewDecoder(w.Body).Decode(&resp) //nolint:errcheck
 		if len(resp.Sources) != 2 {
 			t.Fatalf("got %d sources, want 2", len(resp.Sources))
 		}
@@ -2251,9 +2317,12 @@ func TestHandlePutCheckbox(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600) //nolint:errcheck
 
-	entry, _ := s.AddFile(mdFile, DefaultGroup)
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := NewHandler(s)
 
 	t.Run("toggles checkbox and stores override", func(t *testing.T) {
@@ -2295,8 +2364,11 @@ func TestHandlePutCheckbox(t *testing.T) {
 
 	t.Run("handles URL-encoded keys", func(t *testing.T) {
 		mdFile2 := filepath.Join(dir, "spaces.md")
-		os.WriteFile(mdFile2, []byte("- [ ] Buy milk\n"), 0o600)
-		entry2, _ := s.AddFile(mdFile2, DefaultGroup)
+		os.WriteFile(mdFile2, []byte("- [ ] Buy milk\n"), 0o600) //nolint:errcheck
+		entry2, err := s.AddFile(mdFile2, DefaultGroup)
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		body := strings.NewReader(`{"checked": true}`)
 		req := httptest.NewRequest("PUT", "/_/api/files/"+entry2.ID+"/checkboxes/Buy%20milk", body)
@@ -2330,9 +2402,12 @@ func TestHandleDeleteCheckboxes(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [x] Gamma\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [x] Gamma\n"), 0o600) //nolint:errcheck
 
-	entry, _ := s.AddFile(mdFile, DefaultGroup)
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := NewHandler(s)
 
 	// Toggle Alpha to true (source is false).
@@ -2385,9 +2460,12 @@ func TestCheckboxReconciliationOnFileChange(t *testing.T) {
 
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [ ] Gamma\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [ ] Gamma\n"), 0o600) //nolint:errcheck
 
-	entry, _ := s.AddFile(mdFile, DefaultGroup)
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Set up overrides.
 	s.mu.Lock()
@@ -2399,7 +2477,7 @@ func TestCheckboxReconciliationOnFileChange(t *testing.T) {
 	s.mu.Unlock()
 
 	// Rewrite the file: remove Gamma, change Beta to unchecked.
-	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [ ] Beta\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [ ] Beta\n"), 0o600) //nolint:errcheck
 
 	// Trigger reconciliation.
 	s.notifyFileChangedByPath(mdFile)
@@ -2431,9 +2509,12 @@ func TestRestoreCheckboxOverrides(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600)
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600) //nolint:errcheck
 
-	entry, _ := s.AddFile(mdFile, DefaultGroup)
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	overrides := map[string]map[string]bool{
 		entry.ID: {"Alpha": true, "Beta": true, "Deleted": false},
@@ -2464,7 +2545,10 @@ func TestHandleCheckAll(t *testing.T) {
 	mdFile := filepath.Join(dir, "tasks.md")
 	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [ ] Gamma\n"), 0o600) //nolint:errcheck
 
-	entry, _ := s.AddFile(mdFile, DefaultGroup)
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := NewHandler(s)
 
 	// Set an existing override: Beta overridden to false.
@@ -2508,4 +2592,3 @@ func TestHandleCheckAll(t *testing.T) {
 		}
 	})
 }
-

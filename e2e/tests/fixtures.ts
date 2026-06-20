@@ -1,6 +1,6 @@
 import { test as base } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../..");
 const MO_BIN = join(REPO_ROOT, "mo");
 const TESTDATA = join(REPO_ROOT, "testdata");
+
+// mo gates every /_/ request behind a per-server token (header or cookie).
+const AUTH_HEADER = "X-Mo-Token";
 
 async function findFreePort(): Promise<number> {
   return new Promise((res, rej) => {
@@ -28,11 +31,14 @@ async function findFreePort(): Promise<number> {
   });
 }
 
+// Probe the SPA shell ("/") for readiness. Auth gates every /_/ route — including
+// /_/api/status — but the shell is served unauthenticated (and hands the browser
+// the mo_token cookie), so it's the right token-free readiness signal.
 async function waitForServer(baseURL: string, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`${baseURL}/_/api/status`);
+      const res = await fetch(`${baseURL}/`);
       if (res.ok) return;
     } catch {
       // not ready
@@ -42,10 +48,24 @@ async function waitForServer(baseURL: string, timeoutMs = 10_000): Promise<void>
   throw new Error(`mo server at ${baseURL} did not become ready within ${timeoutMs}ms`);
 }
 
+// The server mints its auth token and writes it to
+// $XDG_STATE_HOME/mo/token/mo-<port>.token BEFORE it binds the listener, so by
+// the time waitForServer() sees "/" the file exists. Returns "" when auth is
+// disabled (MO_DISABLE_AUTH=1) — then no token file is written and none is needed.
+function readToken(stateDir: string, port: number): string {
+  try {
+    return readFileSync(join(stateDir, "mo", "token", `mo-${port}.token`), "utf-8").trim();
+  } catch {
+    return "";
+  }
+}
+
 export interface MoServerHandle {
   baseURL: string;
   port: number;
   stateDir: string;
+  /** Per-server auth token; "" when MO_DISABLE_AUTH=1. Required on /_/ requests. */
+  token: string;
   addFile(absPath: string, group?: string): Promise<{ id: string; name: string; path: string }>;
 }
 
@@ -56,10 +76,14 @@ interface Fixtures {
 /**
  * Per-test mo server. Each test gets:
  *   - A unique port
- *   - A fresh XDG_STATE_HOME so backups/logs don't collide
+ *   - A fresh XDG_STATE_HOME so backups/logs/token don't collide
  *   - A running mo process (foreground mode) that is torn down after the test
  *
- * The `addFile` helper uses the mo HTTP API to register files for the test.
+ * The server runs with auth ON (as in production). The fixture reads the
+ * per-server token and attaches it to every /_/ call it makes (addFile,
+ * shutdown) and — via the overridden `request` fixture below — to the API specs'
+ * direct requests. Browser specs go through `page`, which gets the mo_token
+ * cookie on first navigation, so they need no token wrangling.
  */
 export const test = base.extend<Fixtures>({
   moServer: async ({}, use, testInfo) => {
@@ -114,14 +138,20 @@ export const test = base.extend<Fixtures>({
       throw new Error(`${(err as Error).message}\n--- server output ---\n${serverLog}`);
     }
 
+    // The token is persisted before the server starts listening, so it is
+    // readable now. Attach it to every /_/ request the fixture makes.
+    const token = readToken(stateDir, port);
+    const authHeaders: Record<string, string> = token ? { [AUTH_HEADER]: token } : {};
+
     const handle: MoServerHandle = {
       baseURL,
       port,
       stateDir,
+      token,
       async addFile(absPath: string, group = "default") {
         const res = await fetch(`${baseURL}/_/api/files`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeaders },
           body: JSON.stringify({ path: absPath, group }),
         });
         if (!res.ok) {
@@ -135,7 +165,7 @@ export const test = base.extend<Fixtures>({
 
     // Teardown: shut down the server, then clean up state dir.
     try {
-      await fetch(`${baseURL}/_/api/shutdown`, { method: "POST" });
+      await fetch(`${baseURL}/_/api/shutdown`, { method: "POST", headers: authHeaders });
     } catch {
       // ignore
     }
@@ -156,6 +186,18 @@ export const test = base.extend<Fixtures>({
     if (testInfo.status !== testInfo.expectedStatus) {
       await testInfo.attach("mo-server-log", { body: serverLog, contentType: "text/plain" });
     }
+  },
+
+  // Override the built-in `request` fixture with one that carries the auth token.
+  // The API specs hit /_/ directly through `request` (no browser, so no cookie),
+  // so without this they'd all 401. Browser specs use `page` / `page.request`,
+  // which carry the mo_token cookie set on first navigation, and are unaffected.
+  request: async ({ playwright, moServer }, use) => {
+    const ctx = await playwright.request.newContext({
+      extraHTTPHeaders: moServer.token ? { [AUTH_HEADER]: moServer.token } : {},
+    });
+    await use(ctx);
+    await ctx.dispose();
   },
 });
 

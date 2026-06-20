@@ -272,7 +272,11 @@ func TestRemovePropagatesNonNotExistError(t *testing.T) {
 	if err := os.Chmod(backupDir, 0o500); err != nil {
 		t.Fatalf("Chmod: %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(backupDir, 0o755) })
+	t.Cleanup(func() {
+		if err := os.Chmod(backupDir, 0o755); err != nil {
+			t.Logf("chmod restore failed: %v", err)
+		}
+	})
 
 	if err := Remove(555); err == nil {
 		t.Fatal("expected Remove to fail when parent is read-only")

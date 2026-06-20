@@ -194,7 +194,7 @@ func TestExtractCheckboxes(t *testing.T) {
 
 	t.Run("checkbox outside list is ignored", func(t *testing.T) {
 		// Raw HTML checkbox should not appear in the extracted set — goldmark
-		// only recognises checkboxes inside the TaskList extension scope.
+		// only recognizes checkboxes inside the TaskList extension scope.
 		md := "Some paragraph with <input type=\"checkbox\"> inside.\n\n- [ ] Real task\n"
 		sources, ordered := ExtractCheckboxes(md)
 		if len(sources) != 1 {
