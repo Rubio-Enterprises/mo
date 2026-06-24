@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "packageManager": "pnpm@10.34.4",
+  "packageManager": "pnpm@11.8.0",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -14,14 +14,6 @@
     "lint": "oxlint -c .oxlintrc.json --disable-nested-config src/",
     "fmt": "oxfmt -c .oxfmtrc.json --write src/",
     "fmt:check": "oxfmt -c .oxfmtrc.json --check src/"
-  },
-  "pnpm": {
-    "executionEnv": {
-      "nodeVersion": "22.16.0"
-    },
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
