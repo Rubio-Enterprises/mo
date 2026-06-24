@@ -1,0 +1,13 @@
+name: Copilot Setup Steps
+
+# Public-repo override: pin Copilot code review (and coding agent) to a
+# GitHub-hosted Ubuntu x64 runner. Self-hosted runners cannot serve public
+# repos, so without this the org-default labeled runner would queue ~24h.
+on: workflow_dispatch
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
