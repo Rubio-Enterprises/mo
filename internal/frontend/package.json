@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "packageManager": "pnpm@11.8.0",
+  "packageManager": "pnpm@11.9.0",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -46,19 +46,19 @@
     "@types/hast": "3.0.4",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-react": "6.0.3",
     "@vitest/coverage-v8": "4.1.9",
     "jsdom": "29.1.1",
     "oxfmt": "0.56.0",
     "oxlint": "1.71.0",
-    "playwright": "1.61.0",
+    "playwright": "1.61.1",
     "rehype-stringify": "10.0.1",
     "remark-parse": "11.0.0",
     "remark-rehype": "11.1.2",
     "rollup-plugin-license": "3.7.1",
     "tailwindcss": "4.3.1",
     "typescript": "6.0.3",
-    "vite": "8.0.16",
+    "vite": "8.1.0",
     "vitest": "4.1.9"
   }
 }
