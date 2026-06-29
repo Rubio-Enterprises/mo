@@ -36,7 +36,7 @@ jobs:
     # the SHA when .github@v1 advances. Without it, the SHA pin is opaque to
     # Renovate and never gets updated.
     if: github.event_name != 'pull_request' || github.event.action != 'edited'
-    uses: Rubio-Enterprises/.github/.github/workflows/audit.yml@5846b4191b1fd77a8edc040ec76c0341888e1106 # v1
+    uses: Rubio-Enterprises/.github/.github/workflows/audit.yml@bb2c7f632d6be8167029cb77fb11d6049a8514a5 # v1
     # standards is private: forward the org STANDARDS_READER_APP_* secrets so the
     # reusable can mint a read-only token to clone standards@audit/v1.
     secrets: inherit
