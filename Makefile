@@ -41,7 +41,11 @@ fmt-check:
 
 depsdev:
 	go install github.com/Songmu/gocredits/cmd/gocredits@latest
-	go install github.com/k1LoW/gostyle@latest
+	# gostyle must be built with a Go >= the repo's language version (go.mod: go 1.26),
+	# or its go/analysis type-checker rejects the code ("requires newer Go version").
+	# gostyle's own go.mod pins an older toolchain, so set a floor here; `+auto` still
+	# upgrades if a future dependency needs newer.
+	GOTOOLCHAIN=go1.26.0+auto go install github.com/k1LoW/gostyle@latest
 
 credits: depsdev generate
 	go mod download

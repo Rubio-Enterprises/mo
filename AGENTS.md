@@ -10,51 +10,59 @@ This repo follows Rubio-Enterprises standards. Run `/audit-standards` from a Cla
 
 ## Build & Run
 
-Requires Go 1.26+ and [pnpm](https://pnpm.io/). Node.js version is managed via `pnpm.executionEnv.nodeVersion` in `internal/frontend/package.json`.
+Requires **Go 1.26+** and [pnpm](https://pnpm.io/). The Node.js version is pinned in `.tool-versions` (managed by mise) and must satisfy the `packageManager` pin in `internal/frontend/package.json`: **pnpm 11.9.0 requires Node ≥ 22.13**, so any `go generate` / `pnpm` step fails on an older Node.
 
-```bash
-# Full build (frontend + Go binary, with ldflags)
-make build
+The tiers below are the complete set of ways to build, run, and test mo. Every
+`make`/`pnpm` target that runs `go generate` needs Node ≥ 22.13 (see above).
 
-# Dev: build frontend then run with args (uses port 16275, foreground mode)
-make dev ARGS="testdata/basic.md"
+### Build
 
-# Dev with tab groups (-t can only specify one group per invocation)
-make dev ARGS="-t design testdata/basic.md"
+- `make build` — frontend (`go generate`) + Go binary with ldflags → `./mo`
+- `make generate` — frontend build only (`go generate ./internal/static/`)
+- `go build -o mo .` — Go binary only (requires `internal/static/dist/` already generated)
 
-# Frontend code generation only (called by make build/dev via go generate)
-make generate
+### Run
 
-# Run all tests (frontend + Go)
-make test
+- `make dev ARGS="testdata/basic.md"` — build, then run foreground on port 16275
+- `make dev ARGS="-t design testdata/basic.md"` — with a tab group (`-t` takes one group per invocation)
+- `./mo testdata/basic.md` — after `make build`; self-backgrounds and opens a browser (default port 6275)
+- `cd internal/frontend && pnpm run dev` — Vite dev server, proxies `/_/` to `localhost:6275` (set `MO_DISABLE_AUTH=1` on the backend for this cross-origin flow)
+- `make screenshot` — regenerate README screenshots (**requires Google Chrome**, not bundled Chromium)
+- Drive a running server via the CLI — `./mo --status [--json]`, `./mo --json <file>` (adds to the running server), `--restart`, `--shutdown`, `--clear`
+- Drive a running server via the API — token-gated `curl` to `/_/api/*` with `X-Mo-Token: $(cat $XDG_STATE_HOME/mo/token/mo-<port>.token)`
+- Headless drive + screenshot — `node .claude/skills/run-mo/driver.mjs <url> [out.png]` (see the `run-mo` skill)
 
-# Run a single frontend test (vitest)
-cd internal/frontend && pnpm test src/utils/buildTree.test.ts
+### Test — Go
 
-# Run Go tests only
-go test ./...
+- `go test ./...` — all Go packages
+- `go test ./internal/server/ -run TestHandleReorderFiles` — a single Go test
+- `go test ./... -coverprofile=coverage.out -covermode=count -count=1` — with coverage
+- `mise run test` — gotestsum; writes JUnit to `reports/unit/junit.xml`
 
-# Run a single Go test
-go test ./internal/server/ -run TestHandleFiles
+### Test — frontend (vitest)
 
-# Run linters (golangci-lint + gostyle)
-make lint
+- `cd internal/frontend && pnpm test` — all frontend tests
+- `cd internal/frontend && pnpm test src/utils/buildTree.test.ts` — a single test file
+- `cd internal/frontend && pnpm run test:coverage` — with coverage
 
-# Format code (frontend)
-make fmt
+### Test — end-to-end (Playwright, `e2e/`)
 
-# Check formatting without modifying
-make fmt-check
+- `make e2e` — build binary, install the browser, run all specs (API + SPA + CLI)
+- `cd e2e && npm test` — specs only (requires `./mo` already built)
+- `cd e2e && npm run test:headed` · `test:ui` · `report` — require a display; not runnable in a headless container
 
-# Take screenshots for README (requires Chrome)
-make screenshot
+### Test — combined
 
-# CI target (install dev deps + generate + test)
-make ci
+- `make test` — frontend coverage + Go coverage
+- `make ci` — `depsdev` + `generate` + `test` (matches the CI `Test` job)
 
-# Frontend dev server with backend proxy (proxies /_/ to localhost:6275)
-cd internal/frontend && pnpm run dev
-```
+### Lint / format / hooks
+
+- `make lint` — oxlint (frontend) + golangci-lint + gostyle (run `make depsdev` once to install gostyle/gocredits)
+- `mise run lint` — golangci-lint only
+- `make fmt` / `make fmt-check` — oxfmt write / check
+- `cd internal/frontend && pnpm run lint` · `pnpm run fmt` · `pnpm run fmt:check` — frontend directly
+- `mise exec -- lefthook run pre-commit --all-files` — run all git hooks across the repo
 
 ### CLI Flags
 
