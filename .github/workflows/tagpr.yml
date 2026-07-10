@@ -86,9 +86,21 @@ jobs:
             --title "$GITHUB_REF_NAME" \
             --generate-notes
 
+      # Per-run push credential: contents:write on the tap only, expires with
+      # the job. Replaces the retired HOMEBREW_TAP_TOKEN PAT.
+      - name: Mint tap-push App token
+        id: tap-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ secrets.TAP_PUSH_APP_ID }}
+          private-key: ${{ secrets.TAP_PUSH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+          permission-contents: write
+
       - name: Update Homebrew formula
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ steps.tap-app.outputs.token }}
         run: |
           TAG="$GITHUB_REF_NAME"
           VERSION="${TAG#strubio-v}"
