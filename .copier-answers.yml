@@ -13,4 +13,6 @@ is_public: true
 node_version: 22.12.0
 project_name: mo
 tier: experimental
+upstream_branch: main
+upstream_url: https://github.com/k1LoW/mo
 uses_release_please: false
