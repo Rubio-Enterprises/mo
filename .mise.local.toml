@@ -1,0 +1,7 @@
+[tasks.test]
+description = "frontend Vitest + Go test with JUnit"
+run = [
+  "pnpm --dir internal/frontend install --frozen-lockfile",
+  "pnpm --dir internal/frontend run test",
+  "gotestsum --junitfile=reports/unit/junit.xml -- ./...",
+]

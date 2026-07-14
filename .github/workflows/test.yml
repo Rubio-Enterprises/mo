@@ -1,4 +1,6 @@
-name: build
+name: test
+# This repo-owned path replaces the manually disabled ci.yml workflow.
+# A new workflow path registers active while preserving its CI test coverage.
 
 on:
   push:
