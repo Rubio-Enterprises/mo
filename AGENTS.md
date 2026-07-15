@@ -150,7 +150,7 @@ Frontend: ESLint via `pnpm run lint` in `internal/frontend/`. Formatting via `pn
 
 - **CI**: golangci-lint (via reviewdog), gostyle, `make ci` (test + coverage), octocov
 - **Release**: Tags trigger the release workflow. The `go generate` step (frontend build) runs before cross-platform Go builds. Binaries are uploaded as a GitHub release, and the Homebrew formula is auto-updated.
-- **License check**: Trivy scans for license issues
+- **License check**: `.github/workflows/license-scan.yml` runs Trivy's license scanner on PRs and pushes to `main`. It replaces the manually disabled upstream `trivy.yml` path so GitHub registers the preserved check as an active workflow.
 - CI requires pnpm setup (`pnpm/action-setup`) before any Go build step because `go generate` triggers the frontend build.
 
 ### Release Tags
