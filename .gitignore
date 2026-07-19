@@ -49,7 +49,7 @@ reports/
 !.claude/agents/
 !.claude/skills/
 
-# Per-archetype
+# Per-stack
 vendor/
 *.exe
 *.test
