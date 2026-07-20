@@ -405,6 +405,21 @@ export GOTOOLCHAIN=auto
 go mod download || true
 go build ./... || true
 go test ./... -run='^$' >/dev/null 2>&1 || true
+# Node/TS: warm node_modules so it lands in the
+# snapshot. Key the package manager off the COMMITTED lockfile, never PATH
+# order: an unconditional pnpm-first preference minted a stray pnpm-lock.yaml
+# into an npm repo's snapshot, tripping the stop hook's untracked-files check
+# in every session. Prefer the frozen-lockfile install; fall back to a plain
+# install when no lockfile is committed on this branch.
+if [ -f package-lock.json ] && command -v npm >/dev/null 2>&1; then
+  (npm ci || npm install) >/dev/null 2>&1 || echo "cloud-setup: npm install failed (non-fatal)" >&2
+elif [ -f pnpm-lock.yaml ] && command -v pnpm >/dev/null 2>&1; then
+  (pnpm install --frozen-lockfile || pnpm install) >/dev/null 2>&1 || echo "cloud-setup: pnpm install failed (non-fatal)" >&2
+elif command -v pnpm >/dev/null 2>&1; then
+  pnpm install >/dev/null 2>&1 || echo "cloud-setup: pnpm install failed (non-fatal)" >&2
+elif command -v npm >/dev/null 2>&1; then
+  npm install >/dev/null 2>&1 || echo "cloud-setup: npm install failed (non-fatal)" >&2
+fi
 
 # --- Repo-local additions (scripts/repo-local/cloud-setup.sh) ----------------
 # REPO-OWNED, committed, never rendered by the template — the consumer's own
