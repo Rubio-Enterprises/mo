@@ -1,6 +1,6 @@
 # Changes here will be overwritten by Copier; NEVER edit this file manually.
-_commit: template/v1.55.21
-_rubio_template_version: template/v1.55.21
+_commit: template/v1.55.22
+_rubio_template_version: template/v1.55.22
 _src_path: https://github.com/Rubio-Enterprises/standards.git
 default_branch: main
 enforce_audit: true
@@ -29,6 +29,7 @@ is_marketplace: false
 is_public: true
 node_version: 22.12.0
 project_name: mo
+repo_type: extended_fork
 tier: experimental
 upstream_branch: main
 upstream_url: https://github.com/k1LoW/mo
