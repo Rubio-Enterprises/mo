@@ -50,6 +50,10 @@ reports/
 !.claude/skills/
 
 # Per-stack
+.next/
+.vite/
+.turbo/
+.tsbuildinfo
 vendor/
 *.exe
 *.test

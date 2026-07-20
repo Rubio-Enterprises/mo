@@ -267,6 +267,6 @@ drift_note="${drift_note}${plugin_note}${workflow_note}"
 # line (first matching stack facet wins; ts-first keeps polyglot repos on the
 # message their primary package.json workflow implies). The drift NOTE (if any) is appended.
 # shellcheck disable=SC2016
-printf 'mo dev toolchain ready (mise): golangci-lint, gotestsum, lefthook, shellcheck, shfmt, gitleaks, yq on PATH. Use `make build/test/lint` or `mise run build/test/lint`.%s\n' "$drift_note"
+printf 'mo dev toolchain ready (mise): biome, lefthook, shellcheck, shfmt, gitleaks, prettier, yq on PATH. Use `mise run build/test/lint` (or the package.json scripts).%s\n' "$drift_note"
 
 exit 0
