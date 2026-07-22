@@ -318,7 +318,8 @@ func (s *State) AddFile(absPath, groupName string) (*FileEntry, error) {
 		// Binary types: verify regular file, skip content checks. mo intentionally
 		// opens paths selected by an authenticated local caller; arbitrary local-file
 		// access is the core capability, and withAuth protects the HTTP API boundary.
-		// codeql[go/path-injection]
+
+		// lgtm[go/path-injection]
 		fi, err := os.Stat(absPath)
 		if err != nil {
 			if !os.IsNotExist(err) {
