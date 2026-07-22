@@ -246,9 +246,15 @@ $ mo --status --json
 | `--clear` | | | Clear saved session (restarts server if running) |
 | `--foreground` | | | Run mo server in foreground |
 | `--json` | | | Output structured data as JSON to stdout |
+| `--trusted-host` | | | Extra `Host` header value to accept behind a trusted reverse proxy, repeatable (e.g. `host.example.ts.net:8443`) |
 
 > [!WARNING]
 > Binding to a non-localhost address exposes mo to the network **without any authentication**. Remote clients can read any file accessible by the user, browse the filesystem via glob patterns, and shut down the server. A confirmation prompt is shown when `--bind` is set to a non-loopback address.
+
+<!-- -->
+
+> [!NOTE]
+> **Behind a reverse proxy (e.g. Tailscale Serve):** keep the default `--bind localhost` and let the proxy terminate TLS. A proxy forwards its own `Host` header, which mo's DNS-rebinding allowlist rejects by default (`403 forbidden`). Add that hostname with `--trusted-host host.example.ts.net:8443` (repeatable, and include the port unless it is the scheme default). Loopback binding, the token cookie, and rebinding defense for every other `Host` all stay in force. mo's auth cookie is `Secure`, so the proxy must serve HTTPS — Tailscale Serve does. A root-mounted SPA like mo needs its **own** listener at `/`, not a sub-path, so its absolute asset URLs resolve.
 
 ## Development
 
