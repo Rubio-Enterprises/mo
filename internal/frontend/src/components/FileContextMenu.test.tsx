@@ -23,6 +23,7 @@ function renderMenu(opts: {
     onToggle: (id: string) => void;
     onOpenInNewTab: (id: string) => void;
     onCopyPath: (path: string) => void;
+    onCopyLink: (id: string) => void;
     onMoveToGroup: (id: string, group: string) => void;
     onRemove: (id: string) => void;
   }>;
@@ -31,6 +32,7 @@ function renderMenu(opts: {
     onToggle: vi.fn(),
     onOpenInNewTab: vi.fn(),
     onCopyPath: vi.fn(),
+    onCopyLink: vi.fn(),
     onMoveToGroup: vi.fn(),
     onRemove: vi.fn(),
     ...opts.handlers,
@@ -47,6 +49,7 @@ function renderMenu(opts: {
       onToggle={handlers.onToggle}
       onOpenInNewTab={handlers.onOpenInNewTab}
       onCopyPath={handlers.onCopyPath}
+      onCopyLink={handlers.onCopyLink}
       onMoveToGroup={handlers.onMoveToGroup}
       onRemove={handlers.onRemove}
       menuRef={menuRef}
@@ -141,6 +144,7 @@ describe("FileContextMenu", () => {
         onToggle={() => {}}
         onOpenInNewTab={() => {}}
         onCopyPath={() => {}}
+        onCopyLink={() => {}}
         onMoveToGroup={() => {}}
         onRemove={() => {}}
         menuRef={menuRef}

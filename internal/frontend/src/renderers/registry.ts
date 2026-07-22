@@ -1,5 +1,7 @@
 import { lazy, type ComponentType } from "react";
 import type { FileType } from "../hooks/useApi";
+import type { FontSize } from "../components/FontSizeToggle";
+import type { ZoomContent } from "../components/ZoomModal";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { CodeRenderer } from "./CodeRenderer";
 import { GenericRenderer } from "./GenericRenderer";
@@ -28,14 +30,21 @@ export interface CheckboxInfo {
 }
 
 interface BaseRendererProps {
+  activeGroup: string;
   fileId: string;
   fileName: string;
   revision: number;
   isRawView: boolean;
-  onFileOpened?: (fileId: string) => void;
+  onFileOpened?: (fileId: string, hash?: string) => void;
   onHeadingsChange: (headings: TocHeading[]) => void;
   onContentRendered?: () => void;
   onCheckboxInfo?: (info: CheckboxInfo) => void;
+  scrollContainer?: HTMLElement | null;
+  fontSize: FontSize;
+  onZoom?: (content: ZoomContent) => void;
+  scrollToHeading?: string | null;
+  onScrolledToHeading?: () => void;
+  searchQuery?: string | null;
 }
 
 export type TextRendererProps = BaseRendererProps & {

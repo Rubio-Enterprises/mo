@@ -52,9 +52,9 @@ describe("fetchFileContent", () => {
       }),
     );
 
-    const result = await fetchFileContent("abc12345");
+    const result = await fetchFileContent("default", "abc12345");
     expect(result).toEqual(data);
-    expect(fetch).toHaveBeenCalledWith("/_/api/files/abc12345/content");
+    expect(fetch).toHaveBeenCalledWith("/_/api/groups/default/files/abc12345/content");
   });
 
   it("throws on error response", async () => {
@@ -66,7 +66,9 @@ describe("fetchFileContent", () => {
       }),
     );
 
-    await expect(fetchFileContent("nonexist")).rejects.toThrow("Failed to fetch file content");
+    await expect(fetchFileContent("default", "nonexist")).rejects.toThrow(
+      "Failed to fetch file content",
+    );
   });
 });
 
@@ -81,9 +83,9 @@ describe("openRelativeFile", () => {
       }),
     );
 
-    const result = await openRelativeFile("ccc33333", "./other.md");
+    const result = await openRelativeFile("default", "ccc33333", "./other.md");
     expect(result).toEqual(entry);
-    expect(fetch).toHaveBeenCalledWith("/_/api/files/open", {
+    expect(fetch).toHaveBeenCalledWith("/_/api/groups/default/files/open", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fileId: "ccc33333", path: "./other.md" }),
@@ -99,7 +101,9 @@ describe("openRelativeFile", () => {
       }),
     );
 
-    await expect(openRelativeFile("aaa11111", "missing.md")).rejects.toThrow("Failed to open file");
+    await expect(openRelativeFile("default", "aaa11111", "missing.md")).rejects.toThrow(
+      "Failed to open file",
+    );
   });
 });
 
@@ -113,14 +117,14 @@ describe("reorderFiles", () => {
     );
 
     await reorderFiles("default", ["ccc", "aaa", "bbb"]);
-    expect(fetch).toHaveBeenCalledWith("/_/api/reorder", {
+    expect(fetch).toHaveBeenCalledWith("/_/api/groups/default/reorder", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ group: "default", fileIds: ["ccc", "aaa", "bbb"] }),
+      body: JSON.stringify({ fileIds: ["ccc", "aaa", "bbb"] }),
     });
   });
 
-  it("sends group name in body for slash-containing names", async () => {
+  it("encodes group name in URL path", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -129,10 +133,10 @@ describe("reorderFiles", () => {
     );
 
     await reorderFiles("api/docs", ["aaa", "bbb"]);
-    expect(fetch).toHaveBeenCalledWith("/_/api/reorder", {
+    expect(fetch).toHaveBeenCalledWith("/_/api/groups/api%2Fdocs/reorder", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ group: "api/docs", fileIds: ["aaa", "bbb"] }),
+      body: JSON.stringify({ fileIds: ["aaa", "bbb"] }),
     });
   });
 
@@ -158,8 +162,8 @@ describe("moveFile", () => {
       }),
     );
 
-    await moveFile("eee55555", "docs");
-    expect(fetch).toHaveBeenCalledWith("/_/api/files/eee55555/group", {
+    await moveFile("default", "eee55555", "docs");
+    expect(fetch).toHaveBeenCalledWith("/_/api/groups/default/files/eee55555/group", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ group: "docs" }),
@@ -176,7 +180,7 @@ describe("moveFile", () => {
       }),
     );
 
-    await expect(moveFile("aaa11111", "docs")).rejects.toThrow(
+    await expect(moveFile("default", "aaa11111", "docs")).rejects.toThrow(
       'file "a.md" already exists in group "docs"',
     );
   });
@@ -191,7 +195,7 @@ describe("moveFile", () => {
       }),
     );
 
-    await expect(moveFile("aaa11111", "docs")).rejects.toThrow("Failed to move file");
+    await expect(moveFile("default", "aaa11111", "docs")).rejects.toThrow("Failed to move file");
   });
 });
 
@@ -200,10 +204,10 @@ describe("uploadFile", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
 
     await uploadFile("test.md", "# Hello", "default");
-    expect(fetch).toHaveBeenCalledWith("/_/api/files/upload", {
+    expect(fetch).toHaveBeenCalledWith("/_/api/groups/default/files/upload", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "test.md", content: "# Hello", group: "default" }),
+      body: JSON.stringify({ name: "test.md", content: "# Hello" }),
     });
   });
 

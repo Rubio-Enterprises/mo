@@ -10,11 +10,13 @@ import { codeToHtml } from "shiki";
 import { CodeRenderer } from "./CodeRenderer";
 
 const baseProps = {
+  activeGroup: "default",
   fileId: "abc12345",
   fileName: "example.ts",
   revision: 1,
   isRawView: false,
   onHeadingsChange: vi.fn(),
+  fontSize: "medium" as const,
   contentSource: "text" as const,
 };
 

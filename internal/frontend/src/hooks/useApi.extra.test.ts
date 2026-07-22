@@ -15,15 +15,17 @@ beforeEach(() => {
 });
 
 describe("removeFile", () => {
-  it("sends DELETE with the right URL", async () => {
+  it("sends DELETE to the encoded group-scoped URL", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
-    await removeFile("abc12345");
-    expect(fetch).toHaveBeenCalledWith("/_/api/files/abc12345", { method: "DELETE" });
+    await removeFile("api/docs", "abc12345");
+    expect(fetch).toHaveBeenCalledWith("/_/api/groups/api%2Fdocs/files/abc12345", {
+      method: "DELETE",
+    });
   });
 
   it("throws on non-ok response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
-    await expect(removeFile("abc")).rejects.toThrow("Failed to remove file");
+    await expect(removeFile("default", "abc")).rejects.toThrow("Failed to remove file");
   });
 });
 
@@ -62,21 +64,21 @@ describe("fetchVersion", () => {
 });
 
 describe("rawFileUrl", () => {
-  it("returns base URL when no revision is given", () => {
-    expect(rawFileUrl("abc")).toBe("/_/api/files/abc/raw");
+  it("returns an encoded group-scoped URL when no revision is given", () => {
+    expect(rawFileUrl("api/docs", "abc")).toBe("/_/api/groups/api%2Fdocs/files/abc/raw");
   });
 
   it("appends revision when provided", () => {
-    expect(rawFileUrl("abc", 7)).toBe("/_/api/files/abc/raw?v=7");
+    expect(rawFileUrl("default", "abc", 7)).toBe("/_/api/groups/default/files/abc/raw?v=7");
   });
 
   it("appends revision=0", () => {
-    expect(rawFileUrl("abc", 0)).toBe("/_/api/files/abc/raw?v=0");
+    expect(rawFileUrl("default", "abc", 0)).toBe("/_/api/groups/default/files/abc/raw?v=0");
   });
 });
 
 describe("checkbox APIs", () => {
-  it("fetchCheckboxes returns parsed state", async () => {
+  it("fetchCheckboxes returns parsed state from an encoded group URL", async () => {
     const data = { sources: { a: true }, overrides: {}, orderedKeys: ["a"] };
     vi.stubGlobal(
       "fetch",
@@ -85,21 +87,21 @@ describe("checkbox APIs", () => {
         json: () => Promise.resolve(data),
       }),
     );
-    const res = await fetchCheckboxes("file-id");
+    const res = await fetchCheckboxes("api/docs", "file-id");
     expect(res).toEqual(data);
-    expect(fetch).toHaveBeenCalledWith("/_/api/files/file-id/checkboxes");
+    expect(fetch).toHaveBeenCalledWith("/_/api/groups/api%2Fdocs/files/file-id/checkboxes");
   });
 
   it("fetchCheckboxes throws on error", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
-    await expect(fetchCheckboxes("f")).rejects.toThrow("Failed to fetch checkboxes");
+    await expect(fetchCheckboxes("default", "f")).rejects.toThrow("Failed to fetch checkboxes");
   });
 
-  it("toggleCheckbox encodes key and sends PUT", async () => {
+  it("toggleCheckbox encodes group and key and sends PUT", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
-    await toggleCheckbox("f", "my key/with-slash", true);
+    await toggleCheckbox("api/docs", "f", "my key/with-slash", true);
     expect(fetch).toHaveBeenCalledWith(
-      `/_/api/files/f/checkboxes/${encodeURIComponent("my key/with-slash")}`,
+      `/_/api/groups/api%2Fdocs/files/f/checkboxes/${encodeURIComponent("my key/with-slash")}`,
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -110,28 +112,34 @@ describe("checkbox APIs", () => {
 
   it("toggleCheckbox throws on error", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
-    await expect(toggleCheckbox("f", "k", false)).rejects.toThrow("Failed to toggle checkbox");
+    await expect(toggleCheckbox("default", "f", "k", false)).rejects.toThrow(
+      "Failed to toggle checkbox",
+    );
   });
 
   it("uncheckAllCheckboxes sends DELETE", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
-    await uncheckAllCheckboxes("f");
-    expect(fetch).toHaveBeenCalledWith("/_/api/files/f/checkboxes", { method: "DELETE" });
+    await uncheckAllCheckboxes("default", "f");
+    expect(fetch).toHaveBeenCalledWith("/_/api/groups/default/files/f/checkboxes", {
+      method: "DELETE",
+    });
   });
 
   it("uncheckAllCheckboxes throws on error", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
-    await expect(uncheckAllCheckboxes("f")).rejects.toThrow("Failed to uncheck all");
+    await expect(uncheckAllCheckboxes("default", "f")).rejects.toThrow("Failed to uncheck all");
   });
 
   it("checkAllCheckboxes sends POST to check-all", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
-    await checkAllCheckboxes("f");
-    expect(fetch).toHaveBeenCalledWith("/_/api/files/f/checkboxes/check-all", { method: "POST" });
+    await checkAllCheckboxes("default", "f");
+    expect(fetch).toHaveBeenCalledWith("/_/api/groups/default/files/f/checkboxes/check-all", {
+      method: "POST",
+    });
   });
 
   it("checkAllCheckboxes throws on error", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
-    await expect(checkAllCheckboxes("f")).rejects.toThrow("Failed to check all");
+    await expect(checkAllCheckboxes("default", "f")).rejects.toThrow("Failed to check all");
   });
 });

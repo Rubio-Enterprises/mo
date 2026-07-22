@@ -1,3 +1,8 @@
+export function isMarkdownFile(fileName: string): boolean {
+  const lower = fileName.toLowerCase();
+  return lower.endsWith(".md") || lower.endsWith(".mdx");
+}
+
 // Map file extension to Shiki language identifier.
 // Returns "text" for unknown extensions.
 const extToLang: Record<string, string> = {

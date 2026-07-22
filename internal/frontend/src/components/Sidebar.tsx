@@ -14,9 +14,11 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { FileEntry, Group } from "../hooks/useApi";
+import type { FileEntry, Group, SearchResult } from "../hooks/useApi";
 import { removeFile, moveFile } from "../hooks/useApi";
 import { buildFileUrl } from "../utils/groups";
+import { isPlainLeftClick } from "../utils/linkClick";
+import { escapeRegExp } from "../utils/regex";
 import type { ViewMode } from "./ViewModeToggle";
 import { TreeView } from "./TreeView";
 import { FileContextMenu } from "./FileContextMenu";
@@ -36,8 +38,26 @@ function getInitialWidth(): number {
   return DEFAULT_WIDTH;
 }
 
+function renderHighlightedText(text: string, query: string) {
+  if (!query) {
+    return text;
+  }
+
+  const parts = text.split(new RegExp(`(${escapeRegExp(query)})`, "gi"));
+  return parts.map((part, index) =>
+    part.toLowerCase() === query.toLowerCase() ? (
+      <mark key={`${part}:${index}`} className="bg-transparent p-0 font-semibold text-gh-text">
+        {part}
+      </mark>
+    ) : (
+      <span key={`${part}:${index}`}>{part}</span>
+    ),
+  );
+}
+
 interface FileItemProps {
   file: FileEntry;
+  activeGroup: string;
   isActive: boolean;
   showTitle: boolean;
   menuOpenId: string | null;
@@ -46,6 +66,7 @@ interface FileItemProps {
   onMenuToggle: (id: string) => void;
   onOpenInNewTab: (id: string) => void;
   onCopyPath: (path: string) => void;
+  onCopyLink: (id: string) => void;
   onMoveToGroup: (id: string, group: string) => void;
   onRemove: (id: string) => void;
   menuRef: React.RefObject<HTMLDivElement | null>;
@@ -53,6 +74,7 @@ interface FileItemProps {
 
 function FileItem({
   file,
+  activeGroup,
   isActive,
   showTitle,
   menuOpenId,
@@ -61,19 +83,25 @@ function FileItem({
   onMenuToggle,
   onOpenInNewTab,
   onCopyPath,
+  onCopyLink,
   onMoveToGroup,
   onRemove,
   menuRef,
 }: FileItemProps) {
   return (
     <div className="relative group/file">
-      <button
-        className={`flex items-center gap-2 w-full px-3 py-2 border-none cursor-pointer text-left text-sm transition-colors duration-150 ${
+      <a
+        href={buildFileUrl(activeGroup, file.id)}
+        className={`flex items-center gap-2 w-full px-3 py-2 border-none cursor-pointer text-left text-sm no-underline transition-colors duration-150 ${
           isActive
             ? "bg-gh-bg-active text-gh-text font-semibold"
             : "bg-transparent text-gh-text-secondary hover:bg-gh-bg-hover"
         }`}
-        onClick={() => onFileSelect(file.id)}
+        onClick={(e) => {
+          if (!isPlainLeftClick(e)) return;
+          e.preventDefault();
+          onFileSelect(file.id);
+        }}
         title={file.uploaded ? file.name : file.path}
         aria-current={isActive ? "page" : undefined}
       >
@@ -81,7 +109,7 @@ function FileItem({
         <span className="overflow-hidden text-ellipsis whitespace-nowrap pr-6">
           {(showTitle && file.title) || file.name}
         </span>
-      </button>
+      </a>
       <FileContextMenu
         file={file}
         isOpen={menuOpenId === file.id}
@@ -89,6 +117,7 @@ function FileItem({
         onToggle={onMenuToggle}
         onOpenInNewTab={onOpenInNewTab}
         onCopyPath={onCopyPath}
+        onCopyLink={onCopyLink}
         onMoveToGroup={onMoveToGroup}
         onRemove={onRemove}
         menuRef={menuRef}
@@ -125,6 +154,9 @@ interface SidebarProps {
   showTitle: boolean;
   searchQuery: string | null;
   onSearchQueryChange: (query: string | null) => void;
+  searchResults?: SearchResult[];
+  searchLoading?: boolean;
+  onSearchResultSelect?: (fileId: string, heading?: string) => void;
 }
 
 export function Sidebar({
@@ -137,6 +169,9 @@ export function Sidebar({
   showTitle,
   searchQuery,
   onSearchQueryChange,
+  searchResults = [],
+  searchLoading = false,
+  onSearchResultSelect,
 }: SidebarProps) {
   const allFiles = useMemo(() => {
     const currentGroup = groups.find((g) => g.name === activeGroup);
@@ -164,6 +199,8 @@ export function Sidebar({
   const [width, setWidth] = useState(getInitialWidth);
   const resizeDragging = useRef(false);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [contentMatchesOpen, setContentMatchesOpen] = useState(true);
+  const [fileMatchesOpen, setFileMatchesOpen] = useState(true);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const sensors = useSensors(
@@ -251,24 +288,39 @@ export function Sidebar({
       });
   }, [groups, activeGroup]);
 
-  const handleMoveToGroup = useCallback(async (id: string, group: string) => {
-    setMenuOpenId(null);
-    try {
-      await moveFile(id, group);
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Failed to move file");
-    }
-  }, []);
+  const handleMoveToGroup = useCallback(
+    async (id: string, group: string) => {
+      setMenuOpenId(null);
+      try {
+        await moveFile(activeGroup, id, group);
+      } catch (err) {
+        window.alert(err instanceof Error ? err.message : "Failed to move file");
+      }
+    },
+    [activeGroup],
+  );
 
   const handleCopyPath = useCallback((path: string) => {
     setMenuOpenId(null);
     navigator.clipboard.writeText(path).catch(() => {});
   }, []);
 
-  const handleRemove = useCallback((id: string) => {
-    setMenuOpenId(null);
-    removeFile(id);
-  }, []);
+  const handleCopyLink = useCallback(
+    (id: string) => {
+      setMenuOpenId(null);
+      const url = new URL(buildFileUrl(activeGroup, id), window.location.origin);
+      navigator.clipboard.writeText(url.toString()).catch(() => {});
+    },
+    [activeGroup],
+  );
+
+  const handleRemove = useCallback(
+    (id: string) => {
+      setMenuOpenId(null);
+      removeFile(activeGroup, id);
+    },
+    [activeGroup],
+  );
 
   const handleMenuToggle = useCallback((id: string) => {
     setMenuOpenId((prev) => (prev === id ? null : id));
@@ -276,7 +328,7 @@ export function Sidebar({
 
   return (
     <aside
-      className="relative bg-gh-bg-sidebar border-r border-gh-border flex flex-col overflow-y-auto shrink-0"
+      className="relative bg-gh-bg-sidebar border-r border-gh-border flex flex-col overflow-y-auto overscroll-contain shrink-0"
       style={{ width }}
     >
       {searchOpen && (
@@ -295,7 +347,105 @@ export function Sidebar({
         </div>
       )}
       <nav className="flex flex-col pb-1">
-        {viewMode === "tree" ? (
+        {isSearching ? (
+          <>
+            {searchLoading ? (
+              <div className="px-3 py-2 text-sm text-gh-text-secondary">Searching contents...</div>
+            ) : searchResults.length > 0 ? (
+              <>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-3 pt-2 pb-1 text-left text-xs font-semibold uppercase tracking-wide text-gh-text-secondary"
+                  onClick={() => setContentMatchesOpen((v) => !v)}
+                  aria-expanded={contentMatchesOpen}
+                >
+                  <span>Content matches</span>
+                  <span className="text-sm leading-none">{contentMatchesOpen ? "−" : "+"}</span>
+                </button>
+                {contentMatchesOpen &&
+                  searchResults.flatMap((result) =>
+                    result.matches.map((match, index) => (
+                      <a
+                        key={`${result.fileId}:${match.line}:${index}`}
+                        href={buildFileUrl(activeGroup, result.fileId)}
+                        className="w-full px-3 py-2 text-left border-none bg-transparent cursor-pointer no-underline text-gh-text-secondary transition-colors duration-150 hover:bg-gh-bg-hover"
+                        onClick={(e) => {
+                          if (!isPlainLeftClick(e)) return;
+                          e.preventDefault();
+                          onSearchResultSelect?.(result.fileId, match.heading);
+                        }}
+                      >
+                        <div className="flex items-center gap-2 text-sm font-medium text-gh-text">
+                          <FileIcon uploaded={result.uploaded} />
+                          <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                            {(showTitle && result.title) || result.fileName}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gh-text-secondary">{`Line ${match.line}`}</div>
+                        <div className="mt-2 rounded-sm bg-gh-bg-hover/80 px-2 py-1.5">
+                          {match.before?.map((line, i) => (
+                            <div
+                              key={`before:${i}`}
+                              className="text-xs leading-5 text-gh-text-secondary whitespace-pre-wrap break-words"
+                            >
+                              {line}
+                            </div>
+                          ))}
+                          <div className="text-sm leading-5 text-gh-text-secondary whitespace-pre-wrap break-words">
+                            {renderHighlightedText(match.text, searchQuery)}
+                          </div>
+                          {match.after?.map((line, i) => (
+                            <div
+                              key={`after:${i}`}
+                              className="text-xs leading-5 text-gh-text-secondary whitespace-pre-wrap break-words"
+                            >
+                              {line}
+                            </div>
+                          ))}
+                        </div>
+                      </a>
+                    )),
+                  )}
+              </>
+            ) : null}
+            {files.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-3 pt-2 pb-1 text-left text-xs font-semibold uppercase tracking-wide text-gh-text-secondary"
+                  onClick={() => setFileMatchesOpen((v) => !v)}
+                  aria-expanded={fileMatchesOpen}
+                >
+                  <span>File name matches</span>
+                  <span className="text-sm leading-none">{fileMatchesOpen ? "−" : "+"}</span>
+                </button>
+                {fileMatchesOpen &&
+                  files.map((f) => (
+                    <FileItem
+                      key={f.id}
+                      file={f}
+                      activeGroup={activeGroup}
+                      isActive={f.id === activeFileId}
+                      showTitle={showTitle}
+                      menuOpenId={menuOpenId}
+                      otherGroups={otherGroups}
+                      onFileSelect={onFileSelect}
+                      onMenuToggle={handleMenuToggle}
+                      onOpenInNewTab={handleOpenInNewTab}
+                      onCopyPath={handleCopyPath}
+                      onCopyLink={handleCopyLink}
+                      onMoveToGroup={handleMoveToGroup}
+                      onRemove={handleRemove}
+                      menuRef={menuRef}
+                    />
+                  ))}
+              </>
+            )}
+            {!searchLoading && searchResults.length === 0 && files.length === 0 && (
+              <div className="px-3 py-2 text-sm text-gh-text-secondary">No matches found</div>
+            )}
+          </>
+        ) : viewMode === "tree" ? (
           <TreeView
             files={files}
             activeGroup={activeGroup}
@@ -307,28 +457,11 @@ export function Sidebar({
             onMenuToggle={handleMenuToggle}
             onOpenInNewTab={handleOpenInNewTab}
             onCopyPath={handleCopyPath}
+            onCopyLink={handleCopyLink}
             onMoveToGroup={handleMoveToGroup}
             onRemove={handleRemove}
             menuRef={menuRef}
           />
-        ) : isSearching ? (
-          files.map((f) => (
-            <FileItem
-              key={f.id}
-              file={f}
-              isActive={f.id === activeFileId}
-              showTitle={showTitle}
-              menuOpenId={menuOpenId}
-              otherGroups={otherGroups}
-              onFileSelect={onFileSelect}
-              onMenuToggle={handleMenuToggle}
-              onOpenInNewTab={handleOpenInNewTab}
-              onCopyPath={handleCopyPath}
-              onMoveToGroup={handleMoveToGroup}
-              onRemove={handleRemove}
-              menuRef={menuRef}
-            />
-          ))
         ) : (
           <DndContext
             sensors={sensors}
@@ -340,6 +473,7 @@ export function Sidebar({
                 <SortableFileItem
                   key={f.id}
                   file={f}
+                  activeGroup={activeGroup}
                   isActive={f.id === activeFileId}
                   showTitle={showTitle}
                   menuOpenId={menuOpenId}
@@ -348,6 +482,7 @@ export function Sidebar({
                   onMenuToggle={handleMenuToggle}
                   onOpenInNewTab={handleOpenInNewTab}
                   onCopyPath={handleCopyPath}
+                  onCopyLink={handleCopyLink}
                   onMoveToGroup={handleMoveToGroup}
                   onRemove={handleRemove}
                   menuRef={menuRef}

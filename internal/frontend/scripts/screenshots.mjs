@@ -41,10 +41,10 @@ async function waitForServer(maxRetries = 30) {
 }
 
 async function addFile(path, group = "default") {
-  const res = await fetch(`${BASE}/_/api/files`, {
+  const res = await fetch(`${BASE}/_/api/groups/${encodeURIComponent(group)}/files`, {
     method: "POST",
     headers: apiHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ path, group }),
+    body: JSON.stringify({ path }),
   });
   if (!res.ok) throw new Error(`Failed to add file: ${path}`);
   return res.json();
@@ -176,21 +176,29 @@ async function main() {
       const peekWidth = Math.round(flatBox.width / 3);
       await page3.screenshot({
         path: resolve(IMAGES_DIR, "sidebar-flat.png"),
-        clip: { x: flatBox.x, y: flatBox.y, width: flatBox.width + peekWidth, height: flatBox.height / 2 },
+        clip: {
+          x: flatBox.x,
+          y: flatBox.y,
+          width: flatBox.width + peekWidth,
+          height: flatBox.height / 2,
+        },
       });
       console.log("Saved sidebar-flat.png");
 
       // Switch to tree view
-      await page3
-        .locator('button[title="Switch to tree view"]')
-        .click();
+      await page3.locator('button[title="Switch to tree view"]').click();
       await page3.waitForTimeout(500);
 
       // Tree mode — capture top half of sidebar + peek into content
       const treeBox = await page3.locator("aside").boundingBox();
       await page3.screenshot({
         path: resolve(IMAGES_DIR, "sidebar-tree.png"),
-        clip: { x: treeBox.x, y: treeBox.y, width: treeBox.width + peekWidth, height: treeBox.height / 2 },
+        clip: {
+          x: treeBox.x,
+          y: treeBox.y,
+          width: treeBox.width + peekWidth,
+          height: treeBox.height / 2,
+        },
       });
       console.log("Saved sidebar-tree.png");
       await page3.close();

@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -21,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/k1LoW/errors"
 
 	"github.com/k1LoW/donegroup"
@@ -32,6 +34,8 @@ import (
 	"github.com/muesli/termenv"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
+	"golang.org/x/text/collate"
+	"golang.org/x/text/language"
 )
 
 const (
@@ -39,6 +43,9 @@ const (
 	probeTimeoutFast = 500 * time.Millisecond
 	// probeTimeoutDefault is used when the server is expected to be running.
 	probeTimeoutDefault = 2 * time.Second
+
+	markdownGlob          = "*.md"
+	markdownGlobRecursive = "**/*.md"
 )
 
 var (
@@ -52,8 +59,9 @@ var (
 	restartServer                bool
 	foreground                   bool
 	statusServer                 bool
-	watchPatterns                []string
-	unwatchPatterns              []string
+	watchMode                    bool
+	unwatchMode                  bool
+	recursive                    bool
 	closeFiles                   bool
 	clearBackup                  bool
 	jsonOutput                   bool
@@ -62,7 +70,7 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "mo [flags] [FILE ...]",
+	Use:   "mo [flags] [FILE|DIR ...]",
 	Short: "mo is a Markdown viewer that opens .md files in a browser.",
 	Long: `mo is a Markdown viewer that opens .md files in a browser with live-reload.
 
@@ -74,6 +82,8 @@ Examples:
   mo README.md CHANGELOG.md docs/*.md   Open multiple files
   mo spec.md --target design            Open in a named group
   mo draft.md --port 6276               Use a different port
+  cat notes.md | mo                     Read Markdown from stdin
+  cmd | mo --target output              Pipe command output into a group
 
 Single Server, Multiple Files:
   By default, mo runs a single server on port 6275.
@@ -128,19 +138,33 @@ Supported Markdown Features:
   - GitHub Flavored Markdown (tables, task lists, strikethrough, autolinks)
   - Syntax-highlighted code blocks (via Shiki)
   - Mermaid diagrams
+  - LaTeX math rendering (via KaTeX)
+  - GitHub Alerts (admonitions)
+  - Fullscreen zoom modal for images and Mermaid diagrams
   - YAML frontmatter (displayed as a collapsible metadata block)
   - MDX files (rendered as Markdown with import/export stripped and JSX tags escaped)
   - Raw HTML
 
-Glob Patterns:
-  Use --watch (-w) to specify glob patterns. Matching directories are
-  watched and new files are automatically added.
-  Cannot be combined with file arguments.
+Watch mode and glob patterns:
+  --watch (-w) turns on watch mode. Directory and glob positional
+  arguments are then registered as watch patterns; matching files are
+  opened and new files are picked up automatically. Combine with
+  --recursive (-R) to descend into subdirectories.
 
   $ mo -w '**/*.md'                   Watch all .md files recursively
   $ mo -w 'docs/**/*.md' -t docs      Watch docs/ tree in "docs" group
-  $ mo -w '*.md' -w 'docs/**/*.md'    Watch multiple patterns
+  $ mo -w '*.md' 'docs/**/*.md'       Multiple patterns (positional)
+  $ mo -w docs/                       Watch docs/*.md
+  $ mo -w -R docs/                    Watch docs/**/*.md
+  $ mo -wR docs/                      Same (short-combined form)
   $ mo --unwatch '**/*.md'            Stop watching a pattern
+  $ mo --unwatch docs/                Stop watching docs/*.md
+  $ mo --unwatch -R docs/             Stop watching all patterns under docs/
+
+  Without --watch, globs are expanded once and a directory argument
+  opens the matching files without live-watching new additions.
+
+  $ mo -R docs/                       Open every .md under docs/ once
 
 WARNING: --bind with a non-loopback address:
   Binding to a non-localhost address (e.g. 0.0.0.0) exposes mo to the
@@ -172,8 +196,9 @@ func init() {
 	rootCmd.Flags().MarkHidden("restore") //nolint:errcheck
 	rootCmd.Flags().BoolVar(&foreground, "foreground", false, "Run mo server in foreground (do not background)")
 	rootCmd.Flags().BoolVar(&statusServer, "status", false, "Show status of all running mo servers")
-	rootCmd.Flags().StringArrayVarP(&watchPatterns, "watch", "w", nil, "Glob pattern to watch for matching files (repeatable)")
-	rootCmd.Flags().StringArrayVar(&unwatchPatterns, "unwatch", nil, "Remove a watched glob pattern (repeatable)")
+	rootCmd.Flags().BoolVarP(&watchMode, "watch", "w", false, "Treat directory and glob arguments as watch patterns")
+	rootCmd.Flags().BoolVar(&unwatchMode, "unwatch", false, "Remove watched patterns for the given directory or glob arguments")
+	rootCmd.Flags().BoolVarP(&recursive, "recursive", "R", false, "Recurse into subdirectories when a directory is given")
 	rootCmd.Flags().BoolVar(&closeFiles, "close", false, "Close files instead of opening them")
 	rootCmd.Flags().BoolVar(&clearBackup, "clear", false, "Clear saved session for the specified port")
 	rootCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output structured data as JSON to stdout")
@@ -185,7 +210,7 @@ func run(cmd *cobra.Command, args []string) error {
 	// Set up the log file whenever a server may be started (regardless of
 	// foreground mode) so that --status can discover it via the log directory.
 	// We skip this only for client-side commands that do not start a server.
-	if !statusServer && !shutdownServer && !restartServer && !clearBackup && !closeFiles && len(unwatchPatterns) == 0 {
+	if !statusServer && !shutdownServer && !restartServer && !clearBackup && !closeFiles && !unwatchMode {
 		logCleanup, err := logfile.Setup(port)
 		if err != nil {
 			slog.Warn("failed to setup log file, using stderr", "error", err)
@@ -266,17 +291,12 @@ func run(cmd *cobra.Command, args []string) error {
 		return doRestart(addr)
 	}
 
-	if len(unwatchPatterns) > 0 {
-		if len(watchPatterns) > 0 {
+	if unwatchMode {
+		if watchMode {
 			return fmt.Errorf("cannot use --unwatch with --watch")
 		}
-		if len(args) > 0 {
-			return fmt.Errorf("cannot use --unwatch with file arguments")
-		}
-
-		resolved, err := resolvePatterns(unwatchPatterns)
-		if err != nil {
-			return err
+		if len(args) == 0 {
+			return fmt.Errorf("--unwatch requires a glob pattern or directory argument")
 		}
 
 		resolvedTarget, err := server.ResolveGroupName(target)
@@ -284,11 +304,16 @@ func run(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("invalid target group name %q: %w", target, err)
 		}
 
-		return doUnwatch(addr, resolved, resolvedTarget)
+		patterns, err := resolveUnwatchArgs(args, recursive, addr, resolvedTarget)
+		if err != nil {
+			return err
+		}
+
+		return doUnwatch(addr, patterns, resolvedTarget)
 	}
 
 	if closeFiles {
-		if len(watchPatterns) > 0 {
+		if watchMode {
 			return fmt.Errorf("cannot use --close with --watch")
 		}
 		if len(args) == 0 {
@@ -325,37 +350,88 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 	target = resolved
 
-	if len(watchPatterns) > 0 && len(args) > 0 {
-		hasGlob := slices.ContainsFunc(watchPatterns, func(p string) bool {
-			return hasGlobChars(p)
-		})
-		if !hasGlob {
-			return fmt.Errorf("cannot use --watch (-w) with file arguments\n(hint: the shell may have expanded the glob pattern; quote it to prevent expansion, e.g. -w '**/*.md')")
+	if recursive && len(args) == 0 {
+		return fmt.Errorf("--recursive (-R) requires a directory argument")
+	}
+
+	files, patterns, err := resolveArgs(args, watchMode, recursive)
+	if err != nil {
+		return err
+	}
+
+	if watchMode && len(patterns) == 0 {
+		if len(files) > 0 {
+			return fmt.Errorf("--watch (-w) requires a glob pattern or directory argument\n(hint: the shell may have expanded the glob pattern; quote it, e.g. -w '**/*.md')")
 		}
-		return fmt.Errorf("cannot use --watch (-w) with file arguments")
+		return fmt.Errorf("--watch (-w) requires a glob pattern or directory argument")
 	}
 
-	patterns, err := resolvePatterns(watchPatterns)
-	if err != nil {
-		return err
+	// Detect redirected stdin when no positional arguments are given.
+	var stdinData *server.UploadedFileData
+	if isStdinRedirected() {
+		if len(args) > 0 {
+			return fmt.Errorf("cannot use redirected stdin with positional arguments")
+		}
+		if watchMode {
+			return fmt.Errorf("cannot use --watch (-w) with redirected stdin")
+		}
+		name, content, err := readStdin(os.Stdin)
+		if err != nil {
+			return err
+		}
+		stdinData = &server.UploadedFileData{
+			Name:    name,
+			Content: content,
+			Group:   target,
+		}
 	}
 
-	files, err := resolveFiles(args)
-	if err != nil {
-		return err
-	}
-
-	// When no files or patterns are specified and a server is already
+	// When no files, patterns, or stdin are specified and a server is already
 	// running, just open the browser and exit.
-	if len(files) == 0 && len(patterns) == 0 {
+	if len(files) == 0 && len(patterns) == 0 && stdinData == nil {
 		if _, err := probeServer(addr, probeTimeoutDefault); err == nil {
 			openBrowser(addr)
 			return nil
 		}
 	}
 
-	if (len(files) > 0 || len(patterns) > 0) && tryAddToExisting(addr, files, patterns) {
-		return nil
+	// Try adding to an existing server.
+	if stdinData != nil || len(files) > 0 || len(patterns) > 0 {
+		result, probeErr := probeServer(addr, probeTimeoutFast)
+		if probeErr == nil {
+			isNewGroup := !slices.Contains(result.groups, target)
+
+			deeplinks, err := postFiles(result.client, addr, target, files)
+			if err != nil {
+				return err
+			}
+			patternDeeplinks, err := postPatterns(result.client, addr, target, patterns)
+			if err != nil {
+				return err
+			}
+			deeplinks = append(deeplinks, patternDeeplinks...)
+
+			if stdinData != nil {
+				entry, err := postUploadedFile(result.client, addr, target, stdinData.Name, stdinData.Content)
+				if err != nil {
+					return fmt.Errorf("failed to upload stdin content: %w", err)
+				}
+				deeplinks = append(deeplinks, entry)
+			}
+
+			added := len(files) + len(patterns)
+			if stdinData != nil {
+				added++
+			}
+			slog.Info("added to existing server", "files", len(files), "patterns", len(patterns), "stdin", stdinData != nil, "addr", addr)
+			emitServeOutput(addr, deeplinks, false)
+			fmt.Fprintf(os.Stderr, "mo: added %d item(s) to http://%s\n", added, addr)
+
+			if isNewGroup || open {
+				openBrowser(addr)
+			}
+			return nil
+		}
 	}
 
 	if err := validateTrustedHosts(trustedHosts); err != nil {
@@ -383,11 +459,19 @@ func run(cmd *cobra.Command, args []string) error {
 		uploadedFiles = restoredUploads
 	}
 
+	// Append stdin content to uploaded files for the new server.
+	if stdinData != nil {
+		uploadedFiles = append(uploadedFiles, *stdinData)
+	}
+
 	// Prompt only when actually starting a new server (not adding to existing one).
 	if !isLoopbackBind(bind) {
 		slog.Warn("binding to non-loopback address", "bind", bind, "dangerously-allow-remote-access", dangerouslyAllowRemoteAccess)
 	}
 	if !isLoopbackBind(bind) && !dangerouslyAllowRemoteAccess {
+		if stdinData != nil {
+			return fmt.Errorf("cannot use redirected stdin with non-loopback bind without --dangerously-allow-remote-access")
+		}
 		o := termenv.NewOutput(os.Stderr)
 		c := func(s string) termenv.Style { return o.String(s).Foreground(o.Color("208")) }
 		fmt.Fprintln(os.Stderr, c("SECURITY WARNING:").Bold(),
@@ -500,92 +584,197 @@ func hasGlobChars(s string) bool {
 	return strings.ContainsAny(s, "*?[")
 }
 
-func resolvePatterns(patterns []string) ([]string, error) {
-	var resolved []string
-	for _, pat := range patterns {
-		if !hasGlobChars(pat) {
-			return nil, fmt.Errorf("pattern %q does not contain glob characters (* ? [); use file arguments instead", pat)
-		}
-		abs, err := filepath.Abs(pat)
-		if err != nil {
-			return nil, fmt.Errorf("cannot resolve pattern %q: %w", pat, err)
-		}
-		resolved = append(resolved, abs)
-	}
-	return resolved, nil
-}
-
-func resolveFiles(args []string) ([]string, error) {
-	var files []string
+func resolveUnwatchArgs(args []string, recursive bool, addr, groupName string) ([]string, error) {
+	var patterns []string
+	var registered []string
+	var registeredFetched bool
 	for _, arg := range args {
-		absPath, err := filepath.Abs(arg)
+		abs, err := filepath.Abs(arg)
 		if err != nil {
 			return nil, fmt.Errorf("cannot resolve path %s: %w", arg, err)
 		}
-		if stat, err := os.Stat(absPath); err != nil {
-			return nil, fmt.Errorf("file not found: %s", absPath)
-		} else if stat.IsDir() {
-			return nil, fmt.Errorf("%s is a directory", absPath)
+
+		if hasGlobChars(arg) {
+			patterns = append(patterns, abs)
+			continue
 		}
-		files = append(files, absPath)
+
+		stat, err := os.Stat(abs)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				if !recursive {
+					return nil, fmt.Errorf("path not found: %s", abs)
+				}
+				// Allow deleted directories in recursive mode so users can
+				// clean up patterns that remain after the directory is removed.
+			} else {
+				return nil, fmt.Errorf("cannot stat path %s: %w", abs, err)
+			}
+		} else if !stat.IsDir() {
+			return nil, fmt.Errorf("--unwatch requires glob patterns or directories, not individual files (hint: use --close to remove individual files)")
+		}
+
+		if recursive {
+			if !registeredFetched {
+				registered, err = fetchRegisteredPatterns(addr, groupName)
+				if err != nil {
+					return nil, err
+				}
+				registeredFetched = true
+			}
+			prefix := abs + string(filepath.Separator)
+			var matched []string
+			for _, p := range registered {
+				if strings.HasPrefix(p, prefix) {
+					matched = append(matched, p)
+				}
+			}
+			if len(matched) == 0 {
+				return nil, fmt.Errorf("no watched patterns found under %s in group %q (use --status to see registered patterns)", abs, groupName)
+			}
+			patterns = append(patterns, matched...)
+		} else {
+			patterns = append(patterns, filepath.Join(abs, markdownGlob))
+		}
 	}
-	return files, nil
+	seen := make(map[string]struct{}, len(patterns))
+	unique := make([]string, 0, len(patterns))
+	for _, p := range patterns {
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		unique = append(unique, p)
+	}
+
+	return unique, nil
 }
 
-func tryAddToExisting(addr string, files []string, patterns []string) bool {
-	result, err := probeServer(addr, probeTimeoutFast)
+func fetchRegisteredPatterns(addr, groupName string) ([]string, error) {
+	client := &http.Client{Timeout: probeTimeoutDefault, Transport: newTokenTransport(addr)}
+	resp, err := client.Get(fmt.Sprintf("http://%s/_/api/status", addr))
 	if err != nil {
-		return false
+		return nil, fmt.Errorf("failed to query server status: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to query server status: %s", resp.Status)
 	}
 
-	isNewGroup := !slices.Contains(result.groups, target)
-
-	var deeplinks []deeplinkEntry
-	deeplinks = append(deeplinks, postFiles(result.client, addr, target, files)...)
-	deeplinks = append(deeplinks, postPatterns(result.client, addr, target, patterns)...)
-
-	added := len(files) + len(patterns)
-	slog.Info("added to existing server", "files", len(files), "patterns", len(patterns), "addr", addr)
-	emitServeOutput(addr, deeplinks, false)
-	fmt.Fprintf(os.Stderr, "mo: added %d item(s) to http://%s\n", added, addr)
-
-	if isNewGroup || open {
-		openBrowser(addr)
+	var status statusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return nil, fmt.Errorf("failed to decode server status: %w", err)
 	}
 
-	return true
+	for _, g := range status.Groups {
+		if g.Name == groupName {
+			return g.Patterns, nil
+		}
+	}
+	return nil, fmt.Errorf("group %q not found (use --status to see registered groups)", groupName)
 }
 
-func postFiles(client *http.Client, addr, group string, files []string) []deeplinkEntry {
+func resolveArgs(args []string, watchMode, recursive bool) (files, patterns []string, err error) {
+	for _, arg := range args {
+		abs, err := filepath.Abs(arg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("cannot resolve path %s: %w", arg, err)
+		}
+
+		if hasGlobChars(arg) {
+			if watchMode {
+				patterns = append(patterns, abs)
+				continue
+			}
+			matches, err := expandGlobPattern(abs)
+			if err != nil {
+				return nil, nil, err
+			}
+			if len(matches) == 0 {
+				return nil, nil, fmt.Errorf("no files matched %s", arg)
+			}
+			files = append(files, matches...)
+			continue
+		}
+
+		stat, err := os.Stat(abs)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, nil, fmt.Errorf("file not found: %s", abs)
+			}
+			return nil, nil, fmt.Errorf("cannot stat path %s: %w", abs, err)
+		}
+		if stat.IsDir() {
+			pat := filepath.Join(abs, markdownGlobFor(recursive))
+			if watchMode {
+				patterns = append(patterns, pat)
+				continue
+			}
+			matches, err := expandGlobPattern(pat)
+			if err != nil {
+				return nil, nil, err
+			}
+			if len(matches) == 0 {
+				return nil, nil, fmt.Errorf("no .md files in %s", abs)
+			}
+			files = append(files, matches...)
+			continue
+		}
+		files = append(files, abs)
+	}
+	return files, patterns, nil
+}
+
+func markdownGlobFor(recursive bool) string {
+	if recursive {
+		return markdownGlobRecursive
+	}
+	return markdownGlob
+}
+
+func expandGlobPattern(absPattern string) ([]string, error) {
+	base, rel := doublestar.SplitPattern(filepath.ToSlash(absPattern))
+	rels, err := doublestar.Glob(os.DirFS(base), rel, doublestar.WithFilesOnly())
+	if err != nil {
+		return nil, fmt.Errorf("failed to expand glob %s: %w", absPattern, err)
+	}
+	matches := make([]string, len(rels))
+	for i, r := range rels {
+		matches[i] = filepath.Join(base, r)
+	}
+	collate.New(language.Und, collate.Numeric).SortStrings(matches)
+	return matches, nil
+}
+
+func postFiles(client *http.Client, addr, group string, files []string) ([]deeplinkEntry, error) {
 	var entries []deeplinkEntry
 	for _, f := range files {
 		body, err := json.Marshal(map[string]string{
-			"path":  f,
-			"group": group,
+			"path": f,
 		})
 		if err != nil {
-			slog.Warn("failed to marshal request", "path", f, "error", err)
-			continue
+			return entries, fmt.Errorf("failed to encode request for file %q: %w", f, err)
 		}
 		resp, err := client.Post(
-			fmt.Sprintf("http://%s/_/api/files", addr),
+			fmt.Sprintf("http://%s/_/api/groups/%s/files", addr, url.PathEscape(group)),
 			"application/json",
 			bytes.NewReader(body),
 		)
 		if err != nil {
-			slog.Warn("failed to post file", "path", f, "error", err)
-			continue
+			return entries, fmt.Errorf("failed to add file %q: %w", f, err)
 		}
 		if resp.StatusCode != http.StatusOK {
-			slog.Warn("failed to add file", "path", f, "status", resp.StatusCode)
 			resp.Body.Close()
-			continue
+			if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+				return entries, incompatibleGroupedFileEndpointError(resp.Status)
+			}
+			return entries, fmt.Errorf("failed to add file %q: server returned %s", f, resp.Status)
 		}
 		var entry server.FileEntry
 		if err := json.NewDecoder(resp.Body).Decode(&entry); err != nil {
-			slog.Warn("failed to decode file response", "error", err)
 			resp.Body.Close()
-			continue
+			return entries, fmt.Errorf("failed to decode response after adding file %q: %w", f, err)
 		}
 		resp.Body.Close()
 		entries = append(entries, deeplinkEntry{
@@ -593,10 +782,10 @@ func postFiles(client *http.Client, addr, group string, files []string) []deepli
 			Path: entry.Path,
 		})
 	}
-	return entries
+	return entries, nil
 }
 
-func postPatterns(client *http.Client, addr, group string, patterns []string) []deeplinkEntry {
+func postPatterns(client *http.Client, addr, group string, patterns []string) ([]deeplinkEntry, error) {
 	var entries []deeplinkEntry
 	for _, pat := range patterns {
 		body, err := json.Marshal(map[string]string{
@@ -604,8 +793,7 @@ func postPatterns(client *http.Client, addr, group string, patterns []string) []
 			"group":   group,
 		})
 		if err != nil {
-			slog.Warn("failed to marshal request", "pattern", pat, "error", err)
-			continue
+			return entries, fmt.Errorf("failed to encode request for pattern %q: %w", pat, err)
 		}
 		resp, err := client.Post(
 			fmt.Sprintf("http://%s/_/api/patterns", addr),
@@ -613,19 +801,16 @@ func postPatterns(client *http.Client, addr, group string, patterns []string) []
 			bytes.NewReader(body),
 		)
 		if err != nil {
-			slog.Warn("failed to post pattern", "pattern", pat, "error", err)
-			continue
+			return entries, fmt.Errorf("failed to add pattern %q: %w", pat, err)
 		}
 		if resp.StatusCode != http.StatusOK {
-			slog.Warn("failed to add pattern", "pattern", pat, "status", resp.StatusCode)
 			resp.Body.Close()
-			continue
+			return entries, fmt.Errorf("failed to add pattern %q: server returned %s", pat, resp.Status)
 		}
 		var patResp server.AddPatternResponse
 		if err := json.NewDecoder(resp.Body).Decode(&patResp); err != nil {
-			slog.Warn("failed to decode pattern response", "error", err)
 			resp.Body.Close()
-			continue
+			return entries, fmt.Errorf("failed to decode response after adding pattern %q: %w", pat, err)
 		}
 		resp.Body.Close()
 		for _, f := range patResp.Files {
@@ -635,7 +820,11 @@ func postPatterns(client *http.Client, addr, group string, patterns []string) []
 			})
 		}
 	}
-	return entries
+	return entries, nil
+}
+
+func incompatibleGroupedFileEndpointError(status string) error {
+	return fmt.Errorf("the running mo server is incompatible with this CLI: grouped file endpoint returned %s; restart it with `mo --restart` and retry", status)
 }
 
 type deeplinkEntry struct {
@@ -921,7 +1110,7 @@ func doShutdown(addr string) error {
 	}
 
 	slog.Info("shutdown request sent", "addr", addr)
-	fmt.Fprintf(os.Stderr, "mo: shutdown request sent to %s\n", addr)
+	fmt.Fprintf(os.Stderr, "mo: shutdown request sent to http://%s\n", addr)
 	return nil
 }
 
@@ -942,7 +1131,7 @@ func doRestart(addr string) error {
 	}
 
 	slog.Info("restart request sent", "addr", addr)
-	fmt.Fprintf(os.Stderr, "mo: restart request sent to %s\n", addr)
+	fmt.Fprintf(os.Stderr, "mo: restart request sent to http://%s\n", addr)
 	return nil
 }
 
@@ -1030,7 +1219,7 @@ func doClose(addr string, paths []string, groupName string) ([]string, error) {
 		}
 
 		req, err := http.NewRequest(http.MethodDelete,
-			fmt.Sprintf("http://%s/_/api/files/%s", addr, id), nil)
+			fmt.Sprintf("http://%s/_/api/groups/%s/files/%s", addr, url.PathEscape(groupName), id), nil)
 		if err != nil {
 			joinedErr = errors.Join(joinedErr, fmt.Errorf("failed to create request for %q: %w", absPath, err))
 			continue

@@ -26,7 +26,7 @@ describe("useCheckboxState", () => {
       );
     });
 
-    const { result } = renderHook(() => useCheckboxState("file-1"));
+    const { result } = renderHook(() => useCheckboxState("default", "file-1"));
 
     await waitFor(() => expect(result.current.checkboxesLoaded).toBe(true));
     expect(result.current.hasCheckboxes).toBe(true);
@@ -40,7 +40,7 @@ describe("useCheckboxState", () => {
   it("resets to empty state on fetch error and marks loaded", async () => {
     mockFetch(async () => new Response(null, { status: 500 }));
 
-    const { result } = renderHook(() => useCheckboxState("file-err"));
+    const { result } = renderHook(() => useCheckboxState("default", "file-err"));
     await waitFor(() => expect(result.current.checkboxesLoaded).toBe(true));
     expect(result.current.hasCheckboxes).toBe(false);
     expect(result.current.orderedKeys).toEqual([]);
@@ -59,12 +59,39 @@ describe("useCheckboxState", () => {
       );
     });
 
-    const { result } = renderHook(() => useCheckboxState("f"));
+    const { result } = renderHook(() => useCheckboxState("default", "f"));
     await waitFor(() => expect(result.current.checkboxesLoaded).toBe(true));
 
     act(() => result.current.toggle("a"));
     await waitFor(() => expect(toggleBody).not.toBeNull());
     expect((toggleBody as { checked: boolean } | null)?.checked).toBe(true);
+  });
+
+  it("toggle uses the current group after rerender", async () => {
+    const toggleURLs: string[] = [];
+    mockFetch(async (url) => {
+      if (url.includes("/checkboxes/")) {
+        toggleURLs.push(url);
+        return new Response(null, { status: 200 });
+      }
+      return new Response(
+        JSON.stringify({ sources: { a: false }, overrides: {}, orderedKeys: ["a"] }),
+        { status: 200 },
+      );
+    });
+
+    const { result, rerender } = renderHook(
+      ({ group, fileId }) => useCheckboxState(group, fileId),
+      { initialProps: { group: "first", fileId: "same-file" } },
+    );
+    await waitFor(() => expect(result.current.checkboxesLoaded).toBe(true));
+
+    rerender({ group: "second", fileId: "same-file" });
+    await waitFor(() => expect(result.current.checkboxesLoaded).toBe(true));
+
+    act(() => result.current.toggle("a"));
+    await waitFor(() => expect(toggleURLs).toHaveLength(1));
+    expect(toggleURLs[0]).toContain("/_/api/groups/second/files/same-file/checkboxes/a");
   });
 
   it("checkAll / uncheckAll call the right endpoints", async () => {
@@ -79,19 +106,21 @@ describe("useCheckboxState", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const { result } = renderHook(() => useCheckboxState("f"));
+    const { result } = renderHook(() => useCheckboxState("default", "f"));
     await waitFor(() => expect(result.current.checkboxesLoaded).toBe(true));
 
     act(() => result.current.checkAll());
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/_/api/files/f/checkboxes/check-all", {
+      expect(fetchMock).toHaveBeenCalledWith("/_/api/groups/default/files/f/checkboxes/check-all", {
         method: "POST",
       });
     });
 
     act(() => result.current.uncheckAll());
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/_/api/files/f/checkboxes", { method: "DELETE" });
+      expect(fetchMock).toHaveBeenCalledWith("/_/api/groups/default/files/f/checkboxes", {
+        method: "DELETE",
+      });
     });
   });
 
@@ -102,7 +131,7 @@ describe("useCheckboxState", () => {
           status: 200,
         }),
     );
-    const { result } = renderHook(() => useCheckboxState("file-1"));
+    const { result } = renderHook(() => useCheckboxState("default", "file-1"));
     await waitFor(() => expect(result.current.checkboxesLoaded).toBe(true));
 
     const prevRevision = result.current.checkboxRevision;
@@ -133,7 +162,7 @@ describe("useCheckboxState", () => {
           status: 200,
         }),
     );
-    const { result } = renderHook(() => useCheckboxState("file-1"));
+    const { result } = renderHook(() => useCheckboxState("default", "file-1"));
     await waitFor(() => expect(result.current.checkboxesLoaded).toBe(true));
     const before = result.current.checkboxRevision;
 

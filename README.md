@@ -22,19 +22,24 @@ Highlights:
 - Syntax highlighting ([Shiki](https://shiki.style/))
 - [Mermaid](https://mermaid.js.org/) diagram rendering
 - LaTeX math rendering ([KaTeX](https://katex.org/))
+- [GitHub Alerts](https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#alerts) (admonitions)
+- Fullscreen zoom modal for images and Mermaid diagrams
 - <img src="images/icons/theme-light.svg" width="16" height="16" alt="dark theme"> Dark / <img src="images/icons/theme-dark.svg" width="16" height="16" alt="light theme"> light theme
 - <img src="images/icons/group.svg" width="16" height="16" alt="group"> File grouping
 - <img src="images/icons/toc.svg" width="16" height="16" alt="toc"> Table of contents panel
-- <img src="images/icons/view-flat.svg" width="16" height="16" alt="flat view"> Flat / <img src="images/icons/view-tree.svg" width="16" height="16" alt="tree view"> tree sidebar view with drag-and-drop reorder and file search
+- <img src="images/icons/view-flat.svg" width="16" height="16" alt="flat view"> Flat / <img src="images/icons/view-tree.svg" width="16" height="16" alt="tree view"> tree sidebar view with drag-and-drop reorder
 - <img src="images/icons/title-filename.svg" width="16" height="16" alt="file name"> File name / <img src="images/icons/title-heading.svg" width="16" height="16" alt="heading title"> heading title sidebar display toggle (per-group)
+- <img src="images/icons/search.svg" width="16" height="16" alt="search"> Full-text search across file names and content
 - YAML frontmatter display (collapsible metadata block)
 - MDX file support (renders as Markdown, strips `import`/`export`, escapes JSX tags)
+- <img src="images/icons/font-size.svg" width="16" height="16" alt="font size"> Content font size toggle (small / medium / large / extra large)
 - <img src="images/icons/width-expand.svg" width="16" height="16" alt="wide view"> Wide / <img src="images/icons/width-compress.svg" width="16" height="16" alt="narrow view"> narrow content width toggle
 - <img src="images/icons/raw.svg" width="16" height="16" alt="raw"> Raw markdown view
 - <img src="images/icons/copy.svg" width="16" height="16" alt="copy"> Copy content (Markdown / Text / HTML)
 - <img src="images/icons/restart.svg" width="16" height="16" alt="restart"> Server restart with session preservation
 - Auto session backup and restore
 - Drag-and-drop file addition from the OS file manager (content is loaded in-memory; live-reload is not supported for dropped files)
+- Stdin pipe support (`cat file.md | mo`)
 - Live-reload on save (for files opened via CLI)
 
 ## Install
@@ -60,10 +65,24 @@ Download a binary from the [releases page](https://github.com/k1LoW/mo/releases)
 ```console
 mo README.md                          # Open a single file
 mo README.md CHANGELOG.md docs/*.md   # Open multiple files
+mo docs/                              # Open all .md files in a directory
 mo spec.md --target design            # Open in a named group
+cat notes.md | mo                     # Read Markdown from stdin
 ```
 
 `mo` opens Markdown files in a browser with live-reload. When you save a file, the browser automatically reflects the changes.
+
+### Reading from stdin
+
+When no positional arguments are given and stdin is redirected (not a terminal), `mo` reads Markdown content from stdin.
+
+```console
+cat notes.md | mo
+some-command | mo --target output
+mo < notes.md
+```
+
+The content is loaded in-memory with a generated name (`stdin-<hash>.md`). Piping the same content again reuses the existing entry (deduplicated by content hash).
 
 ### Single server, multiple files
 
@@ -94,26 +113,47 @@ mo notes.md --target notes      # Opens at http://localhost:6275/notes
 
 ![Group view](images/groups.png)
 
-### Glob pattern watching
+### Watch mode and glob patterns
 
-Use `--watch` (`-w`) to specify glob patterns. Matching files are opened automatically, and watched directories are monitored for new files.
+`--watch` (`-w`) turns on watch mode. Directory and glob positional arguments are registered as watch patterns, matching files are opened, and new matching files are picked up automatically.
 
 ```console
-mo --watch '**/*.md'                          # Watch and open all .md files recursively
-mo --watch 'docs/**/*.md' --target docs       # Watch docs/ tree in "docs" group
-mo --watch '*.md' --watch 'docs/**/*.md'      # Multiple patterns
+mo -w '**/*.md'                              # Watch and open all .md files recursively
+mo -w 'docs/**/*.md' --target docs           # Watch docs/ tree in "docs" group
+mo -w '*.md' 'docs/**/*.md'                  # Multiple patterns (positional)
+mo -w docs/                                  # Watch docs/*.md
 ```
 
-`--watch` cannot be combined with file arguments. The `**` pattern matches directories recursively.
+Combine with `--recursive` (`-R`) to descend into subdirectories. Short flags can be combined:
+
+```console
+mo -w -R docs/                               # Watch docs/**/*.md
+mo -wR docs/                                 # Same, short-combined
+```
+
+Without `--watch`, globs are expanded once and directory arguments open matching files without live-watching new additions:
+
+```console
+mo docs/                                     # Open every .md directly in docs/
+mo -R docs/                                  # Open every .md under docs/ (recursive)
+mo 'docs/*.md'                               # Expand and open matching .md files
+```
 
 #### Removing watch patterns
 
-Use `--unwatch` to stop watching a previously registered pattern. Files already added remain in the sidebar.
+`--unwatch` removes previously registered patterns. Pass glob patterns or directories as positional arguments to specify which patterns to remove. Regular file paths are not accepted (use `--close` to remove individual files from the sidebar). Files already added by a pattern remain in the sidebar.
 
 ```console
 mo --unwatch '**/*.md'                              # Stop watching a pattern (default group)
+mo --unwatch docs/                                  # Stop watching docs/*.md
 mo --unwatch 'docs/**/*.md' --target docs            # Stop watching in a specific group
 mo --unwatch '/Users/you/project/**/*.md'            # Stop watching by absolute path
+```
+
+With `-R`, a directory argument removes **all** registered patterns under that directory at once. For example, if `docs/*.md`, `docs/sub/*.md`, and `docs/**/*.md` are all registered, a single command removes them all:
+
+```console
+mo --unwatch -R docs/                               # Removes docs/*.md, docs/sub/*.md, docs/**/*.md, etc.
 ```
 
 Patterns are resolved to absolute paths before matching, so you can specify either a relative glob or the full path shown by `--status`.
@@ -238,14 +278,16 @@ $ mo --status --json
 | `--open` | | | Always open browser |
 | `--no-open` | | | Never open browser |
 | `--status` | | | Show all running mo servers |
-| `--watch` | `-w` | | Glob pattern to watch for matching files (repeatable) |
-| `--unwatch` | | | Remove a watched glob pattern (repeatable) |
+| `--watch` | `-w` | `false` | Treat directory and glob arguments as watch patterns |
+| `--unwatch` | | `false` | Remove watched patterns for the given directory or glob arguments |
+| `--recursive` | `-R` | `false` | Recurse into subdirectories when a directory is given |
 | `--close` | | | Close files instead of opening them |
 | `--shutdown` | | | Shut down the running mo server |
 | `--restart` | | | Restart the running mo server |
 | `--clear` | | | Clear saved session (restarts server if running) |
 | `--foreground` | | | Run mo server in foreground |
 | `--json` | | | Output structured data as JSON to stdout |
+| `--dangerously-allow-remote-access` | | | Allow remote access without authentication (trusted networks only) |
 | `--trusted-host` | | | Extra `Host` header value to accept behind a trusted reverse proxy, repeatable (e.g. `host.example.ts.net:8443`) |
 
 > [!WARNING]

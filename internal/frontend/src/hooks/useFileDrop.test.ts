@@ -80,7 +80,7 @@ describe("useFileDrop", () => {
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
-        "/_/api/files/upload",
+        "/_/api/groups/docs/files/upload",
         expect.objectContaining({ method: "POST" }),
       );
     });

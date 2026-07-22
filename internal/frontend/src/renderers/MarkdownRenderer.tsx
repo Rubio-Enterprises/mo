@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from "react";
-import Markdown from "react-markdown";
+import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
@@ -13,12 +13,41 @@ import "katex/dist/katex.min.css";
 import { codeToHtml } from "shiki";
 import mermaid from "mermaid";
 import { openRelativeFile } from "../hooks/useApi";
+import { isPlainLeftClick } from "../utils/linkClick";
+import { escapeRegExp } from "../utils/regex";
 import { resolveLink, resolveImageSrc, extractLanguage } from "../utils/resolve";
+import { buildRelativeOpenUrl } from "../utils/groups";
 import { parseFrontmatter } from "../utils/frontmatter";
 import { stripMdxSyntax } from "../utils/mdx";
 import type { TextRendererProps, TocHeading } from "./registry";
+import type { ZoomContent } from "../components/ZoomModal";
 import type { Components } from "react-markdown";
 import "github-markdown-css/github-markdown.css";
+
+// Strip the `user-content-` prefix that remark-gfm bakes into footnote IDs,
+// so rehype-sanitize can re-add it exactly once (avoiding double-prefixed IDs).
+function rehypeStripClobberPrefix() {
+  const FOOTNOTE_ID_PATTERN = /^user-content-(fn-|fnref-|footnote-label$)/;
+  const PREFIX = "user-content-";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function walk(node: any) {
+    if (node.properties) {
+      const props = node.properties;
+      if (typeof props.id === "string" && FOOTNOTE_ID_PATTERN.test(props.id)) {
+        props.id = props.id.slice(PREFIX.length);
+      }
+    }
+    if (node.children) {
+      for (const child of node.children) {
+        if (child.type === "element") walk(child);
+      }
+    }
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (tree: any) => {
+    walk(tree);
+  };
+}
 
 // Extend default GitHub-compatible schema to allow style/align attributes used in raw HTML
 const sanitizeSchema = {
@@ -29,7 +58,82 @@ const sanitizeSchema = {
     div: [...(defaultSchema.attributes?.["div"] || []), "style", "align"],
     input: [...(defaultSchema.attributes?.["input"] || []), "dataCheckboxKey"],
   },
+  protocols: {
+    ...defaultSchema.protocols,
+    src: [...(defaultSchema.protocols?.["src"] || []), "data"],
+  },
 };
+
+// react-markdown's defaultUrlTransform drops every data: URI, on top of
+// rehype-sanitize. Restrict the exception to data:image/ on src: img is
+// script-inert for data URIs, while data:text/html on href would be a vector.
+function urlTransform(url: string, key: string): string {
+  if (key === "src" && url.startsWith("data:image/")) {
+    return url;
+  }
+  return defaultUrlTransform(url);
+}
+
+interface SearchHitMarker {
+  top: number;
+  height: number;
+}
+
+const SEARCH_HIT_COLUMN_OFFSET = -24;
+
+function collectSearchHitMarkers(root: HTMLElement, query: string): SearchHitMarker[] {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const pattern = new RegExp(escapeRegExp(trimmed), "gi");
+  const articleRect = root.getBoundingClientRect();
+  const markers = new Map<string, SearchHitMarker>();
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (
+        parent == null ||
+        parent.closest("script, style, .frontmatter-block") != null ||
+        node.textContent == null ||
+        node.textContent.trim() === ""
+      ) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      pattern.lastIndex = 0;
+      return pattern.test(node.textContent) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    },
+  });
+
+  let current = walker.nextNode();
+  while (current != null) {
+    if (current instanceof Text) {
+      const text = current.textContent ?? "";
+      pattern.lastIndex = 0;
+      for (const match of text.matchAll(pattern)) {
+        const start = match.index ?? 0;
+        const end = start + match[0].length;
+        const range = document.createRange();
+        range.setStart(current, start);
+        range.setEnd(current, end);
+        const [rect] = Array.from(range.getClientRects());
+        if (rect != null && rect.height > 0 && rect.width > 0) {
+          const top = rect.top - articleRect.top;
+          const height = rect.height;
+          const key = `${Math.round(top)}:${Math.round(height)}`;
+          markers.set(key, {
+            top,
+            height,
+          });
+        }
+      }
+    }
+    current = walker.nextNode();
+  }
+
+  return [...markers.values()].sort((a, b) => a.top - b.top);
+}
 
 function getMermaidTheme(): "dark" | "default" {
   return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "default";
@@ -72,7 +176,13 @@ async function renderMermaid(code: string, width?: number): Promise<string> {
   return result;
 }
 
-export function MermaidBlock({ code }: { code: string }) {
+export function MermaidBlock({
+  code,
+  onZoom,
+}: {
+  code: string;
+  onZoom?: (content: ZoomContent) => void;
+}) {
   const [svg, setSvg] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -110,6 +220,7 @@ export function MermaidBlock({ code }: { code: string }) {
     return (
       <div ref={containerRef} className="relative group">
         <div className="overflow-x-auto" dangerouslySetInnerHTML={{ __html: svg }} />
+        {onZoom && <ZoomButton onClick={() => onZoom({ type: "svg", svg })} position="right-18" />}
         <MermaidImageCopyButton svg={svg} />
         <CodeBlockCopyButton code={code} themed />
       </div>
@@ -136,11 +247,15 @@ function MermaidImageCopyButton({ svg }: { svg: string }) {
 
   const handleCopy = async () => {
     try {
-      const blob = await svgToPngBlob(svg);
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      // Pass the Blob promise directly to ClipboardItem so clipboard.write() is
+      // invoked synchronously inside the user gesture. Awaiting the blob first
+      // lets the transient user activation expire on Chrome and breaks the
+      // user-gesture requirement on Safari/WebKit, both surfacing as a silent
+      // no-op click.
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": svgToPngBlob(svg) })]);
       setCopied(true);
-    } catch {
-      // clipboard API may fail in insecure contexts
+    } catch (err) {
+      console.error("mermaid copy image failed", err);
     }
   };
 
@@ -172,9 +287,20 @@ function MermaidImageCopyButton({ svg }: { svg: string }) {
 
 function svgToPngBlob(svgString: string): Promise<Blob> {
   return new Promise((resolve, reject) => {
+    // Mermaid flowchart/stateDiagram labels embed HTML void elements such as
+    // <br> inside <foreignObject>, which the strict "image/svg+xml" parser
+    // rejects silently (documentElement becomes <html> and the width, height,
+    // and viewBox lookups all return null). Parsing as "text/html" is lenient
+    // and still preserves the case of SVG attributes (viewBox,
+    // preserveAspectRatio, etc.). XMLSerializer then normalizes <br> to <br/>
+    // so the resulting data URL loads cleanly as an SVG image.
     const parser = new DOMParser();
-    const doc = parser.parseFromString(svgString, "image/svg+xml");
-    const svgEl = doc.documentElement;
+    const doc = parser.parseFromString(svgString, "text/html");
+    const svgEl = doc.querySelector("svg");
+    if (!svgEl) {
+      reject(new Error("No SVG element found"));
+      return;
+    }
 
     // Ensure xmlns is present for standalone SVG rendering
     if (!svgEl.getAttribute("xmlns")) {
@@ -234,6 +360,38 @@ function svgToPngBlob(svgString: string): Promise<Blob> {
     };
     img.src = dataUrl;
   });
+}
+
+function ZoomButton({
+  onClick,
+  position = "right-2",
+  groupClass = "group-hover:opacity-100",
+}: {
+  onClick: () => void;
+  position?: string;
+  groupClass?: string;
+}) {
+  return (
+    <button
+      className={`absolute ${position} top-2 flex items-center justify-center rounded-md p-1 cursor-pointer transition-all duration-150 border ${themedButtonStyle} opacity-0 ${groupClass}`}
+      onClick={onClick}
+      title="Zoom"
+    >
+      {/* Placeholder icon — will be replaced */}
+      <svg
+        className="size-4"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
+        <circle cx="7" cy="7" r="4.5" />
+        <line x1="10.5" y1="10.5" x2="14" y2="14" strokeLinecap="round" />
+        <line x1="5" y1="7" x2="9" y2="7" strokeLinecap="round" />
+        <line x1="7" y1="5" x2="7" y2="9" strokeLinecap="round" />
+      </svg>
+    </button>
+  );
 }
 
 const darkButtonStyle = "border-[#484f58] hover:border-[#8b949e] text-[#8b949e] bg-[#2d333b]";
@@ -373,6 +531,7 @@ function RawView({ content }: { content: string }) {
 }
 
 export function MarkdownRenderer({
+  activeGroup,
   fileId,
   fileName,
   content,
@@ -382,9 +541,14 @@ export function MarkdownRenderer({
   onHeadingsChange,
   onContentRendered,
   onCheckboxInfo,
+  onZoom,
+  scrollToHeading,
+  onScrolledToHeading,
+  searchQuery,
 }: TextRendererProps) {
   const articleRef = useRef<HTMLDivElement>(null);
   const pendingHashRef = useRef<string>("");
+  const [searchHitMarkers, setSearchHitMarkers] = useState<SearchHitMarker[]>([]);
 
   const {
     getChecked,
@@ -396,7 +560,7 @@ export function MarkdownRenderer({
     orderedKeys,
     checkboxesLoaded,
     checkboxRevision,
-  } = useCheckboxState(fileId);
+  } = useCheckboxState(activeGroup, fileId);
 
   // Use refs for checkbox callbacks so the components useMemo stays stable
   // across checkbox state changes, preventing full re-render flicker.
@@ -414,13 +578,13 @@ export function MarkdownRenderer({
       e.preventDefault();
       try {
         pendingHashRef.current = hash;
-        const entry = await openRelativeFile(fileId, href);
-        onFileOpened?.(entry.id);
+        const entry = await openRelativeFile(activeGroup, fileId, href);
+        onFileOpened?.(entry.id, hash);
       } catch {
         pendingHashRef.current = "";
       }
     },
-    [fileId, onFileOpened],
+    [activeGroup, fileId, onFileOpened],
   );
 
   const components: Components = useMemo(
@@ -432,7 +596,7 @@ export function MarkdownRenderer({
         const isBlock = String(children).endsWith("\n");
         if (language) {
           if (language === "mermaid") {
-            return <MermaidBlock code={code} />;
+            return <MermaidBlock code={code} onZoom={onZoom} />;
           }
           return <CodeBlock language={language} code={code} />;
         }
@@ -446,10 +610,23 @@ export function MarkdownRenderer({
         );
       },
       img: ({ src, alt, ...props }) => {
-        return <img src={resolveImageSrc(src, fileId)} alt={alt} {...props} />;
+        const resolvedSrc = resolveImageSrc(src, activeGroup, fileId);
+        if (onZoom && resolvedSrc) {
+          return (
+            <span className="relative inline-block group/img">
+              <img src={resolvedSrc} alt={alt} {...props} />
+              <ZoomButton
+                onClick={() => onZoom({ type: "image", src: resolvedSrc, alt: alt ?? undefined })}
+                position="right-1"
+                groupClass="group-hover/img:opacity-100"
+              />
+            </span>
+          );
+        }
+        return <img src={resolveImageSrc(src, activeGroup, fileId)} alt={alt} {...props} />;
       },
       a: ({ href, children, ...props }) => {
-        const resolved = resolveLink(href, fileId);
+        const resolved = resolveLink(href, activeGroup, fileId);
         switch (resolved.type) {
           case "external":
             return (
@@ -459,15 +636,39 @@ export function MarkdownRenderer({
             );
           case "hash":
             return (
-              <a href={href} {...props}>
+              <a
+                href={href}
+                onClick={(e) => {
+                  if (!isPlainLeftClick(e)) return;
+                  const id = href?.slice(1);
+                  if (!id) return;
+                  const target = document.getElementById(id);
+                  if (target) {
+                    e.preventDefault();
+                    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+                    target.scrollIntoView({
+                      behavior: reduced ? "auto" : "smooth",
+                      block: "start",
+                    });
+                    history.pushState(null, "", href);
+                  }
+                }}
+                {...props}
+              >
                 {children}
               </a>
             );
           case "markdown":
             return (
               <a
-                href={href}
-                onClick={(e) => handleLinkClick(e, resolved.hrefPath, resolved.hash)}
+                href={buildRelativeOpenUrl(activeGroup, fileId, resolved.hrefPath, resolved.hash)}
+                onClick={(e) => {
+                  // Modifier / middle clicks fall through so the browser opens the
+                  // self-resolving href in a new tab (App resolves it on load); only a
+                  // plain click navigates in place.
+                  if (!isPlainLeftClick(e)) return;
+                  handleLinkClick(e, resolved.hrefPath, resolved.hash);
+                }}
                 {...props}
               >
                 {children}
@@ -578,7 +779,7 @@ export function MarkdownRenderer({
         );
       },
     }),
-    [fileId, handleLinkClick],
+    [activeGroup, fileId, handleLinkClick, onZoom],
   );
 
   const parsed = useMemo(
@@ -612,6 +813,7 @@ export function MarkdownRenderer({
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[
             rehypeRaw,
+            rehypeStripClobberPrefix,
             [rehypeCheckboxIndices, { orderedKeys }],
             [rehypeSanitize, sanitizeSchema],
             rehypeGithubAlerts,
@@ -619,6 +821,7 @@ export function MarkdownRenderer({
             rehypeKatex,
           ]}
           components={components}
+          urlTransform={urlTransform}
         >
           {md}
         </Markdown>
@@ -677,5 +880,56 @@ export function MarkdownRenderer({
     }
   }, [renderedContent]);
 
-  return <div ref={articleRef}>{renderedContent}</div>;
+  useLayoutEffect(() => {
+    if (renderedContent == null || !scrollToHeading || !articleRef.current) return;
+
+    const headings = articleRef.current.querySelectorAll("h1, h2, h3, h4, h5, h6");
+    const target = Array.from(headings).find(
+      (el) => (el.textContent ?? "").trim() === scrollToHeading,
+    );
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      onScrolledToHeading?.();
+    }
+  }, [renderedContent, scrollToHeading, onScrolledToHeading]);
+
+  useLayoutEffect(() => {
+    if (renderedContent == null || !articleRef.current || isRawView || !searchQuery?.trim()) {
+      setSearchHitMarkers([]);
+      return;
+    }
+
+    const updateMarkers = () => {
+      if (articleRef.current) {
+        setSearchHitMarkers(collectSearchHitMarkers(articleRef.current, searchQuery));
+      }
+    };
+
+    updateMarkers();
+    const resizeObserver = new ResizeObserver(() => updateMarkers());
+    resizeObserver.observe(articleRef.current);
+    for (const element of articleRef.current.querySelectorAll("img, svg")) {
+      resizeObserver.observe(element);
+    }
+    return () => resizeObserver.disconnect();
+  }, [renderedContent, isRawView, searchQuery]);
+
+  return (
+    <div ref={articleRef} className="relative overflow-visible">
+      <div className="pointer-events-none absolute inset-0 z-10 overflow-visible">
+        {searchHitMarkers.map((marker, index) => (
+          <div
+            key={`${marker.top}:${marker.height}:${index}`}
+            className="absolute w-1 rounded-none bg-gh-text/80"
+            style={{
+              left: SEARCH_HIT_COLUMN_OFFSET,
+              top: marker.top,
+              height: marker.height,
+            }}
+          />
+        ))}
+      </div>
+      {renderedContent}
+    </div>
+  );
 }

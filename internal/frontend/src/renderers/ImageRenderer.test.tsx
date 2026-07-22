@@ -4,11 +4,13 @@ import { ImageRenderer } from "./ImageRenderer";
 
 describe("ImageRenderer", () => {
   const baseProps = {
+    activeGroup: "default",
     fileId: "abc12345",
     fileName: "photo.png",
     revision: 1,
     isRawView: false,
     onHeadingsChange: vi.fn(),
+    fontSize: "medium" as const,
     contentSource: "raw" as const,
     rawUrl: "/_/api/files/abc12345/raw",
   };

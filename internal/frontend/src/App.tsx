@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { FileViewer } from "./components/FileViewer";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { FontSizeToggle, type FontSize } from "./components/FontSizeToggle";
 import { WidthToggle } from "./components/WidthToggle";
 import { GroupDropdown } from "./components/GroupDropdown";
 import { ViewModeToggle, type ViewMode } from "./components/ViewModeToggle";
@@ -10,21 +11,84 @@ import { TitleToggle } from "./components/TitleToggle";
 import { NavigationButtons } from "./components/NavigationButtons";
 import { RestartButton } from "./components/RestartButton";
 import { DropOverlay } from "./components/DropOverlay";
+import { ZoomModal } from "./components/ZoomModal";
+import type { ZoomContent } from "./components/ZoomModal";
 import { TocPanel } from "./components/TocPanel";
 import type { TocHeading } from "./components/TocPanel";
+import { EmptyGroupMessage } from "./components/EmptyGroupMessage";
 import { useSSE } from "./hooks/useSSE";
 import { useFileDrop } from "./hooks/useFileDrop";
 import { useActiveHeading } from "./hooks/useActiveHeading";
 import { useScrollRestoration, SCROLL_SESSION_KEY } from "./hooks/useScrollRestoration";
+import type { FileEntry, Group, SearchResult } from "./hooks/useApi";
+import {
+  fetchGroups,
+  fetchSearchResults,
+  openRelativeFile,
+  removeFile,
+  reorderFiles,
+} from "./hooks/useApi";
 import { useNavigationHistory } from "./hooks/useNavigationHistory";
 import type { NavEntry } from "./hooks/useNavigationHistory";
-import type { Group } from "./hooks/useApi";
-import { fetchGroups, removeFile, reorderFiles } from "./hooks/useApi";
-import { allFileIds, parseGroupFromPath, parseFileIdFromSearch, groupToPath } from "./utils/groups";
+import {
+  allFileIds,
+  parseGroupFromPath,
+  parseFileIdFromSearch,
+  parseRelativeOpenFromSearch,
+  groupToPath,
+  buildFileUrl,
+} from "./utils/groups";
+import { isMarkdownFile } from "./utils/filetype";
+import { formatFileLabel } from "./utils/fileLabel";
 
 const VIEWMODE_STORAGE_KEY = "mo-sidebar-viewmode";
 const WIDTH_STORAGE_KEY = "mo-layout-width";
 const SHOW_TITLE_STORAGE_KEY = "mo-sidebar-show-title";
+export const FONT_SIZE_STORAGE_KEY = "mo-font-size";
+export const TOC_OPEN_STORAGE_KEY = "mo-toc-open";
+
+export function getInitialFontSize(): FontSize {
+  try {
+    const stored = localStorage.getItem(FONT_SIZE_STORAGE_KEY);
+    if (stored === "small" || stored === "medium" || stored === "large" || stored === "xlarge") {
+      return stored;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "medium";
+}
+
+export function getInitialTocOpenMap(): Record<string, boolean> {
+  try {
+    const stored = localStorage.getItem(TOC_OPEN_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+export function formatTitle(fileEntry: Pick<FileEntry, "name" | "title"> | undefined): string {
+  if (fileEntry == undefined) return "mo";
+  const { name, title } = fileEntry;
+  return `${formatFileLabel(name, title)} | mo`;
+}
+
+export function isTocOpenForFile(
+  map: Record<string, boolean>,
+  fileId: string | null,
+  fileName: string,
+): boolean {
+  if (fileId == null) return false;
+  if (fileName && !isMarkdownFile(fileName)) return false;
+  return map[fileId] === true;
+}
 
 export function App() {
   const [groups, setGroups] = useState<Group[]>([]);
@@ -33,10 +97,13 @@ export function App() {
   );
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [tocOpen, setTocOpen] = useState(false);
+  const [tocOpenMap, setTocOpenMap] = useState<Record<string, boolean>>(getInitialTocOpenMap);
   const [headings, setHeadings] = useState<TocHeading[]>([]);
   const [contentRevision, setContentRevision] = useState(0);
   const [searchQuery, setSearchQuery] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [pendingSearchHeading, setPendingSearchHeading] = useState<string | null>(null);
   const [viewModes, setViewModes] = useState<Record<string, ViewMode>>(() => {
     try {
       const stored = localStorage.getItem(VIEWMODE_STORAGE_KEY);
@@ -62,6 +129,7 @@ export function App() {
       return false;
     }
   });
+  const [fontSize, setFontSize] = useState<FontSize>(getInitialFontSize);
   const knownFileIds = useRef<Set<string>>(new Set());
   const [initialFileId, setInitialFileId] = useState<string | null>(() => {
     const fromUrl = parseFileIdFromSearch(window.location.search);
@@ -79,6 +147,7 @@ export function App() {
     return null;
   });
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
+  const [zoomContent, setZoomContent] = useState<ZoomContent | null>(null);
 
   // Track previous values for render-time state adjustment
   const [prevGroups, setPrevGroups] = useState<Group[]>([]);
@@ -161,38 +230,110 @@ export function App() {
       .catch(() => {});
   }, []);
 
-  // Sync URL path with active group
+  // A relative Markdown link opened in a new tab lands here with from/open params
+  // because the target file has no ID until the server resolves it. Resolve it once
+  // on load, then rewrite the URL to the canonical ?file= form.
+  const relativeOpen = useRef(parseRelativeOpenFromSearch(window.location.search));
+  const relativeOpenStarted = useRef(false);
   useEffect(() => {
-    const expectedPath = groupToPath(activeGroup);
-    if (window.location.pathname !== expectedPath) {
-      window.history.replaceState(null, "", expectedPath);
-    }
-  }, [activeGroup]);
+    if (relativeOpenStarted.current) return;
+    const rel = relativeOpen.current;
+    if (!rel) return;
+    relativeOpenStarted.current = true;
+    const group = parseGroupFromPath(window.location.pathname);
+    openRelativeFile(group, rel.from, rel.open)
+      .then((entry) => {
+        relativeOpen.current = null;
+        setInitialFileId(entry.id);
+        window.history.replaceState(null, "", `${buildFileUrl(group, entry.id)}${rel.hash}`);
+        loadGroups();
+      })
+      .catch(() => {
+        relativeOpen.current = null;
+        window.history.replaceState(null, "", groupToPath(group));
+      });
+  }, [loadGroups]);
 
-  // Clear search params after consuming initial file ID
+  // User-initiated navigation (file/group selection) calls pushState directly at
+  // the call site. This effect only reconciles the URL with state for automatic
+  // changes (initial mount, SSE updates, render-time fallbacks) via replaceState.
   useEffect(() => {
-    if (initialFileId === null && window.location.search) {
-      window.history.replaceState(null, "", window.location.pathname);
-    }
-  }, [initialFileId]);
+    // A relative-open resolve is in flight; it owns the URL until it settles.
+    if (relativeOpen.current != null) return;
+    // initialFileId hasn't been consumed yet — keep the URL as the user landed.
+    if (initialFileId != null) return;
+    const expectedUrl = activeFileId
+      ? buildFileUrl(activeGroup, activeFileId)
+      : groupToPath(activeGroup);
+    if (window.location.pathname + window.location.search === expectedUrl) return;
+    window.history.replaceState(null, "", expectedUrl);
+  }, [activeGroup, activeFileId, initialFileId]);
 
+  useEffect(() => {
+    const handlePopState = () => {
+      setActiveGroup(parseGroupFromPath(window.location.pathname));
+      setActiveFileId(parseFileIdFromSearch(window.location.search));
+      setPendingSearchHeading(null);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (!searchQuery?.trim()) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSearchLoading(true);
+
+    const timer = setTimeout(() => {
+      fetchSearchResults(searchQuery, activeGroup)
+        .then((resp) => {
+          if (!cancelled) {
+            setSearchResults(resp.results);
+            setSearchLoading(false);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSearchResults([]);
+            setSearchLoading(false);
+          }
+        });
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery, activeGroup]);
+
+  const activeGroupData = useMemo(
+    () => groups.find((g) => g.name === activeGroup),
+    [groups, activeGroup],
+  );
   const activeFile = useMemo(
-    () => groups.find((g) => g.name === activeGroup)?.files.find((f) => f.id === activeFileId),
-    [groups, activeGroup, activeFileId],
+    () => activeGroupData?.files.find((f) => f.id === activeFileId),
+    [activeGroupData, activeFileId],
   );
   const activeFileName = activeFile?.name ?? "";
+  const tocOpen = isTocOpenForFile(tocOpenMap, activeFileId, activeFileName);
   const currentShowTitle: boolean = showTitles[activeGroup] ?? false;
 
-  useEffect(() => {
-    document.title = (currentShowTitle && activeFile?.title) || activeFileName || "mo";
-  }, [currentShowTitle, activeFile?.title, activeFileName]);
+  const setTocOpen = useCallback(
+    (open: boolean) => {
+      if (activeFileId == null) return;
+      setTocOpenMap((prev) => ({ ...prev, [activeFileId]: open }));
+    },
+    [activeFileId],
+  );
 
-  const activeFileType = activeFile?.type;
   useEffect(() => {
-    if (activeFileType && activeFileType !== "markdown") {
-      setTocOpen(false);
-    }
-  }, [activeFileType]);
+    document.title = formatTitle(activeFile);
+  }, [activeFile]);
 
   useSSE({
     onUpdate: () => {
@@ -230,11 +371,27 @@ export function App() {
 
   useEffect(() => {
     try {
+      localStorage.setItem(TOC_OPEN_STORAGE_KEY, JSON.stringify(tocOpenMap));
+    } catch {
+      /* ignore */
+    }
+  }, [tocOpenMap]);
+
+  useEffect(() => {
+    try {
       localStorage.setItem(WIDTH_STORAGE_KEY, isWide ? "wide" : "narrow");
     } catch {
       /* ignore */
     }
   }, [isWide]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(FONT_SIZE_STORAGE_KEY, fontSize);
+    } catch {
+      /* ignore */
+    }
+  }, [fontSize]);
 
   const handleViewModeToggle = useCallback(() => {
     setViewModes((prev) => {
@@ -249,20 +406,25 @@ export function App() {
   }, [activeGroup]);
 
   const handleSearchToggle = useCallback(() => {
-    setSearchQuery((prev) => (prev != null ? null : ""));
+    setSearchQuery((prev) => {
+      if (prev != null) return null;
+      setSidebarOpen(true);
+      return "";
+    });
   }, []);
 
-  const handleGroupChange = (name: string) => {
+  const handleGroupChange = useCallback((name: string) => {
+    window.history.pushState(null, "", groupToPath(name));
     setActiveGroup(name);
     setActiveFileId(null);
-    window.history.pushState(null, "", groupToPath(name));
-  };
+    setPendingSearchHeading(null);
+  }, []);
 
   const handleRemoveFile = useCallback(() => {
     if (activeFileId != null) {
-      removeFile(activeFileId);
+      removeFile(activeGroup, activeFileId);
     }
-  }, [activeFileId]);
+  }, [activeFileId, activeGroup]);
 
   const handleFilesReorder = useCallback((groupName: string, fileIds: string[]) => {
     // Optimistic update
@@ -306,19 +468,28 @@ export function App() {
   }, [scrollContainer, activeFileId, activeHeadingId]);
 
   const navigateToFile = useCallback(
-    (fileId: string) => {
+    (fileId: string, hash = "", searchHeading: string | null = null) => {
       const current = getCurrentNavEntry();
       if (current && current.fileId !== fileId) {
         nav.navigate(current);
       }
+      window.history.pushState(null, "", `${buildFileUrl(activeGroup, fileId)}${hash}`);
       setActiveFileId(fileId);
+      setPendingSearchHeading(searchHeading);
     },
-    [getCurrentNavEntry, nav],
+    [activeGroup, getCurrentNavEntry, nav],
   );
 
   const handleFileOpened = useCallback(
-    (fileId: string) => {
-      navigateToFile(fileId);
+    (fileId: string, hash = "") => {
+      navigateToFile(fileId, hash);
+    },
+    [navigateToFile],
+  );
+
+  const handleSearchResultSelect = useCallback(
+    (fileId: string, heading?: string) => {
+      navigateToFile(fileId, "", heading || null);
     },
     [navigateToFile],
   );
@@ -329,9 +500,11 @@ export function App() {
     const entry = nav.goBack(current);
     if (entry) {
       pendingRestoreRef.current = entry;
+      window.history.pushState(null, "", buildFileUrl(activeGroup, entry.fileId));
       setActiveFileId(entry.fileId);
+      setPendingSearchHeading(null);
     }
-  }, [getCurrentNavEntry, nav]);
+  }, [activeGroup, getCurrentNavEntry, nav]);
 
   const handleForward = useCallback(() => {
     const current = getCurrentNavEntry();
@@ -339,9 +512,11 @@ export function App() {
     const entry = nav.goForward(current);
     if (entry) {
       pendingRestoreRef.current = entry;
+      window.history.pushState(null, "", buildFileUrl(activeGroup, entry.fileId));
       setActiveFileId(entry.fileId);
+      setPendingSearchHeading(null);
     }
-  }, [getCurrentNavEntry, nav]);
+  }, [activeGroup, getCurrentNavEntry, nav]);
 
   const wrappedOnContentRendered = useCallback(() => {
     onContentRendered();
@@ -363,7 +538,16 @@ export function App() {
 
   const handleHeadingClick = useCallback((id: string) => {
     const el = document.getElementById(id);
-    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el?.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
+  }, []);
+
+  const handleZoom = useCallback((content: ZoomContent) => {
+    setZoomContent(content);
+  }, []);
+
+  const handleZoomClose = useCallback(() => {
+    setZoomContent(null);
   }, []);
 
   return (
@@ -408,6 +592,7 @@ export function App() {
         <TitleToggle showTitle={currentShowTitle} onToggle={handleTitleToggle} />
         <SearchToggle isOpen={searchQuery != null} onToggle={handleSearchToggle} />
         <div className="ml-auto flex items-center gap-2">
+          <FontSizeToggle fontSize={fontSize} onChange={setFontSize} />
           <WidthToggle isWide={isWide} onToggle={() => setIsWide((v) => !v)} />
           <ThemeToggle />
         </div>
@@ -424,28 +609,42 @@ export function App() {
             showTitle={currentShowTitle}
             searchQuery={searchQuery}
             onSearchQueryChange={setSearchQuery}
+            searchResults={searchResults}
+            searchLoading={searchLoading}
+            onSearchResultSelect={handleSearchResultSelect}
           />
         )}
         <main className="flex-1 flex flex-col overflow-hidden">
-          <div ref={setScrollContainer} className="flex-1 overflow-y-auto p-8 bg-gh-bg">
+          <div
+            ref={setScrollContainer}
+            className="flex-1 overflow-y-auto overscroll-contain p-8 bg-gh-bg"
+          >
             {activeFileId != null && activeFile != null ? (
               <FileViewer
+                activeGroup={activeGroup}
                 fileId={activeFileId}
                 fileName={activeFileName}
                 fileType={activeFile.type}
+                title={activeFile.title}
+                filePath={activeFile.path}
+                scrollContainer={scrollContainer}
                 revision={contentRevision}
                 onFileOpened={handleFileOpened}
                 onHeadingsChange={setHeadings}
                 onContentRendered={wrappedOnContentRendered}
                 isTocOpen={tocOpen}
-                onTocToggle={() => setTocOpen((v) => !v)}
+                onTocToggle={() => setTocOpen(!tocOpen)}
                 onRemoveFile={handleRemoveFile}
+                uploaded={activeFile?.uploaded}
                 isWide={isWide}
+                fontSize={fontSize}
+                onZoom={handleZoom}
+                scrollToHeading={pendingSearchHeading}
+                onScrolledToHeading={() => setPendingSearchHeading(null)}
+                searchQuery={searchQuery}
               />
             ) : (
-              <div className="flex items-center justify-center h-50 text-gh-text-secondary text-sm">
-                No file selected
-              </div>
+              <EmptyGroupMessage group={activeGroupData} />
             )}
           </div>
         </main>
@@ -459,6 +658,7 @@ export function App() {
       </div>
       <RestartButton />
       {isDragging && <DropOverlay />}
+      {zoomContent && <ZoomModal content={zoomContent} onClose={handleZoomClose} />}
     </div>
   );
 }

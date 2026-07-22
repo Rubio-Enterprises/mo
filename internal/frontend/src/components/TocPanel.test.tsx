@@ -31,12 +31,14 @@ describe("TocPanel", () => {
 
   it("highlights the active heading", () => {
     render(<TocPanel headings={headings} activeHeadingId="setup" onHeadingClick={() => {}} />);
-    const activeButton = screen.getByText("Setup").closest("button")!;
-    expect(activeButton.className).toContain("bg-gh-bg-active");
-    expect(activeButton.className).toContain("font-semibold");
+    const activeLink = screen.getByText("Setup").closest("a")!;
+    expect(activeLink.className).toContain("bg-gh-bg-active");
+    expect(activeLink.className).toContain("font-semibold");
+    expect(activeLink.getAttribute("aria-current")).toBe("location");
 
-    const inactiveButton = screen.getByText("Introduction").closest("button")!;
-    expect(inactiveButton.className).toContain("bg-transparent");
+    const inactiveLink = screen.getByText("Introduction").closest("a")!;
+    expect(inactiveLink.className).toContain("bg-transparent");
+    expect(inactiveLink.getAttribute("aria-current")).toBeNull();
   });
 
   it("calls onHeadingClick with the heading id", async () => {
@@ -48,15 +50,21 @@ describe("TocPanel", () => {
     expect(onHeadingClick).toHaveBeenCalledWith("config");
   });
 
+  it("renders each heading as a link with hash href", () => {
+    render(<TocPanel headings={headings} activeHeadingId={null} onHeadingClick={() => {}} />);
+    expect(screen.getByText("Introduction").closest("a")?.getAttribute("href")).toBe("#intro");
+    expect(screen.getByText("Setup").closest("a")?.getAttribute("href")).toBe("#setup");
+  });
+
   it("applies different indentation per heading level", () => {
     render(<TocPanel headings={headings} activeHeadingId={null} onHeadingClick={() => {}} />);
-    const h1Button = screen.getByText("Introduction").closest("button")!;
-    const h2Button = screen.getByText("Setup").closest("button")!;
-    const h3Button = screen.getByText("Configuration").closest("button")!;
+    const h1Link = screen.getByText("Introduction").closest("a")!;
+    const h2Link = screen.getByText("Setup").closest("a")!;
+    const h3Link = screen.getByText("Configuration").closest("a")!;
 
-    expect(h1Button.className).toContain("pl-3");
-    expect(h2Button.className).toContain("pl-6");
-    expect(h3Button.className).toContain("pl-9");
+    expect(h1Link.className).toContain("pl-3");
+    expect(h2Link.className).toContain("pl-6");
+    expect(h3Link.className).toContain("pl-9");
   });
 
   it("shows heading text as title attribute", () => {

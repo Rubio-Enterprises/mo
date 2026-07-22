@@ -4,11 +4,13 @@ import { GenericRenderer } from "./GenericRenderer";
 
 describe("GenericRenderer", () => {
   const defaultProps = {
+    activeGroup: "default",
     fileId: "abc123",
     fileName: "archive.zip",
     revision: 1,
     isRawView: false,
     onHeadingsChange: vi.fn(),
+    fontSize: "medium" as const,
     onContentRendered: vi.fn(),
     contentSource: "raw" as const,
     rawUrl: "/_/api/files/abc123/raw?v=1",

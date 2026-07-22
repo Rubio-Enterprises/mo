@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Sidebar } from "./Sidebar";
-import type { Group } from "../hooks/useApi";
+import type { Group, SearchResult } from "../hooks/useApi";
 
 const groups: Group[] = [
   {
@@ -23,6 +23,30 @@ const groups: Group[] = [
     files: [{ id: "ccc33333", name: "api.md", path: "/docs/api.md", type: "markdown" }],
   },
 ];
+
+const searchResults: SearchResult[] = [
+  {
+    fileId: "aaa11111",
+    fileName: "README.md",
+    title: "Getting Started",
+    path: "/README.md",
+    uploaded: false,
+    matches: [
+      {
+        line: 3,
+        text: "cache line",
+        before: ["# Intro"],
+        after: ["after line"],
+        heading: "Intro",
+        anchor: { kind: "heading", value: "Intro" },
+      },
+    ],
+  },
+];
+
+function hasTextContent(text: string) {
+  return (_content: string, element: Element | null) => element?.textContent === text;
+}
 
 beforeEach(() => {
   localStorage.clear();
@@ -80,11 +104,13 @@ describe("Sidebar", () => {
         onSearchQueryChange={() => {}}
       />,
     );
-    const activeButton = screen.getByText("README.md").closest("button")!;
-    expect(activeButton.className).toContain("bg-gh-bg-active");
+    const activeLink = screen.getByText("README.md").closest("a")!;
+    expect(activeLink.className).toContain("bg-gh-bg-active");
+    expect(activeLink.getAttribute("aria-current")).toBe("page");
 
-    const inactiveButton = screen.getByText("GUIDE.md").closest("button")!;
-    expect(inactiveButton.className).toContain("bg-transparent");
+    const inactiveLink = screen.getByText("GUIDE.md").closest("a")!;
+    expect(inactiveLink.className).toContain("bg-transparent");
+    expect(inactiveLink.getAttribute("aria-current")).toBeNull();
   });
 
   it("calls onFileSelect when a file is clicked", async () => {
@@ -106,6 +132,49 @@ describe("Sidebar", () => {
 
     await user.click(screen.getByText("GUIDE.md"));
     expect(onFileSelect).toHaveBeenCalledWith("bbb22222");
+  });
+
+  it("renders file items as anchors with href to file URL", () => {
+    render(
+      <Sidebar
+        groups={groups}
+        activeGroup="default"
+        activeFileId={null}
+        onFileSelect={() => {}}
+        onFilesReorder={() => {}}
+        viewMode="flat"
+        showTitle={false}
+        searchQuery={null}
+        onSearchQueryChange={() => {}}
+      />,
+    );
+    expect(screen.getByText("README.md").closest("a")?.getAttribute("href")).toBe(
+      "/?file=aaa11111",
+    );
+    expect(screen.getByText("GUIDE.md").closest("a")?.getAttribute("href")).toBe("/?file=bbb22222");
+  });
+
+  it("does not call onFileSelect when modifier keys are pressed", async () => {
+    const user = userEvent.setup();
+    const onFileSelect = vi.fn();
+    render(
+      <Sidebar
+        groups={groups}
+        activeGroup="default"
+        activeFileId={null}
+        onFileSelect={onFileSelect}
+        onFilesReorder={() => {}}
+        viewMode="flat"
+        showTitle={false}
+        searchQuery={null}
+        onSearchQueryChange={() => {}}
+      />,
+    );
+
+    await user.keyboard("[ControlLeft>]");
+    await user.click(screen.getByText("GUIDE.md"));
+    await user.keyboard("[/ControlLeft]");
+    expect(onFileSelect).not.toHaveBeenCalled();
   });
 
   it("shows file path as title attribute", () => {
@@ -271,5 +340,48 @@ describe("Sidebar", () => {
     );
     expect(screen.getByText("README.md")).toBeInTheDocument();
     expect(screen.queryByText("GUIDE.md")).not.toBeInTheDocument();
+  });
+
+  it("renders content search results", () => {
+    render(
+      <Sidebar
+        groups={groups}
+        activeGroup="default"
+        activeFileId={null}
+        onFileSelect={() => {}}
+        onFilesReorder={() => {}}
+        viewMode="flat"
+        showTitle={false}
+        searchQuery="cache"
+        onSearchQueryChange={() => {}}
+        searchResults={searchResults}
+      />,
+    );
+    expect(screen.getByText("Content matches")).toBeInTheDocument();
+    expect(screen.getByText("Line 3")).toBeInTheDocument();
+    expect(screen.getByText(hasTextContent("cache line"))).toBeInTheDocument();
+  });
+
+  it("toggles content matches section", async () => {
+    const user = userEvent.setup();
+    render(
+      <Sidebar
+        groups={groups}
+        activeGroup="default"
+        activeFileId={null}
+        onFileSelect={() => {}}
+        onFilesReorder={() => {}}
+        viewMode="flat"
+        showTitle={false}
+        searchQuery="cache"
+        onSearchQueryChange={() => {}}
+        searchResults={searchResults}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /content matches/i }));
+    expect(screen.queryByText(hasTextContent("cache line"))).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /content matches/i }));
+    expect(screen.getByText(hasTextContent("cache line"))).toBeInTheDocument();
   });
 });

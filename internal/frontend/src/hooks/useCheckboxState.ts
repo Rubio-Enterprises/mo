@@ -21,7 +21,7 @@ interface CheckboxStateResult {
   checkboxRevision: number;
 }
 
-export function useCheckboxState(fileId: string): CheckboxStateResult {
+export function useCheckboxState(group: string, fileId: string): CheckboxStateResult {
   const [sources, setSources] = useState<Record<string, boolean>>({});
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   const [orderedKeys, setOrderedKeys] = useState<string[]>([]);
@@ -39,7 +39,7 @@ export function useCheckboxState(fileId: string): CheckboxStateResult {
   useEffect(() => {
     let cancelled = false;
     setCheckboxesLoaded(false);
-    fetchCheckboxes(fileId)
+    fetchCheckboxes(group, fileId)
       .then((data) => {
         if (!cancelled) {
           setSources(data.sources);
@@ -60,7 +60,7 @@ export function useCheckboxState(fileId: string): CheckboxStateResult {
     return () => {
       cancelled = true;
     };
-  }, [fileId]);
+  }, [group, fileId]);
 
   // Listen for SSE-dispatched checkbox change events via custom event.
   // App.tsx dispatches "mo-checkbox-changed" when the SSE event fires.
@@ -78,7 +78,7 @@ export function useCheckboxState(fileId: string): CheckboxStateResult {
     };
     window.addEventListener("mo-checkbox-changed", handler);
     return () => window.removeEventListener("mo-checkbox-changed", handler);
-  }, [fileId]);
+  }, [group, fileId]);
 
   const getChecked = useCallback(
     (key: string): boolean => {
@@ -97,24 +97,24 @@ export function useCheckboxState(fileId: string): CheckboxStateResult {
           ? overridesRef.current[key]
           : (sourcesRef.current[key] ?? false);
       const newChecked = !currentChecked;
-      toggleCheckbox(fileId, key, newChecked).catch(() => {
+      toggleCheckbox(group, fileId, key, newChecked).catch(() => {
         // Error handled silently — SSE will provide authoritative state.
       });
     },
-    [fileId],
+    [group, fileId],
   );
 
   const uncheckAll = useCallback(() => {
-    uncheckAllCheckboxes(fileId).catch(() => {
+    uncheckAllCheckboxes(group, fileId).catch(() => {
       // Error handled silently — SSE will provide authoritative state.
     });
-  }, [fileId]);
+  }, [group, fileId]);
 
   const checkAll = useCallback(() => {
-    checkAllCheckboxes(fileId).catch(() => {
+    checkAllCheckboxes(group, fileId).catch(() => {
       // Error handled silently — SSE will provide authoritative state.
     });
-  }, [fileId]);
+  }, [group, fileId]);
 
   const totalCheckboxes = Object.keys(sources).length;
   const hasCheckboxes = totalCheckboxes > 0;

@@ -1,6 +1,12 @@
 import { test as base } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  mkdirSync,
+  readFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,7 +40,10 @@ async function findFreePort(): Promise<number> {
 // Probe the SPA shell ("/") for readiness. Auth gates every /_/ route — including
 // /_/api/status — but the shell is served unauthenticated (and hands the browser
 // the mo_token cookie), so it's the right token-free readiness signal.
-async function waitForServer(baseURL: string, timeoutMs = 10_000): Promise<void> {
+async function waitForServer(
+  baseURL: string,
+  timeoutMs = 10_000,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -45,7 +54,9 @@ async function waitForServer(baseURL: string, timeoutMs = 10_000): Promise<void>
     }
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error(`mo server at ${baseURL} did not become ready within ${timeoutMs}ms`);
+  throw new Error(
+    `mo server at ${baseURL} did not become ready within ${timeoutMs}ms`,
+  );
 }
 
 // The server mints its auth token and writes it to
@@ -54,7 +65,10 @@ async function waitForServer(baseURL: string, timeoutMs = 10_000): Promise<void>
 // disabled (MO_DISABLE_AUTH=1) — then no token file is written and none is needed.
 function readToken(stateDir: string, port: number): string {
   try {
-    return readFileSync(join(stateDir, "mo", "token", `mo-${port}.token`), "utf-8").trim();
+    return readFileSync(
+      join(stateDir, "mo", "token", `mo-${port}.token`),
+      "utf-8",
+    ).trim();
   } catch {
     return "";
   }
@@ -66,7 +80,10 @@ export interface MoServerHandle {
   stateDir: string;
   /** Per-server auth token; "" when MO_DISABLE_AUTH=1. Required on /_/ requests. */
   token: string;
-  addFile(absPath: string, group?: string): Promise<{ id: string; name: string; path: string }>;
+  addFile(
+    absPath: string,
+    group?: string,
+  ): Promise<{ id: string; name: string; path: string }>;
 }
 
 interface Fixtures {
@@ -88,7 +105,9 @@ interface Fixtures {
 export const test = base.extend<Fixtures>({
   moServer: async ({}, use, testInfo) => {
     const port = await findFreePort();
-    const stateDir = mkdtempSync(join(tmpdir(), `mo-e2e-${testInfo.workerIndex}-`));
+    const stateDir = mkdtempSync(
+      join(tmpdir(), `mo-e2e-${testInfo.workerIndex}-`),
+    );
     const baseURL = `http://127.0.0.1:${port}`;
 
     // Provide one initial file so the server doesn't exit immediately.
@@ -112,7 +131,7 @@ export const test = base.extend<Fixtures>({
         "--foreground",
         initialMd,
       ],
-      { env, stdio: "pipe" },
+      { env, stdio: ["ignore", "pipe", "pipe"] },
     );
 
     // Collect output for diagnostics on failure.
@@ -135,13 +154,17 @@ export const test = base.extend<Fixtures>({
       await waitForServer(baseURL);
     } catch (err) {
       proc.kill("SIGKILL");
-      throw new Error(`${(err as Error).message}\n--- server output ---\n${serverLog}`);
+      throw new Error(
+        `${(err as Error).message}\n--- server output ---\n${serverLog}`,
+      );
     }
 
     // The token is persisted before the server starts listening, so it is
     // readable now. Attach it to every /_/ request the fixture makes.
     const token = readToken(stateDir, port);
-    const authHeaders: Record<string, string> = token ? { [AUTH_HEADER]: token } : {};
+    const authHeaders: Record<string, string> = token
+      ? { [AUTH_HEADER]: token }
+      : {};
 
     const handle: MoServerHandle = {
       baseURL,
@@ -149,11 +172,15 @@ export const test = base.extend<Fixtures>({
       stateDir,
       token,
       async addFile(absPath: string, group = "default") {
-        const res = await fetch(`${baseURL}/_/api/files`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          body: JSON.stringify({ path: absPath, group }),
-        });
+        const encodedGroup = encodeURIComponent(group);
+        const res = await fetch(
+          `${baseURL}/_/api/groups/${encodedGroup}/files`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            body: JSON.stringify({ path: absPath }),
+          },
+        );
         if (!res.ok) {
           throw new Error(`addFile failed: ${res.status} ${await res.text()}`);
         }
@@ -165,7 +192,10 @@ export const test = base.extend<Fixtures>({
 
     // Teardown: shut down the server, then clean up state dir.
     try {
-      await fetch(`${baseURL}/_/api/shutdown`, { method: "POST", headers: authHeaders });
+      await fetch(`${baseURL}/_/api/shutdown`, {
+        method: "POST",
+        headers: authHeaders,
+      });
     } catch {
       // ignore
     }
@@ -184,7 +214,10 @@ export const test = base.extend<Fixtures>({
 
     // Attach log on failure so flakes are diagnosable.
     if (testInfo.status !== testInfo.expectedStatus) {
-      await testInfo.attach("mo-server-log", { body: serverLog, contentType: "text/plain" });
+      await testInfo.attach("mo-server-log", {
+        body: serverLog,
+        contentType: "text/plain",
+      });
     }
   },
 

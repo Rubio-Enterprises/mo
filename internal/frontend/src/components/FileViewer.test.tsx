@@ -60,6 +60,7 @@ vi.mock("../renderers/registry", () => {
 });
 
 const defaultProps = {
+  activeGroup: "default",
   fileId: "abc123",
   fileName: "test.md",
   fileType: "markdown" as const,
@@ -71,6 +72,7 @@ const defaultProps = {
   onTocToggle: vi.fn(),
   onRemoveFile: vi.fn(),
   isWide: false,
+  fontSize: "medium" as const,
 };
 
 describe("FileViewer", () => {
@@ -90,7 +92,7 @@ describe("FileViewer", () => {
     await waitFor(() => {
       const el = screen.getByTestId("raw-renderer");
       expect(el).toBeInTheDocument();
-      expect(el.textContent).toContain("/_/api/files/abc123/raw?v=1");
+      expect(el.textContent).toContain("/_/api/groups/default/files/abc123/raw?v=1");
     });
   });
 

@@ -1,5 +1,188 @@
 # Changelog
 
+## [v1.6.5](https://github.com/k1LoW/mo/compare/v1.6.4...v1.6.5) - 2026-07-15
+
+### Fix bug 🐛
+- Fix data race in State.Groups() by deep-copying FileEntry values by @kiakiraki in https://github.com/k1LoW/mo/pull/251
+
+## [v1.6.4](https://github.com/k1LoW/mo/compare/v1.6.3...v1.6.4) - 2026-07-13
+
+### Dependency Updates ⬆️
+- chore(deps): bump the dependencies group across 1 directory with 13 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/248
+- chore(deps): bump golang.org/x/text from 0.38.0 to 0.40.0 in the dependencies group by @dependabot[bot] in https://github.com/k1LoW/mo/pull/247
+- chore(deps): bump goreleaser/goreleaser-action from 7.2.2 to 7.2.3 in the dependencies group by @dependabot[bot] in https://github.com/k1LoW/mo/pull/245
+### Other Changes
+- fix(frontend): render base64 data:image URIs in Markdown images by @k1LoW in https://github.com/k1LoW/mo/pull/249
+
+## [v1.6.3](https://github.com/k1LoW/mo/compare/v1.6.2...v1.6.3) - 2026-06-26
+
+### Fix bug 🐛
+- fix(frontend): make the Mermaid copy-image button work in Chrome/Safari and on HTML-label diagrams by @k1LoW in https://github.com/k1LoW/mo/pull/243
+### Dependency Updates ⬆️
+- chore(deps): bump actions/setup-go from 6.4.0 to 6.5.0 in the dependencies group by @dependabot[bot] in https://github.com/k1LoW/mo/pull/242
+
+## [v1.6.2](https://github.com/k1LoW/mo/compare/v1.6.1...v1.6.2) - 2026-06-23
+
+### Fix bug 🐛
+- fix(frontend): increase z-index of `GroupDropdown` not to be concealed by active file label by @kyu08 in https://github.com/k1LoW/mo/pull/239
+### Other Changes
+- feat: hint how to unwatch when an empty group is kept alive by patterns by @k1LoW in https://github.com/k1LoW/mo/pull/241
+
+## [v1.6.1](https://github.com/k1LoW/mo/compare/v1.6.0...v1.6.1) - 2026-06-22
+
+### Dependency Updates ⬆️
+- chore(deps): bump the dependencies group with 2 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/234
+- chore(deps-dev): bump the dependencies group in /internal/frontend with 7 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/235
+### Other Changes
+- fix(deps): bump vulnerable frontend dependencies by @k1LoW in https://github.com/k1LoW/mo/pull/237
+
+## [v1.6.0](https://github.com/k1LoW/mo/compare/v1.5.6...v1.6.0) - 2026-06-18
+
+### New Features 🎉
+- feat(frontend): reveal active file label as a sticky bar on scroll by @k1LoW in https://github.com/k1LoW/mo/pull/232
+- feat(frontend): show active file name in header by @kyu08 in https://github.com/k1LoW/mo/pull/224
+- feat(frontend): open relative links in a new tab on modifier-click by @k1LoW in https://github.com/k1LoW/mo/pull/233
+### Dependency Updates ⬆️
+- chore(deps): bump the dependencies group with 2 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/225
+- chore(deps): bump the dependencies group in /internal/frontend with 10 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/226
+- chore(deps-dev): bump the dependencies group in /internal/frontend with 3 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/229
+- chore(deps): bump golang.org/x/text from 0.37.0 to 0.38.0 in the dependencies group by @dependabot[bot] in https://github.com/k1LoW/mo/pull/228
+### Other Changes
+- migrate gofsnotify/fsnotify to fswatcher/fswatcher by @shogo82148 in https://github.com/k1LoW/mo/pull/231
+
+## [v1.5.6](https://github.com/k1LoW/mo/compare/v1.5.5...v1.5.6) - 2026-06-04
+### Dependency Updates ⬆️
+- chore(deps): bump the dependencies group in /internal/frontend with 10 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/214
+- chore(deps): bump the dependencies group with 2 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/212
+- chore(deps): bump the dependencies group with 2 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/213
+- chore(deps): bump goreleaser/goreleaser-action from 7.2.1 to 7.2.2 in the dependencies group by @dependabot[bot] in https://github.com/k1LoW/mo/pull/219
+- chore(deps): bump the dependencies group in /internal/frontend with 9 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/220
+- chore(deps): bump the dependencies group in /internal/frontend with 3 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/221
+### Other Changes
+- Fix raw asset path boundary by @mattn in https://github.com/k1LoW/mo/pull/222
+- docs(security): clarify threat model for local HTTP server by @k1LoW in https://github.com/k1LoW/mo/pull/223
+
+## [v1.5.5](https://github.com/k1LoW/mo/compare/v1.5.4...v1.5.5) - 2026-05-11
+### Dependency Updates ⬆️
+- chore(deps): bump mermaid from 11.14.0 to 11.15.0 in /internal/frontend by @dependabot[bot] in https://github.com/k1LoW/mo/pull/210
+
+## [v1.5.4](https://github.com/k1LoW/mo/compare/v1.5.3...v1.5.4) - 2026-05-08
+### Fix bug 🐛
+- fix: keep watched files on coalesced rename flags from FSEvents by @k1LoW in https://github.com/k1LoW/mo/pull/209
+### Dependency Updates ⬆️
+- chore(deps): bump pnpm/action-setup from 6.0.4 to 6.0.5 in the dependencies group by @dependabot[bot] in https://github.com/k1LoW/mo/pull/206
+- chore(deps): bump the dependencies group in /internal/frontend with 5 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/207
+
+## [v1.5.3](https://github.com/k1LoW/mo/compare/v1.5.2...v1.5.3) - 2026-05-07
+### Other Changes
+- chore: migrate from fsnotify/fsnotify to gofsnotify/fsnotify by @k1LoW in https://github.com/k1LoW/mo/pull/204
+
+## [v1.5.2](https://github.com/k1LoW/mo/compare/v1.5.1...v1.5.2) - 2026-05-05
+### Other Changes
+- fix: apply color-scheme dark to root dark theme selector by @Coiggahou2002 in https://github.com/k1LoW/mo/pull/201
+- refactor(frontend): hoist color-scheme to root theme selectors by @k1LoW in https://github.com/k1LoW/mo/pull/203
+
+## [v1.5.1](https://github.com/k1LoW/mo/compare/v1.5.0...v1.5.1) - 2026-04-30
+### New Features 🎉
+- fix: drop missing files from state when content fetch hits ENOENT by @k1LoW in https://github.com/k1LoW/mo/pull/196
+### Dependency Updates ⬆️
+- chore(deps): bump the dependencies group with 3 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/199
+- chore(deps): bump github.com/fsnotify/fsnotify from 1.9.0 to 1.10.0 in the dependencies group by @dependabot[bot] in https://github.com/k1LoW/mo/pull/198
+- chore(deps-dev): bump the dependencies group in /internal/frontend with 3 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/200
+
+## [v1.5.0](https://github.com/k1LoW/mo/compare/v1.4.1...v1.5.0) - 2026-04-30
+### New Features 🎉
+- fix(frontend): sync URL with active file across all selection paths by @kechol in https://github.com/k1LoW/mo/pull/193
+- fix(frontend): use <a> for file/heading navigation by @kechol in https://github.com/k1LoW/mo/pull/194
+
+## [v1.4.1](https://github.com/k1LoW/mo/compare/v1.4.0...v1.4.1) - 2026-04-27
+### Dependency Updates ⬆️
+- chore(deps-dev): bump the dependencies group in /internal/frontend with 8 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/189
+- chore(deps): bump the dependencies group with 4 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/188
+### Other Changes
+- feat: add @media print styles for better print preview by @k1LoW in https://github.com/k1LoW/mo/pull/192
+
+## [v1.4.0](https://github.com/k1LoW/mo/compare/v1.3.0...v1.4.0) - 2026-04-22
+### Breaking Changes 🛠
+- feat: add --recursive (-R) flag and reshape --watch as a boolean toggle by @kechol in https://github.com/k1LoW/mo/pull/184
+- feat: reshape --unwatch as a boolean flag with positional pattern arguments by @k1LoW in https://github.com/k1LoW/mo/pull/186
+### New Features 🎉
+- fix: sort file lists in natural order (x/text/collate variant) by @kechol in https://github.com/k1LoW/mo/pull/183
+### Dependency Updates ⬆️
+- chore(deps): bump the dependencies group with 2 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/180
+- chore(deps-dev): bump the dependencies group in /internal/frontend with 2 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/181
+### Other Changes
+- feat: make `<code>` element brighter in dark mode by @kyu08 in https://github.com/k1LoW/mo/pull/182
+
+## [v1.3.0](https://github.com/k1LoW/mo/compare/v1.2.0...v1.3.0) - 2026-04-15
+### New Features 🎉
+- feat: fix the position of file menu by @kyu08 in https://github.com/k1LoW/mo/pull/176
+
+## [v1.2.0](https://github.com/k1LoW/mo/compare/v1.1.1...v1.2.0) - 2026-04-13
+### New Features 🎉
+- feat: support reading Markdown from stdin pipe by @k1LoW in https://github.com/k1LoW/mo/pull/174
+- [codex] Add content font size toggle by @agata in https://github.com/k1LoW/mo/pull/171
+
+## [v1.1.1](https://github.com/k1LoW/mo/compare/v1.1.0...v1.1.1) - 2026-04-13
+### Fix bug 🐛
+- fix: decode percent-encoded non-ASCII paths in relative link handler by @k1LoW in https://github.com/k1LoW/mo/pull/173
+### Dependency Updates ⬆️
+- chore(deps): bump Songmu/tagpr from 1.17.1 to 1.18.1 in the dependencies group by @dependabot[bot] in https://github.com/k1LoW/mo/pull/168
+- chore(deps): bump the dependencies group in /internal/frontend with 11 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/169
+
+## [v1.1.0](https://github.com/k1LoW/mo/compare/v1.0.0...v1.1.0) - 2026-04-09
+### Breaking Changes 🛠
+- refactor: nest file API endpoints under groups path by @k1LoW in https://github.com/k1LoW/mo/pull/167
+### Dependency Updates ⬆️
+- chore(deps-dev): bump vite from 8.0.3 to 8.0.5 in /internal/frontend by @dependabot[bot] in https://github.com/k1LoW/mo/pull/163
+### Other Changes
+- fix: scope uploaded file dedup check to target group only by @k1LoW in https://github.com/k1LoW/mo/pull/166
+
+## [v1.0.0](https://github.com/k1LoW/mo/compare/v0.23.4...v1.0.0) - 2026-04-05
+
+## [v0.23.4](https://github.com/k1LoW/mo/compare/v0.23.3...v0.23.4) - 2026-04-04
+### New Features 🎉
+- feat: use distinct icons for Close file and Discard actions by @k1LoW in https://github.com/k1LoW/mo/pull/161
+
+## [v0.23.3](https://github.com/k1LoW/mo/compare/v0.23.2...v0.23.3) - 2026-04-03
+### Dependency Updates ⬆️
+- chore(deps): bump actions/setup-go from 6.3.0 to 6.4.0 in the dependencies group by @dependabot[bot] in https://github.com/k1LoW/mo/pull/157
+- chore(deps): bump the dependencies group in /internal/frontend with 5 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/158
+
+## [v0.23.2](https://github.com/k1LoW/mo/compare/v0.23.1...v0.23.2) - 2026-03-31
+### Fix bug 🐛
+- feat: add smooth scroll for footnote references by @k1LoW in https://github.com/k1LoW/mo/pull/156
+
+## [v0.23.1](https://github.com/k1LoW/mo/compare/v0.23.0...v0.23.1) - 2026-03-28
+### Other Changes
+- fix: open sidebar when search is activated by @k1LoW in https://github.com/k1LoW/mo/pull/152
+
+## [v0.23.0](https://github.com/k1LoW/mo/compare/v0.22.1...v0.23.0) - 2026-03-28
+### New Features 🎉
+- feat: add full-text search results by @k1LoW in https://github.com/k1LoW/mo/pull/149
+- chore: change page title format by @syumai in https://github.com/k1LoW/mo/pull/151
+
+## [v0.22.1](https://github.com/k1LoW/mo/compare/v0.22.0...v0.22.1) - 2026-03-27
+### Fix bug 🐛
+- fix: Enable overscroll containment for Sidebar and TocPanel components by @orangekame3 in https://github.com/k1LoW/mo/pull/147
+### Dependency Updates ⬆️
+- chore(deps): bump the dependencies group in /internal/frontend with 8 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/145
+
+## [v0.22.0](https://github.com/k1LoW/mo/compare/v0.21.0...v0.22.0) - 2026-03-26
+### New Features 🎉
+- feat: add "Copy link" to file context menu by @k1LoW in https://github.com/k1LoW/mo/pull/140
+- feat: persist TOC open/closed state per file in localStorage by @k1LoW in https://github.com/k1LoW/mo/pull/143
+
+## [v0.21.0](https://github.com/k1LoW/mo/compare/v0.20.2...v0.21.0) - 2026-03-24
+### Breaking Changes 🛠
+- feat: support directory arguments to open .md files inside by @k1LoW in https://github.com/k1LoW/mo/pull/137
+### New Features 🎉
+- feat: add fullscreen zoom modal for images and Mermaid diagrams by @harakeishi in https://github.com/k1LoW/mo/pull/135
+
+## [v0.20.2](https://github.com/k1LoW/mo/compare/v0.20.1...v0.20.2) - 2026-03-22
+### Other Changes
+- fix: prevent scroll chaining on content area by @orangekame3 in https://github.com/k1LoW/mo/pull/133
+
 ## [v0.20.1](https://github.com/k1LoW/mo/compare/v0.20.0...v0.20.1) - 2026-03-20
 ### Fix bug 🐛
 - fix: clear running server state when using --clear by @k1LoW in https://github.com/k1LoW/mo/pull/131

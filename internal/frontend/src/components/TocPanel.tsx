@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isPlainLeftClick } from "../utils/linkClick";
 
 export interface TocHeading {
   id: string;
@@ -72,7 +73,7 @@ export function TocPanel({ headings, activeHeadingId, onHeadingClick }: TocPanel
 
   return (
     <aside
-      className="relative shrink-0 bg-gh-bg-sidebar border-l border-gh-border flex flex-col overflow-y-auto"
+      className="relative shrink-0 bg-gh-bg-sidebar border-l border-gh-border flex flex-col overflow-y-auto overscroll-contain"
       style={{ width }}
     >
       {/* Resize handle */}
@@ -85,18 +86,24 @@ export function TocPanel({ headings, activeHeadingId, onHeadingClick }: TocPanel
           <div className="px-3 py-2 text-gh-text-secondary text-sm">No headings</div>
         ) : (
           headings.map((h) => (
-            <button
+            <a
               key={h.id}
-              className={`flex items-center w-full ${INDENT[h.level] ?? "pl-3"} pr-3 py-1.5 border-none cursor-pointer text-left text-sm transition-colors duration-150 ${
+              href={`#${h.id}`}
+              className={`flex items-center w-full ${INDENT[h.level] ?? "pl-3"} pr-3 py-1.5 border-none cursor-pointer text-left text-sm no-underline transition-colors duration-150 ${
                 h.id === activeHeadingId
                   ? "bg-gh-bg-active text-gh-text font-semibold"
                   : "bg-transparent text-gh-text-secondary hover:bg-gh-bg-hover"
               }`}
-              onClick={() => onHeadingClick(h.id)}
+              onClick={(e) => {
+                if (!isPlainLeftClick(e)) return;
+                e.preventDefault();
+                onHeadingClick(h.id);
+              }}
               title={h.text}
+              aria-current={h.id === activeHeadingId ? "location" : undefined}
             >
               <span className="overflow-hidden text-ellipsis whitespace-nowrap">{h.text}</span>
-            </button>
+            </a>
           ))
         )}
       </nav>

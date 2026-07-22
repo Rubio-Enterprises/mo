@@ -26,6 +26,7 @@ function harness(opts: {
   onMenuToggle?: ReturnType<typeof vi.fn>;
   onOpenInNewTab?: ReturnType<typeof vi.fn>;
   onCopyPath?: ReturnType<typeof vi.fn>;
+  onCopyLink?: ReturnType<typeof vi.fn>;
   onMoveToGroup?: ReturnType<typeof vi.fn>;
   onRemove?: ReturnType<typeof vi.fn>;
 }) {
@@ -46,6 +47,7 @@ function harness(opts: {
         onMenuToggle={onMenuToggle as unknown as (id: string) => void}
         onOpenInNewTab={(opts.onOpenInNewTab ?? vi.fn()) as unknown as (id: string) => void}
         onCopyPath={(opts.onCopyPath ?? vi.fn()) as unknown as (path: string) => void}
+        onCopyLink={(opts.onCopyLink ?? vi.fn()) as unknown as (id: string) => void}
         onMoveToGroup={
           (opts.onMoveToGroup ?? vi.fn()) as unknown as (id: string, group: string) => void
         }
@@ -149,8 +151,8 @@ describe("TreeView", () => {
     ];
     harness({ files, activeFileId: "active" });
 
-    const activeBtn = screen.getByText("active.md").closest("button");
-    expect(activeBtn).toHaveAttribute("aria-current", "page");
+    const activeLink = screen.getByText("active.md").closest("a");
+    expect(activeLink).toHaveAttribute("aria-current", "page");
   });
 
   it("shows file title when showTitle is true and title is set", () => {
@@ -201,6 +203,7 @@ function TreeViewWrapped({ files, activeGroup }: { files: FileEntry[]; activeGro
       onMenuToggle={() => {}}
       onOpenInNewTab={() => {}}
       onCopyPath={() => {}}
+      onCopyLink={() => {}}
       onMoveToGroup={() => {}}
       onRemove={() => {}}
       menuRef={menuRef}

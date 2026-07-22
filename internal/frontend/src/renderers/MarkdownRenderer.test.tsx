@@ -32,11 +32,13 @@ vi.mock("../hooks/useApi", async () => {
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
 const baseProps = {
+  activeGroup: "default",
   fileId: "abc12345",
   fileName: "README.md",
   revision: 1,
   isRawView: false,
   onHeadingsChange: vi.fn(),
+  fontSize: "medium" as const,
   contentSource: "text" as const,
 };
 

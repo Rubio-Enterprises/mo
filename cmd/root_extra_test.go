@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/k1LoW/mo/internal/server"
+	"github.com/k1LoW/mo/internal/token"
 )
 
 // stdoutMu and stderrMu serialize swaps of os.Stdout / os.Stderr by the capture
@@ -118,54 +119,6 @@ func TestHasGlobChars(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestResolveFiles(t *testing.T) {
-	dir := t.TempDir()
-	a := filepath.Join(dir, "a.md")
-	if err := os.WriteFile(a, []byte("# A"), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	t.Run("returns nil for empty input", func(t *testing.T) {
-		got, err := resolveFiles(nil)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if len(got) != 0 {
-			t.Fatalf("got %v, want empty", got)
-		}
-	})
-
-	t.Run("resolves existing file to absolute path", func(t *testing.T) {
-		got, err := resolveFiles([]string{a})
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if len(got) != 1 || !filepath.IsAbs(got[0]) {
-			t.Fatalf("got %v, want one absolute path", got)
-		}
-	})
-
-	t.Run("missing file returns error", func(t *testing.T) {
-		_, err := resolveFiles([]string{filepath.Join(dir, "missing.md")})
-		if err == nil {
-			t.Fatal("expected error for missing file")
-		}
-		if !strings.Contains(err.Error(), "file not found") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("directory returns error", func(t *testing.T) {
-		_, err := resolveFiles([]string{dir})
-		if err == nil {
-			t.Fatal("expected error for directory")
-		}
-		if !strings.Contains(err.Error(), "is a directory") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
 }
 
 func TestLoadRestoreData(t *testing.T) {
@@ -366,14 +319,17 @@ func captureStderrErr(t *testing.T, fn func() error) error {
 func TestPostFiles(t *testing.T) {
 	t.Run("success returns deeplink entry", func(t *testing.T) {
 		mux := http.NewServeMux()
-		mux.HandleFunc("/_/api/files", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("POST /_/api/groups/default/files", func(w http.ResponseWriter, r *http.Request) {
 			defer r.Body.Close()
 			var body map[string]string
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				return
 			}
-			if body["path"] != "/a.md" || body["group"] != "default" {
+			if body["path"] != "/a.md" {
 				t.Errorf("unexpected body: %v", body)
+			}
+			if _, ok := body["group"]; ok {
+				t.Errorf("group should be encoded in the route, not the body: %v", body)
 			}
 			if err := json.NewEncoder(w).Encode(server.FileEntry{ID: "id1", Path: "/a.md"}); err != nil {
 				return
@@ -382,7 +338,10 @@ func TestPostFiles(t *testing.T) {
 		srv := newFullFakeServer(t, mux)
 		addr := strings.TrimPrefix(srv.URL, "http://")
 
-		entries := postFiles(srv.Client(), addr, "default", []string{"/a.md"})
+		entries, err := postFiles(srv.Client(), addr, "default", []string{"/a.md"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		if len(entries) != 1 {
 			t.Fatalf("got %d entries, want 1", len(entries))
 		}
@@ -394,24 +353,40 @@ func TestPostFiles(t *testing.T) {
 		}
 	})
 
-	t.Run("non-200 response skips entry", func(t *testing.T) {
+	t.Run("non-200 response returns error", func(t *testing.T) {
 		mux := http.NewServeMux()
-		mux.HandleFunc("/_/api/files", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("POST /_/api/groups/default/files", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 		})
 		srv := newFullFakeServer(t, mux)
 		addr := strings.TrimPrefix(srv.URL, "http://")
 
-		entries := postFiles(srv.Client(), addr, "default", []string{"/a.md"})
-		if len(entries) != 0 {
-			t.Fatalf("got %d entries, want 0", len(entries))
+		entries, err := postFiles(srv.Client(), addr, "default", []string{"/a.md"})
+		if err == nil || !strings.Contains(err.Error(), "400 Bad Request") {
+			t.Fatalf("expected status error, got entries=%v err=%v", entries, err)
 		}
 	})
 
-	t.Run("transport error skips entry", func(t *testing.T) {
-		entries := postFiles(&http.Client{}, "127.0.0.1:1", "default", []string{"/a.md"})
-		if len(entries) != 0 {
-			t.Fatalf("got %d entries, want 0", len(entries))
+	for _, statusCode := range []int{http.StatusNotFound, http.StatusMethodNotAllowed} {
+		t.Run(fmt.Sprintf("status %d reports incompatible server", statusCode), func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("POST /_/api/groups/default/files", func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(statusCode)
+			})
+			srv := newFullFakeServer(t, mux)
+			addr := strings.TrimPrefix(srv.URL, "http://")
+
+			_, err := postFiles(srv.Client(), addr, "default", []string{"/a.md"})
+			if err == nil || !strings.Contains(err.Error(), "incompatible") || !strings.Contains(err.Error(), "mo --restart") {
+				t.Fatalf("expected restart incompatibility error, got %v", err)
+			}
+		})
+	}
+
+	t.Run("transport error returns error", func(t *testing.T) {
+		entries, err := postFiles(&http.Client{}, "127.0.0.1:1", "default", []string{"/a.md"})
+		if err == nil {
+			t.Fatalf("expected transport error, got entries=%v", entries)
 		}
 	})
 }
@@ -419,8 +394,16 @@ func TestPostFiles(t *testing.T) {
 func TestPostPatterns(t *testing.T) {
 	t.Run("success returns one entry per file in pattern", func(t *testing.T) {
 		mux := http.NewServeMux()
-		mux.HandleFunc("/_/api/patterns", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("POST /_/api/patterns", func(w http.ResponseWriter, r *http.Request) {
 			defer r.Body.Close()
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode request: %v", err)
+				return
+			}
+			if body["pattern"] != "/*.md" || body["group"] != "default" {
+				t.Errorf("unexpected body: %v", body)
+			}
 			if err := json.NewEncoder(w).Encode(server.AddPatternResponse{
 				Files: []*server.FileEntry{
 					{ID: "id1", Path: "/a.md"},
@@ -433,20 +416,23 @@ func TestPostPatterns(t *testing.T) {
 		srv := newFullFakeServer(t, mux)
 		addr := strings.TrimPrefix(srv.URL, "http://")
 
-		entries := postPatterns(srv.Client(), addr, "default", []string{"/*.md"})
+		entries, err := postPatterns(srv.Client(), addr, "default", []string{"/*.md"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
 		if len(entries) != 2 {
 			t.Fatalf("got %d entries, want 2", len(entries))
 		}
 	})
 
-	t.Run("transport error returns nil entries", func(t *testing.T) {
-		entries := postPatterns(&http.Client{}, "127.0.0.1:1", "default", []string{"/*.md"})
-		if len(entries) != 0 {
-			t.Fatalf("got %d entries, want 0", len(entries))
+	t.Run("transport error returns error", func(t *testing.T) {
+		entries, err := postPatterns(&http.Client{}, "127.0.0.1:1", "default", []string{"/*.md"})
+		if err == nil {
+			t.Fatalf("expected transport error, got entries=%v", entries)
 		}
 	})
 
-	t.Run("non-200 response skips entry", func(t *testing.T) {
+	t.Run("non-200 response returns error", func(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/_/api/patterns", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
@@ -454,56 +440,9 @@ func TestPostPatterns(t *testing.T) {
 		srv := newFullFakeServer(t, mux)
 		addr := strings.TrimPrefix(srv.URL, "http://")
 
-		entries := postPatterns(srv.Client(), addr, "default", []string{"/*.md"})
-		if len(entries) != 0 {
-			t.Fatalf("got %d entries, want 0", len(entries))
-		}
-	})
-}
-
-func TestTryAddToExisting(t *testing.T) {
-	t.Run("returns false when no server", func(t *testing.T) {
-		got := tryAddToExisting("127.0.0.1:1", []string{"/a.md"}, nil)
-		if got {
-			t.Fatal("expected false when no server")
-		}
-	})
-
-	t.Run("returns true and posts files to existing server", func(t *testing.T) {
-		var postedFiles int
-		mux := http.NewServeMux()
-		mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
-			w.Write(statusJSON([]map[string]any{{"name": "default"}})) //nolint:errcheck
-		})
-		mux.HandleFunc("/_/api/files", func(w http.ResponseWriter, r *http.Request) {
-			postedFiles++
-			if err := json.NewEncoder(w).Encode(server.FileEntry{ID: "id1", Path: "/a.md"}); err != nil {
-				return
-			}
-		})
-		srv := newFullFakeServer(t, mux)
-		addr := strings.TrimPrefix(srv.URL, "http://")
-
-		// Force no browser
-		prev := noOpen
-		noOpen = true
-		prevTarget := target
-		target = "default"
-		t.Cleanup(func() {
-			noOpen = prev
-			target = prevTarget
-		})
-
-		captureStderr(t, func() {
-			captureStdout(t, func() {
-				got := tryAddToExisting(addr, []string{"/a.md"}, nil)
-				if !got {
-					t.Fatal("expected true")
-				}
-			})
-		})
-		if postedFiles != 1 {
-			t.Fatalf("expected 1 file POST, got %d", postedFiles)
+		entries, err := postPatterns(srv.Client(), addr, "default", []string{"/*.md"})
+		if err == nil || !strings.Contains(err.Error(), "400 Bad Request") {
+			t.Fatalf("expected status error, got entries=%v err=%v", entries, err)
 		}
 	})
 }
@@ -514,9 +453,15 @@ func TestDoUnwatch(t *testing.T) {
 		mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
 			w.Write(statusJSON(nil)) //nolint:errcheck
 		})
-		mux.HandleFunc("/_/api/patterns", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodDelete {
-				t.Errorf("unexpected method: %s", r.Method)
+		mux.HandleFunc("DELETE /_/api/patterns", func(w http.ResponseWriter, r *http.Request) {
+			defer r.Body.Close()
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode request: %v", err)
+				return
+			}
+			if body["pattern"] != "/*.md" || body["group"] != "default" {
+				t.Errorf("unexpected body: %v", body)
 			}
 			w.WriteHeader(http.StatusNoContent)
 		})
@@ -597,7 +542,7 @@ func TestDoClose(t *testing.T) {
 		mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
 			w.Write(statusBody()) //nolint:errcheck
 		})
-		mux.HandleFunc("/_/api/files/id1", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("DELETE /_/api/groups/default/files/id1", func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodDelete {
 				t.Errorf("unexpected method: %s", r.Method)
 			}
@@ -644,7 +589,7 @@ func TestDoClose(t *testing.T) {
 		mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
 			w.Write(statusBody()) //nolint:errcheck
 		})
-		mux.HandleFunc("/_/api/files/id1", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("DELETE /_/api/groups/default/files/id1", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 		})
 		srv := newFullFakeServer(t, mux)
@@ -976,18 +921,19 @@ func TestRun_RestartFlagNoServer(t *testing.T) {
 
 func TestRun_UnwatchInvalidTarget(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	unwatchPatterns = []string{"**/*.md"}
+	prevUnwatch := unwatchMode
+	unwatchMode = true
 	prev := target
 	target = "bad?name" // contains '?' which is reserved
 	prevForeground := foreground
 	foreground = true
 	defer func() {
-		unwatchPatterns = nil
+		unwatchMode = prevUnwatch
 		target = prev
 		foreground = prevForeground
 	}()
 
-	err := run(rootCmd, nil)
+	err := run(rootCmd, []string{"**/*.md"})
 	if err == nil {
 		t.Fatal("expected error for invalid group name")
 	}
@@ -1383,8 +1329,9 @@ func TestRun_RestoreHappyPath(t *testing.T) {
 	}
 }
 
-func TestRun_TryAddToExistingViaRun(t *testing.T) {
-	// Spin up a fake mo server, then run() should detect it and POST a file.
+func TestRun_AddFileToExistingGroup(t *testing.T) {
+	// Spin up a token-gated fake mo server, then verify run detects it and
+	// posts the file through the group-scoped API using the token transport.
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 
 	dir := t.TempDir()
@@ -1393,21 +1340,29 @@ func TestRun_TryAddToExistingViaRun(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
+	const wantToken = "test-token"
 	var seenPath string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/_/api/status", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /_/api/status", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get(authHeaderName); got != wantToken {
+			t.Errorf("status token = %q, want %q", got, wantToken)
+		}
 		if err := json.NewEncoder(w).Encode(map[string]any{
 			"version": "test",
 			"pid":     1,
-			"groups":  []map[string]any{{"name": "default"}},
+			"groups":  []map[string]any{{"name": "docs"}},
 		}); err != nil {
 			return
 		}
 	})
-	mux.HandleFunc("/_/api/files", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /_/api/groups/docs/files", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get(authHeaderName); got != wantToken {
+			t.Errorf("file token = %q, want %q", got, wantToken)
+		}
 		defer r.Body.Close()
 		var body map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
 			return
 		}
 		seenPath = body["path"]
@@ -1421,6 +1376,9 @@ func TestRun_TryAddToExistingViaRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("splitHostPort: %v", err)
 	}
+	if err := token.Save(p, wantToken); err != nil {
+		t.Fatalf("save token: %v", err)
+	}
 
 	prevPort := port
 	prevBind := bind
@@ -1431,7 +1389,7 @@ func TestRun_TryAddToExistingViaRun(t *testing.T) {
 	bind = "127.0.0.1"
 	noOpen = true
 	foreground = true
-	target = "default"
+	target = "docs"
 	defer func() {
 		port = prevPort
 		bind = prevBind
@@ -1479,32 +1437,174 @@ func TestRun_FilesValidationErrorPropagates(t *testing.T) {
 	}
 }
 
-func TestRun_PatternResolutionErrorPropagates(t *testing.T) {
+func TestRun_AddWatchPatternToExistingGroup(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	pattern := filepath.Join(t.TempDir(), "*.md")
+
+	const wantToken = "watch-token"
+	var seenPattern, seenGroup string
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /_/api/status", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get(authHeaderName); got != wantToken {
+			t.Errorf("status token = %q, want %q", got, wantToken)
+		}
+		w.Write(statusJSON([]map[string]any{{"name": "docs"}})) //nolint:errcheck
+	})
+	mux.HandleFunc("POST /_/api/patterns", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get(authHeaderName); got != wantToken {
+			t.Errorf("pattern token = %q, want %q", got, wantToken)
+		}
+		defer r.Body.Close()
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		seenPattern = body["pattern"]
+		seenGroup = body["group"]
+		if err := json.NewEncoder(w).Encode(server.AddPatternResponse{}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	_, p, err := splitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	if err != nil {
+		t.Fatalf("splitHostPort: %v", err)
+	}
+	if err := token.Save(p, wantToken); err != nil {
+		t.Fatalf("save token: %v", err)
+	}
+
 	prevForeground := foreground
-	foreground = true
-	prevWatch := watchPatterns
-	watchPatterns = []string{"non-glob-pattern.md"}
+	prevWatch := watchMode
 	prevPort := port
-	port = findFreePort(t)
 	prevBind := bind
-	bind = "127.0.0.1"
 	prevNoOpen := noOpen
+	prevTarget := target
+	foreground = true
+	watchMode = true
+	port = p
+	bind = "127.0.0.1"
 	noOpen = true
+	target = "docs"
 	defer func() {
 		foreground = prevForeground
-		watchPatterns = prevWatch
+		watchMode = prevWatch
 		port = prevPort
 		bind = prevBind
 		noOpen = prevNoOpen
+		target = prevTarget
 	}()
 
-	err := run(rootCmd, nil)
-	if err == nil {
-		t.Fatal("expected error for non-glob pattern")
+	captureStdout(t, func() {
+		captureStderr(t, func() {
+			if err := run(rootCmd, []string{pattern}); err != nil {
+				t.Fatalf("run: %v", err)
+			}
+		})
+	})
+	if seenPattern != pattern {
+		t.Fatalf("pattern = %q, want %q", seenPattern, pattern)
 	}
-	if !strings.Contains(err.Error(), "does not contain glob characters") {
-		t.Fatalf("unexpected error: %v", err)
+	if seenGroup != "docs" {
+		t.Fatalf("group = %q, want docs", seenGroup)
+	}
+}
+
+func TestRun_ExistingServerAddFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		watch      bool
+		statusCode int
+		wantError  []string
+	}{
+		{
+			name:       "grouped file request failure",
+			statusCode: http.StatusInternalServerError,
+			wantError:  []string{"failed to add file", "500 Internal Server Error"},
+		},
+		{
+			name:       "old server grouped file endpoint",
+			statusCode: http.StatusNotFound,
+			wantError:  []string{"incompatible", "mo --restart"},
+		},
+		{
+			name:       "pattern request failure",
+			watch:      true,
+			statusCode: http.StatusInternalServerError,
+			wantError:  []string{"failed to add pattern", "500 Internal Server Error"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+			dir := t.TempDir()
+			arg := filepath.Join(dir, "x.md")
+			if tc.watch {
+				arg = filepath.Join(dir, "*.md")
+			} else if err := os.WriteFile(arg, []byte("# X"), 0o600); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+
+			mux := http.NewServeMux()
+			mux.HandleFunc("GET /_/api/status", func(w http.ResponseWriter, r *http.Request) {
+				w.Write(statusJSON([]map[string]any{{"name": "docs"}})) //nolint:errcheck
+			})
+			if tc.watch {
+				mux.HandleFunc("POST /_/api/patterns", func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(tc.statusCode)
+				})
+			} else {
+				mux.HandleFunc("POST /_/api/groups/docs/files", func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(tc.statusCode)
+				})
+			}
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+			_, p, err := splitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+			if err != nil {
+				t.Fatalf("splitHostPort: %v", err)
+			}
+
+			prevForeground, prevWatch := foreground, watchMode
+			prevPort, prevBind := port, bind
+			prevNoOpen, prevTarget := noOpen, target
+			foreground = true
+			watchMode = tc.watch
+			port = p
+			bind = "127.0.0.1"
+			noOpen = true
+			target = "docs"
+			defer func() {
+				foreground = prevForeground
+				watchMode = prevWatch
+				port = prevPort
+				bind = prevBind
+				noOpen = prevNoOpen
+				target = prevTarget
+			}()
+
+			var runErr error
+			var stderr string
+			stdout := captureStdout(t, func() {
+				stderr = captureStderr(t, func() {
+					runErr = run(rootCmd, []string{arg})
+				})
+			})
+
+			if runErr == nil {
+				t.Fatal("expected existing-server add failure to be returned")
+			}
+			for _, want := range tc.wantError {
+				if !strings.Contains(runErr.Error(), want) {
+					t.Fatalf("error %q does not contain %q", runErr, want)
+				}
+			}
+			if strings.Contains(stderr, "mo: added") || strings.TrimSpace(stdout) != "" {
+				t.Fatalf("failure printed false success: stdout=%q stderr=%q", stdout, stderr)
+			}
+		})
 	}
 }
 

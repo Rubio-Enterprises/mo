@@ -30,11 +30,13 @@ const { PdfRenderer } = await import("./PdfRenderer");
 
 describe("PdfRenderer", () => {
   const defaultProps = {
+    activeGroup: "default",
     fileId: "abc123",
     fileName: "doc.pdf",
     revision: 1,
     isRawView: false,
     onHeadingsChange: vi.fn(),
+    fontSize: "medium" as const,
     onContentRendered: vi.fn(),
     contentSource: "raw" as const,
     rawUrl: "/_/api/files/abc123/raw?v=1",

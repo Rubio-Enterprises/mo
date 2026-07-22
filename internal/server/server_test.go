@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,8 @@ func newTestState(t *testing.T) *State {
 		restartCh:           make(chan string, 1),
 		shutdownCh:          make(chan struct{}, 1),
 		watchedDirs:         make(map[string]int),
+		pathAliases:         make(map[string]string),
+		aliasReverse:        make(map[string]string),
 		fileChangeDebounce:  defaultFileChangeDebounce,
 		fileChangeTimers:    make(map[string]*time.Timer),
 		checkboxSources:     make(map[string]map[string]bool),
@@ -130,7 +133,7 @@ func TestMoveFile(t *testing.T) {
 			Files: []*FileEntry{{ID: idC, Name: "c.md", Path: "/c.md"}},
 		}
 
-		if err := s.MoveFile(idA, "dst"); err != nil {
+		if err := s.MoveFile(idA, "src", "dst"); err != nil {
 			t.Fatalf("MoveFile returned error: %v", err)
 		}
 
@@ -149,7 +152,7 @@ func TestMoveFile(t *testing.T) {
 			Files: []*FileEntry{{ID: idA, Name: "a.md", Path: "/a.md"}, {ID: idB, Name: "b.md", Path: "/b.md"}},
 		}
 
-		if err := s.MoveFile(idA, "newgroup"); err != nil {
+		if err := s.MoveFile(idA, "src", "newgroup"); err != nil {
 			t.Fatalf("MoveFile returned error: %v", err)
 		}
 
@@ -172,7 +175,7 @@ func TestMoveFile(t *testing.T) {
 			Files: []*FileEntry{{ID: idB, Name: "b.md", Path: "/b.md"}},
 		}
 
-		if err := s.MoveFile(idA, "dst"); err != nil {
+		if err := s.MoveFile(idA, "src", "dst"); err != nil {
 			t.Fatalf("MoveFile returned error: %v", err)
 		}
 
@@ -192,7 +195,7 @@ func TestMoveFile(t *testing.T) {
 			Files: []*FileEntry{{ID: idA, Name: "a.md", Path: "/a.md"}},
 		}
 
-		err := s.MoveFile(idA, "dst")
+		err := s.MoveFile(idA, "src", "dst")
 		if err == nil {
 			t.Fatal("MoveFile should return error for duplicate path")
 		}
@@ -205,7 +208,7 @@ func TestMoveFile(t *testing.T) {
 			Files: []*FileEntry{{ID: idA, Name: "a.md", Path: "/a.md"}},
 		}
 
-		err := s.MoveFile(idA, "src")
+		err := s.MoveFile(idA, "src", "src")
 		if err == nil {
 			t.Fatal("MoveFile should return error for same group")
 		}
@@ -213,7 +216,7 @@ func TestMoveFile(t *testing.T) {
 
 	t.Run("returns error for unknown file", func(t *testing.T) {
 		s := newTestState(t)
-		err := s.MoveFile("nonexist", "dst")
+		err := s.MoveFile("nonexist", "src", "dst")
 		if err == nil {
 			t.Fatal("MoveFile should return error for unknown file")
 		}
@@ -240,7 +243,7 @@ func TestHandleMoveFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest("PUT", fmt.Sprintf("/_/api/files/%s/group", idA), bytes.NewReader(body))
+		req := httptest.NewRequest("PUT", fmt.Sprintf("/_/api/groups/src/files/%s/group", idA), bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 
@@ -270,7 +273,7 @@ func TestHandleMoveFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest("PUT", fmt.Sprintf("/_/api/files/%s/group", idA), bytes.NewReader(body))
+		req := httptest.NewRequest("PUT", fmt.Sprintf("/_/api/groups/src/files/%s/group", idA), bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 
@@ -392,11 +395,11 @@ func TestHandleReorderFiles(t *testing.T) {
 		}
 
 		handler := NewHandler(s)
-		body, err := json.Marshal(reorderFilesRequest{Group: "docs", FileIDs: []string{idB, idA}})
+		body, err := json.Marshal(reorderFilesRequest{FileIDs: []string{idB, idA}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest("PUT", "/_/api/reorder", bytes.NewReader(body))
+		req := httptest.NewRequest("PUT", "/_/api/groups/docs/reorder", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 
@@ -423,11 +426,11 @@ func TestHandleReorderFiles(t *testing.T) {
 		}
 
 		handler := NewHandler(s)
-		body, err := json.Marshal(reorderFilesRequest{Group: "api/docs", FileIDs: []string{idB, idA}})
+		body, err := json.Marshal(reorderFilesRequest{FileIDs: []string{idB, idA}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest("PUT", "/_/api/reorder", bytes.NewReader(body))
+		req := httptest.NewRequest("PUT", "/_/api/groups/api%2Fdocs/reorder", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 
@@ -446,11 +449,11 @@ func TestHandleReorderFiles(t *testing.T) {
 	t.Run("returns 400 for invalid group", func(t *testing.T) {
 		s := newTestState(t)
 		handler := NewHandler(s)
-		body, err := json.Marshal(reorderFilesRequest{Group: "nonexistent", FileIDs: []string{idA}})
+		body, err := json.Marshal(reorderFilesRequest{FileIDs: []string{idA}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest("PUT", "/_/api/reorder", bytes.NewReader(body))
+		req := httptest.NewRequest("PUT", "/_/api/groups/nonexistent/reorder", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 
@@ -465,7 +468,7 @@ func TestHandleReorderFiles(t *testing.T) {
 		s := newTestState(t)
 		s.groups[DefaultGroup] = &Group{Name: DefaultGroup, Files: []*FileEntry{}}
 		handler := NewHandler(s)
-		req := httptest.NewRequest("PUT", "/_/api/reorder", bytes.NewReader([]byte("invalid")))
+		req := httptest.NewRequest("PUT", "/_/api/groups/default/reorder", bytes.NewReader([]byte("invalid")))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 
@@ -499,6 +502,37 @@ func TestAddPattern_InitialExpansion(t *testing.T) {
 	}
 	if len(groups[0].Files) != 2 {
 		t.Fatalf("got %d files, want 2", len(groups[0].Files))
+	}
+}
+
+func TestAddPattern_InitialExpansionNaturalOrder(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"i1.md", "i2.md", "i10.md", "i11.md"} {
+		os.WriteFile(filepath.Join(dir, name), []byte("# "+name), 0o600) //nolint:errcheck
+	}
+
+	s := newTestState(t)
+	pattern := filepath.Join(dir, "*.md")
+	entries, err := s.AddPattern(pattern, DefaultGroup)
+	if err != nil {
+		t.Fatalf("AddPattern returned error: %v", err)
+	}
+
+	want := []string{"i1.md", "i2.md", "i10.md", "i11.md"}
+	if len(entries) != len(want) {
+		t.Fatalf("got %d entries, want %d", len(entries), len(want))
+	}
+	for i, name := range want {
+		if entries[i].Name != name {
+			t.Errorf("entries[%d].Name = %q, want %q", i, entries[i].Name, name)
+		}
+	}
+
+	files := s.Groups()[0].Files
+	for i, name := range want {
+		if files[i].Name != name {
+			t.Errorf("group files[%d].Name = %q, want %q", i, files[i].Name, name)
+		}
 	}
 }
 
@@ -657,7 +691,7 @@ func TestGroupPersistsWithPatternsAfterFileRemoval(t *testing.T) {
 
 	// Remove the only file — group should persist because pattern remains.
 	fileID := groups[0].Files[0].ID
-	if !s.RemoveFile(fileID) {
+	if !s.RemoveFile(fileID, groups[0].Name) {
 		t.Fatal("RemoveFile returned false")
 	}
 
@@ -1119,37 +1153,27 @@ func TestEnableBackup_ReflectsLatestState(t *testing.T) {
 
 func TestAddFile_RejectsBinaryFile(t *testing.T) {
 	s := newTestState(t)
+
 	dir := t.TempDir()
 
-	// Binary file with known code extension is still rejected.
-	binFile := filepath.Join(dir, "bad.go")
+	// A text-classified file containing NUL bytes is rejected. Known binary
+	// formats such as images and PDFs are covered by file-type tests below.
+	binFile := filepath.Join(dir, "main.go")
 	os.WriteFile(binFile, []byte("package\x00main"), 0o600) //nolint:errcheck
 
 	_, err := s.AddFile(binFile, DefaultGroup)
 	if err == nil {
-		t.Fatal("expected error for binary code file, got nil")
+		t.Fatal("expected error for binary file, got nil")
 	}
 	if !errors.Is(err, ErrBinaryFile) {
 		t.Fatalf("expected ErrBinaryFile, got: %v", err)
 	}
 
-	// Binary file with unknown extension is accepted as FileTypeBinary.
-	unknownBin := filepath.Join(dir, "data.bin")
-	os.WriteFile(unknownBin, []byte("has\x00null"), 0o600) //nolint:errcheck
-
-	entry, err := s.AddFile(unknownBin, DefaultGroup)
-	if err != nil {
-		t.Fatalf("unexpected error for unknown binary: %v", err)
-	}
-	if entry.Type != FileTypeBinary {
-		t.Errorf("Type = %q, want %q", entry.Type, FileTypeBinary)
-	}
-
-	// Text file should succeed.
+	// Text file should succeed
 	txtFile := filepath.Join(dir, "readme.md")
 	os.WriteFile(txtFile, []byte("# Hello"), 0o600) //nolint:errcheck
 
-	entry, err = s.AddFile(txtFile, DefaultGroup)
+	entry, err := s.AddFile(txtFile, DefaultGroup)
 	if err != nil {
 		t.Fatalf("unexpected error for text file: %v", err)
 	}
@@ -1157,7 +1181,7 @@ func TestAddFile_RejectsBinaryFile(t *testing.T) {
 		t.Fatal("expected non-nil entry for text file")
 	}
 
-	// Non-existent file should not error.
+	// Non-existent file should not error
 	_, err = s.AddFile(filepath.Join(dir, "nonexistent.md"), DefaultGroup)
 	if err != nil {
 		t.Fatalf("unexpected error for non-existent file: %v", err)
@@ -1225,23 +1249,42 @@ func TestAddUploadedFile(t *testing.T) {
 			t.Fatalf("got %d files, want 2", len(s.groups[DefaultGroup].Files))
 		}
 	})
+
+	t.Run("allows same content in different groups", func(t *testing.T) {
+		s := newTestState(t)
+		e1 := s.AddUploadedFile("a.md", "# Same", "src")
+		e2 := s.AddUploadedFile("b.md", "# Same", "dst")
+
+		if e1.ID != e2.ID {
+			t.Fatal("same content should produce same ID")
+		}
+		if e1 == e2 {
+			t.Fatal("different groups should create separate entries")
+		}
+		if len(s.groups["src"].Files) != 1 {
+			t.Fatalf("src group should have 1 file, got %d", len(s.groups["src"].Files))
+		}
+		if len(s.groups["dst"].Files) != 1 {
+			t.Fatalf("dst group should have 1 file, got %d", len(s.groups["dst"].Files))
+		}
+	})
 }
 
 func TestHandleAddFile_RejectsBinaryFile(t *testing.T) {
 	dir := t.TempDir()
 
-	t.Run("returns 400 for binary code file", func(t *testing.T) {
+	t.Run("returns 400 for binary content in a text type", func(t *testing.T) {
 		s := newTestState(t)
 		handler := NewHandler(s)
 
-		binFile := filepath.Join(dir, "bad.go")
+		binFile := filepath.Join(dir, "main.go")
 		os.WriteFile(binFile, []byte("package\x00main"), 0o600) //nolint:errcheck
 
-		body, err := json.Marshal(addFileRequest{Path: binFile, Group: DefaultGroup})
+		body, err := json.Marshal(addFileRequest{Path: binFile})
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest("POST", "/_/api/files", bytes.NewReader(body))
+		req := httptest.NewRequest("POST", "/_/api/groups/default/files", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 
@@ -1252,36 +1295,6 @@ func TestHandleAddFile_RejectsBinaryFile(t *testing.T) {
 		}
 	})
 
-	t.Run("returns 200 for unknown binary file", func(t *testing.T) {
-		s := newTestState(t)
-		handler := NewHandler(s)
-
-		binFile := filepath.Join(dir, "data.bin")
-		os.WriteFile(binFile, []byte("has\x00null"), 0o600) //nolint:errcheck
-
-		body, err := json.Marshal(addFileRequest{Path: binFile, Group: DefaultGroup})
-		if err != nil {
-			t.Fatal(err)
-		}
-		req := httptest.NewRequest("POST", "/_/api/files", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-
-		handler.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
-		}
-
-		var entry FileEntry
-		if err := json.NewDecoder(rec.Body).Decode(&entry); err != nil {
-			t.Fatal(err)
-		}
-		if entry.Type != FileTypeBinary {
-			t.Errorf("Type = %q, want %q", entry.Type, FileTypeBinary)
-		}
-	})
-
 	t.Run("returns 200 for text file", func(t *testing.T) {
 		s := newTestState(t)
 		handler := NewHandler(s)
@@ -1289,11 +1302,11 @@ func TestHandleAddFile_RejectsBinaryFile(t *testing.T) {
 		txtFile := filepath.Join(dir, "readme.md")
 		os.WriteFile(txtFile, []byte("# Hello"), 0o600) //nolint:errcheck
 
-		body, err := json.Marshal(addFileRequest{Path: txtFile, Group: DefaultGroup})
+		body, err := json.Marshal(addFileRequest{Path: txtFile})
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest("POST", "/_/api/files", bytes.NewReader(body))
+		req := httptest.NewRequest("POST", "/_/api/groups/default/files", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 
@@ -1318,11 +1331,11 @@ func TestHandleUploadFile(t *testing.T) {
 		s := newTestState(t)
 		handler := NewHandler(s)
 
-		body, err := json.Marshal(uploadFileRequest{Name: "test.md", Content: "# Hello", Group: DefaultGroup})
+		body, err := json.Marshal(uploadFileRequest{Name: "test.md", Content: "# Hello"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest("POST", "/_/api/files/upload", bytes.NewReader(body))
+		req := httptest.NewRequest("POST", "/_/api/groups/default/files/upload", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 
@@ -1349,11 +1362,11 @@ func TestHandleUploadFile(t *testing.T) {
 		handler := NewHandler(s)
 
 		oversized := strings.Repeat("x", 10<<20+1) // 10MB + 1 byte
-		body, err := json.Marshal(uploadFileRequest{Name: "big.md", Content: oversized, Group: DefaultGroup})
+		body, err := json.Marshal(uploadFileRequest{Name: "big.md", Content: oversized})
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest("POST", "/_/api/files/upload", bytes.NewReader(body))
+		req := httptest.NewRequest("POST", "/_/api/groups/default/files/upload", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 
@@ -1368,11 +1381,11 @@ func TestHandleUploadFile(t *testing.T) {
 		s := newTestState(t)
 		handler := NewHandler(s)
 
-		body, err := json.Marshal(uploadFileRequest{Name: "", Content: "# Hello", Group: DefaultGroup})
+		body, err := json.Marshal(uploadFileRequest{Name: "", Content: "# Hello"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest("POST", "/_/api/files/upload", bytes.NewReader(body))
+		req := httptest.NewRequest("POST", "/_/api/groups/default/files/upload", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 
@@ -1390,7 +1403,7 @@ func TestUploadedFileContent(t *testing.T) {
 		entry := s.AddUploadedFile("test.md", "# Uploaded Content", DefaultGroup)
 
 		handler := NewHandler(s)
-		req := httptest.NewRequest("GET", fmt.Sprintf("/_/api/files/%s/content", entry.ID), nil)
+		req := httptest.NewRequest("GET", fmt.Sprintf("/_/api/groups/default/files/%s/content", entry.ID), nil)
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, req)
@@ -1416,7 +1429,7 @@ func TestUploadedFileContent(t *testing.T) {
 		entry := s.AddUploadedFile("test.md", "# Hello", DefaultGroup)
 
 		handler := NewHandler(s)
-		req := httptest.NewRequest("GET", fmt.Sprintf("/_/api/files/%s/raw/image.png", entry.ID), nil)
+		req := httptest.NewRequest("GET", fmt.Sprintf("/_/api/groups/default/files/%s/raw/image.png", entry.ID), nil)
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, req)
@@ -1435,7 +1448,7 @@ func TestUploadedFileContent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest("POST", "/_/api/files/open", bytes.NewReader(body))
+		req := httptest.NewRequest("POST", "/_/api/groups/default/files/open", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 
@@ -1447,12 +1460,162 @@ func TestUploadedFileContent(t *testing.T) {
 	})
 }
 
+func TestSearch(t *testing.T) {
+	t.Run("searches file contents within a group", func(t *testing.T) {
+		s := newTestState(t)
+		dir := t.TempDir()
+
+		readme := filepath.Join(dir, "README.md")
+		guide := filepath.Join(dir, "GUIDE.md")
+		if err := os.WriteFile(readme, []byte("# Intro\ncache warmup\nmore cache\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(guide, []byte("# Guide\nnothing here\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.AddFile(readme, DefaultGroup); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.AddFile(guide, DefaultGroup); err != nil {
+			t.Fatal(err)
+		}
+		s.AddUploadedFile("upload.md", "# Upload\ncache line\n", "docs")
+
+		handler := NewHandler(s)
+		req := httptest.NewRequest("GET", "/_/api/search?q=cache&group=default&limit=10&context=1", nil)
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		var resp searchResponse
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.Total != 2 {
+			t.Fatalf("got total %d, want 2", resp.Total)
+		}
+		if len(resp.Results) != 1 {
+			t.Fatalf("got %d results, want 1", len(resp.Results))
+		}
+		if resp.Results[0].FileName != "README.md" {
+			t.Fatalf("got file %q, want README.md", resp.Results[0].FileName)
+		}
+		if got := resp.Results[0].Matches[0].Heading; got != "Intro" {
+			t.Fatalf("got heading %q, want Intro", got)
+		}
+		if got := resp.Results[0].Matches[0].Before; len(got) != 1 || got[0] != "# Intro" {
+			t.Fatalf("got before %#v, want [\"# Intro\"]", got)
+		}
+	})
+
+	t.Run("ignores headings inside fenced code blocks", func(t *testing.T) {
+		s := newTestState(t)
+		dir := t.TempDir()
+
+		f := filepath.Join(dir, "fenced.md")
+		content := "# Real Heading\n```\n# Fake Heading\nfind me\n```\n# After Fence\nfind me again\n"
+		if err := os.WriteFile(f, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.AddFile(f, DefaultGroup); err != nil {
+			t.Fatal(err)
+		}
+
+		handler := NewHandler(s)
+		req := httptest.NewRequest("GET", "/_/api/search?q=find+me&group=default&context=0", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		var resp searchResponse
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		if len(resp.Results) != 1 || len(resp.Results[0].Matches) != 2 {
+			t.Fatalf("expected 1 result with 2 matches, got %d results", len(resp.Results))
+		}
+		// First match is inside the code block — heading should be "Real Heading", not "Fake Heading"
+		if got := resp.Results[0].Matches[0].Heading; got != "Real Heading" {
+			t.Fatalf("got heading %q for match inside code block, want \"Real Heading\"", got)
+		}
+		// Second match is after the fence closes — heading should be "After Fence"
+		if got := resp.Results[0].Matches[1].Heading; got != "After Fence" {
+			t.Fatalf("got heading %q for match after fence, want \"After Fence\"", got)
+		}
+	})
+
+	t.Run("strips closing hashes from headings", func(t *testing.T) {
+		s := newTestState(t)
+		dir := t.TempDir()
+
+		f := filepath.Join(dir, "closing.md")
+		content := "# Title ###\nfind me\n"
+		if err := os.WriteFile(f, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.AddFile(f, DefaultGroup); err != nil {
+			t.Fatal(err)
+		}
+
+		handler := NewHandler(s)
+		req := httptest.NewRequest("GET", "/_/api/search?q=find+me&group=default&context=0", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		var resp searchResponse
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		if len(resp.Results) != 1 || len(resp.Results[0].Matches) != 1 {
+			t.Fatalf("expected 1 result with 1 match, got %d results", len(resp.Results))
+		}
+		if got := resp.Results[0].Matches[0].Heading; got != "Title" {
+			t.Fatalf("got heading %q, want \"Title\"", got)
+		}
+	})
+
+	t.Run("returns 400 for missing query", func(t *testing.T) {
+		s := newTestState(t)
+		handler := NewHandler(s)
+
+		req := httptest.NewRequest("GET", "/_/api/search?group=default", nil)
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("got status %d, want %d", rec.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("returns 404 for unknown group", func(t *testing.T) {
+		s := newTestState(t)
+		handler := NewHandler(s)
+
+		req := httptest.NewRequest("GET", "/_/api/search?q=cache&group=missing", nil)
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("got status %d, want %d", rec.Code, http.StatusNotFound)
+		}
+	})
+}
+
 func TestMoveUploadedFile(t *testing.T) {
 	t.Run("moves uploaded file between groups", func(t *testing.T) {
 		s := newTestState(t)
 		entry := s.AddUploadedFile("test.md", "# Hello", "src")
 
-		if err := s.MoveFile(entry.ID, "dst"); err != nil {
+		if err := s.MoveFile(entry.ID, "src", "dst"); err != nil {
 			t.Fatalf("MoveFile returned error: %v", err)
 		}
 
@@ -1467,18 +1630,6 @@ func TestMoveUploadedFile(t *testing.T) {
 		}
 	})
 
-	t.Run("deduplicates across groups", func(t *testing.T) {
-		s := newTestState(t)
-		e1 := s.AddUploadedFile("a.md", "# Same", "src")
-		e2 := s.AddUploadedFile("b.md", "# Same", "dst")
-
-		if e1 != e2 {
-			t.Fatal("same content uploaded to different groups should return existing entry")
-		}
-		if _, ok := s.groups["dst"]; ok && len(s.groups["dst"].Files) > 0 {
-			t.Fatal("duplicate should not be added to dst group")
-		}
-	})
 }
 
 func TestSnapshotRestoreDataWithUploads(t *testing.T) {
@@ -1578,11 +1729,161 @@ func TestDirMove(t *testing.T) {
 			t.Fatal("timed out waiting for stale files to be removed")
 		default:
 		}
-		if s.FindFile(oldID1) == nil && s.FindFile(oldID2) == nil {
+		if s.FindFile(oldID1, DefaultGroup) == nil && s.FindFile(oldID2, DefaultGroup) == nil {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+func TestWatchedFile_RetainedAfterAtomicSaveRewrite(t *testing.T) {
+	// Regression: macOS FSEvents coalesces historical flags, so a plain
+	// Write after a previous atomic save (write tmp + rename) arrives as
+	// Write|Rename. The watchLoop must not drop the file from the list in
+	// that case; only an actually-missing file should be removed.
+	ctx, cancel := donegroup.WithCancel(context.Background())
+	defer cancel()
+
+	s := NewState(ctx)
+	t.Cleanup(s.CloseAllSubscribers)
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "foo.md")
+	if err := os.WriteFile(target, []byte("# init"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	pattern := filepath.Join(dir, "*.md")
+	entries, err := s.AddPattern(pattern, DefaultGroup)
+	if err != nil {
+		t.Fatalf("AddPattern returned error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	id := entries[0].ID
+
+	tmp := target + ".tmp"
+	if err := os.WriteFile(tmp, []byte("# atomic"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(target, []byte("# rewrite"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Poll FindFile until the watchLoop has had time to process the
+	// Write|Rename event (re-watch delay 100ms + debounce). Fail fast if
+	// the file is dropped at any point during the window.
+	deadline := time.After(2 * time.Second)
+	for {
+		if s.FindFile(id, DefaultGroup) == nil {
+			t.Fatalf("file %q was wrongly removed from the list after rewrite", target)
+		}
+		select {
+		case <-deadline:
+			return
+		default:
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestTranslateEventPath(t *testing.T) {
+	canonicalDir := filepath.FromSlash("/private/var/foo/docs")
+	originalDir := filepath.FromSlash("/var/foo/docs")
+	s := &State{pathAliases: map[string]string{
+		canonicalDir: originalDir,
+	}}
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"exact match", canonicalDir, originalDir},
+		{"prefix match for file under aliased dir", filepath.Join(canonicalDir, "new.md"), filepath.Join(originalDir, "new.md")},
+		{"prefix match for nested file", filepath.Join(canonicalDir, "sub", "note.md"), filepath.Join(originalDir, "sub", "note.md")},
+		{"no alias passes through", filepath.FromSlash("/other/path/file.md"), filepath.FromSlash("/other/path/file.md")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := s.translateEventPath(tt.in); got != tt.want {
+				t.Errorf("translateEventPath(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFindRefsByPath_CoversBothPathFormsViaUnion(t *testing.T) {
+	originalDir := filepath.FromSlash("/var/foo/docs")
+	canonicalDir := filepath.FromSlash("/private/var/foo/docs")
+	originalFile := filepath.Join(originalDir, "x.md")
+	canonicalFile := filepath.Join(canonicalDir, "x.md")
+
+	s := &State{
+		groups: map[string]*Group{
+			DefaultGroup: {Name: DefaultGroup, Files: []*FileEntry{
+				{ID: "orig", Path: originalFile},
+				{ID: "canon", Path: canonicalFile},
+			}},
+		},
+		pathAliases: map[string]string{canonicalDir: originalDir},
+	}
+
+	// Simulate the event delivered for canonicalFile and the watchLoop's
+	// union of findRefsByPath(translated) ∪ findRefsByPath(raw).
+	eventName := canonicalFile
+	eventPath := s.translateEventPath(eventName)
+	refs := s.findRefsByPath(eventPath)
+	if eventPath != eventName {
+		refs = append(refs, s.findRefsByPath(eventName)...)
+	}
+
+	got := map[string]bool{}
+	for _, r := range refs {
+		got[r.ID] = true
+	}
+	if !got["orig"] || !got["canon"] {
+		t.Errorf("union refs = %v, want both \"orig\" and \"canon\"", got)
+	}
+}
+
+func TestPathAliasRegisterAndUnregister(t *testing.T) {
+	s := &State{
+		pathAliases:  map[string]string{},
+		aliasReverse: map[string]string{},
+	}
+
+	// Build a temp dir whose path differs from its EvalSymlinks form on macOS
+	// (e.g. /var/... → /private/var/...), so resolvePathAlias has work to do.
+	dir := t.TempDir()
+	canonical := resolvePathAlias(dir)
+	if canonical == "" {
+		t.Skipf("temp dir %q is already canonical; skipping", dir)
+	}
+
+	s.registerPathAlias(dir, canonical)
+	if got := s.pathAliases[canonical]; got != dir {
+		t.Errorf("pathAliases[%q] = %q, want %q", canonical, got, dir)
+	}
+	if got := s.aliasReverse[dir]; got != canonical {
+		t.Errorf("aliasReverse[%q] = %q, want %q", dir, got, canonical)
+	}
+
+	s.unregisterPathAlias(dir)
+	if _, ok := s.pathAliases[canonical]; ok {
+		t.Errorf("pathAliases[%q] still present after unregister", canonical)
+	}
+	if _, ok := s.aliasReverse[dir]; ok {
+		t.Errorf("aliasReverse[%q] still present after unregister", dir)
+	}
+
+	// unregister of an unknown path is a no-op.
+	s.unregisterPathAlias("/nonexistent")
 }
 
 func TestExtractTitle(t *testing.T) {
@@ -1760,6 +2061,113 @@ func TestHandleGroups_IncludesTitle(t *testing.T) {
 	}
 }
 
+func TestHandleGroups_IncludesPatterns(t *testing.T) {
+	s := newTestState(t)
+
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.md"), []byte("# A"), 0o600) //nolint:errcheck
+	pattern := filepath.Join(dir, "*.md")
+	if _, err := s.AddPattern(pattern, DefaultGroup); err != nil {
+		t.Fatalf("AddPattern: %v", err)
+	}
+
+	plainDir := t.TempDir()
+	plainFile := filepath.Join(plainDir, "plain.md")
+	os.WriteFile(plainFile, []byte("# Plain"), 0o600) //nolint:errcheck
+	if _, err := s.AddFile(plainFile, "docs"); err != nil {
+		t.Fatalf("AddFile: %v", err)
+	}
+
+	handler := NewHandler(s)
+	req := httptest.NewRequest("GET", "/_/api/groups", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	rawBody := rec.Body.Bytes()
+	var groups []struct {
+		Name     string   `json:"name"`
+		Patterns []string `json:"patterns,omitempty"`
+	}
+	if err := json.Unmarshal(rawBody, &groups); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	byName := make(map[string][]string, len(groups))
+	for _, g := range groups {
+		byName[g.Name] = g.Patterns
+	}
+
+	got, ok := byName[DefaultGroup]
+	if !ok {
+		t.Fatalf("default group missing from response: %+v", groups)
+	}
+	if len(got) != 1 || got[0] != pattern {
+		t.Errorf("default group patterns = %v, want [%s]", got, pattern)
+	}
+
+	if pats, ok := byName["docs"]; !ok {
+		t.Errorf("docs group missing from response: %+v", groups)
+	} else if len(pats) != 0 {
+		t.Errorf("docs group patterns = %v, want omitted (group has no patterns)", pats)
+	}
+
+	// Verify `omitempty`: docs has no patterns so the JSON key should be absent.
+	var rawGroups []map[string]json.RawMessage
+	if err := json.Unmarshal(rawBody, &rawGroups); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	for _, g := range rawGroups {
+		name := strings.Trim(string(g["name"]), `"`)
+		if name == "docs" {
+			if _, has := g["patterns"]; has {
+				t.Errorf("expected omitempty for docs group, but patterns key is present: %s", rawBody)
+			}
+		}
+	}
+}
+
+func TestHandleGroups_FilesAlwaysArrayForPatternOnlyGroup(t *testing.T) {
+	s := newTestState(t)
+
+	// Pattern in an empty directory: AddPattern creates the group with a nil
+	// Files slice. Without normalization the JSON would encode as
+	// `"files": null`, which breaks the frontend's `group.files.length`.
+	dir := t.TempDir()
+	pattern := filepath.Join(dir, "*.md")
+	if _, err := s.AddPattern(pattern, DefaultGroup); err != nil {
+		t.Fatalf("AddPattern: %v", err)
+	}
+
+	handler := NewHandler(s)
+	req := httptest.NewRequest("GET", "/_/api/groups", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	raw := rec.Body.String()
+	if strings.Contains(raw, `"files":null`) {
+		t.Errorf("response contains \"files\":null, want \"files\":[]: %s", raw)
+	}
+
+	var groups []Group
+	if err := json.Unmarshal(rec.Body.Bytes(), &groups); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("got %d groups, want 1", len(groups))
+	}
+	if len(groups[0].Files) != 0 {
+		t.Errorf("len(Files) = %d, want 0", len(groups[0].Files))
+	}
+}
+
 func TestCSPHeader(t *testing.T) {
 	s := newTestState(t)
 	handler := NewHandler(s)
@@ -1801,41 +2209,6 @@ func TestCSPHeader(t *testing.T) {
 	}
 }
 
-func TestFindGroupForFile(t *testing.T) {
-	idA := testIDa
-	idB := testIDb
-
-	t.Run("returns group name for existing file", func(t *testing.T) {
-		s := newTestState(t)
-		s.groups["docs"] = &Group{
-			Name:  "docs",
-			Files: []*FileEntry{{ID: idA, Name: "a.md", Path: "/a.md"}},
-		}
-		s.groups["notes"] = &Group{
-			Name:  "notes",
-			Files: []*FileEntry{{ID: idB, Name: "b.md", Path: "/b.md"}},
-		}
-
-		got := s.FindGroupForFile(idB)
-		if got != "notes" {
-			t.Errorf("FindGroupForFile(%q) = %q, want %q", idB, got, "notes")
-		}
-	})
-
-	t.Run("returns empty string for unknown file", func(t *testing.T) {
-		s := newTestState(t)
-		s.groups["docs"] = &Group{
-			Name:  "docs",
-			Files: []*FileEntry{{ID: idA, Name: "a.md", Path: "/a.md"}},
-		}
-
-		got := s.FindGroupForFile("nonexistent")
-		if got != "" {
-			t.Errorf("FindGroupForFile(nonexistent) = %q, want empty", got)
-		}
-	})
-}
-
 func TestRemoveFileNotFound(t *testing.T) {
 	s := newTestState(t)
 	s.groups[DefaultGroup] = &Group{
@@ -1843,7 +2216,7 @@ func TestRemoveFileNotFound(t *testing.T) {
 		Files: []*FileEntry{{ID: testIDa, Name: "a.md", Path: "/a.md"}},
 	}
 
-	ok := s.RemoveFile("nonexistent-id")
+	ok := s.RemoveFile("nonexistent-id", DefaultGroup)
 	if ok {
 		t.Error("RemoveFile returned true for nonexistent file ID")
 	}
@@ -1851,6 +2224,366 @@ func TestRemoveFileNotFound(t *testing.T) {
 	// Verify original file is still there
 	if len(s.groups[DefaultGroup].Files) != 1 {
 		t.Error("expected files to be unchanged")
+	}
+}
+
+func TestHandleFileContent_RemovesEntryWhenFileMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "ghost.md")
+	if err := os.WriteFile(path, []byte("# Ghost"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newTestState(t)
+	entry, err := s.AddFile(path, DefaultGroup)
+	if err != nil {
+		t.Fatalf("AddFile: %v", err)
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewHandler(s)
+	req := httptest.NewRequest("GET", fmt.Sprintf("/_/api/groups/default/files/%s/content", entry.ID), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusNotFound)
+	}
+
+	if groups := s.Groups(); len(groups) != 0 {
+		t.Fatalf("expected group to be removed after missing file fetch, got %d groups", len(groups))
+	}
+}
+
+func TestRemoveFilesByPath_RemovesAcrossGroupsAndCleansEmptyGroups(t *testing.T) {
+	tmpDir := t.TempDir()
+	pathA := filepath.Join(tmpDir, "shared.md")
+	pathB := filepath.Join(tmpDir, "other.md")
+	for _, p := range []string{pathA, pathB} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s := newTestState(t)
+	if _, err := s.AddFile(pathA, DefaultGroup); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddFile(pathA, "other"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddFile(pathB, "other"); err != nil {
+		t.Fatal(err)
+	}
+
+	if !s.RemoveFilesByPath(pathA) {
+		t.Fatal("RemoveFilesByPath returned false")
+	}
+
+	groups := s.Groups()
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group remaining (default should be empty and dropped), got %d", len(groups))
+	}
+	if groups[0].Name != "other" || len(groups[0].Files) != 1 || groups[0].Files[0].Path != pathB {
+		t.Fatalf("unexpected remaining group state: %+v", groups[0])
+	}
+}
+
+func TestHandleOpenFile_PercentEncodedNonASCII(t *testing.T) {
+	// Create a temp directory with a non-ASCII markdown file
+	tmpDir := t.TempDir()
+	srcFile := filepath.Join(tmpDir, "index.md")
+	targetFile := filepath.Join(tmpDir, "日本語ファイル.md")
+
+	if err := os.WriteFile(srcFile, []byte("# Index"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(targetFile, []byte("# Japanese"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	srcID := FileID(srcFile)
+	s := newTestState(t)
+	s.groups[DefaultGroup] = &Group{
+		Name: DefaultGroup,
+		Files: []*FileEntry{
+			{ID: srcID, Name: "index.md", Path: srcFile},
+		},
+	}
+
+	handler := NewHandler(s)
+
+	// Simulate browser behavior: percent-encode the non-ASCII filename
+	encodedPath := url.PathEscape("日本語ファイル.md")
+	body, err := json.Marshal(openFileRequest{FileID: srcID, Path: encodedPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("POST", fmt.Sprintf("/_/api/groups/%s/files/open", DefaultGroup), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var entry FileEntry
+	if err := json.NewDecoder(rec.Body).Decode(&entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Path != targetFile {
+		t.Errorf("got path %q, want %q", entry.Path, targetFile)
+	}
+}
+
+func TestHandleFileRaw_PercentEncodedNonASCII(t *testing.T) {
+	// Create a temp directory with a non-ASCII asset file
+	tmpDir := t.TempDir()
+	mdFile := filepath.Join(tmpDir, "index.md")
+	assetFile := filepath.Join(tmpDir, "画像.txt")
+
+	if err := os.WriteFile(mdFile, []byte("# Index"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(assetFile, []byte("asset content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mdID := FileID(mdFile)
+	s := newTestState(t)
+	s.groups[DefaultGroup] = &Group{
+		Name: DefaultGroup,
+		Files: []*FileEntry{
+			{ID: mdID, Name: "index.md", Path: mdFile},
+		},
+	}
+
+	handler := NewHandler(s)
+
+	// Percent-encode the non-ASCII filename in the URL path
+	encodedName := url.PathEscape("画像.txt")
+	reqURL := fmt.Sprintf("/_/api/groups/%s/files/%s/raw/%s", DefaultGroup, mdID, encodedName)
+	req := httptest.NewRequest("GET", reqURL, nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	got := rec.Body.String()
+	if !strings.Contains(got, "asset content") {
+		t.Errorf("expected body to contain %q, got %q", "asset content", got)
+	}
+}
+
+func TestResolveWithinBase(t *testing.T) {
+	base := filepath.Join(string(filepath.Separator), "home", "user", "docs")
+	tests := []struct {
+		name    string
+		rel     string
+		wantOK  bool
+		wantAbs string
+	}{
+		{"sibling", "image.png", true, filepath.Join(base, "image.png")},
+		{"subdir", "assets/image.png", true, filepath.Join(base, "assets", "image.png")},
+		{"dot prefix", "./image.png", true, filepath.Join(base, "image.png")},
+		{"parent escape", "../secret.txt", false, ""},
+		{"deep escape", "../../../../etc/passwd", false, ""},
+		{"sneaky escape", "assets/../../secret.txt", false, ""},
+		{"absolute is contained by join", "/etc/passwd", true, filepath.Join(base, "etc", "passwd")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			abs, ok := resolveWithinBase(base, tt.rel)
+			if ok != tt.wantOK {
+				t.Fatalf("resolveWithinBase(%q, %q) ok = %v, want %v", base, tt.rel, ok, tt.wantOK)
+			}
+			if ok && abs != tt.wantAbs {
+				t.Fatalf("resolveWithinBase(%q, %q) = %q, want %q", base, tt.rel, abs, tt.wantAbs)
+			}
+		})
+	}
+}
+
+func TestHandleFileRaw_RejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(subDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	mdFile := filepath.Join(subDir, "doc.md")
+	if err := os.WriteFile(mdFile, []byte("# Doc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const group = "docs"
+	s := newTestState(t)
+	entry, err := s.AddFile(mdFile, group)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.SetPathValue("group", group)
+	req.SetPathValue("id", entry.ID)
+	req.SetPathValue("path", "../secret.txt")
+	rec := httptest.NewRecorder()
+	handleFileRaw(s).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("traversal raw asset: got status %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestHandleOpenFile_RejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(subDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	mdFile := filepath.Join(subDir, "doc.md")
+	if err := os.WriteFile(mdFile, []byte("# Doc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const group = "docs"
+	s := newTestState(t)
+	entry, err := s.AddFile(mdFile, group)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	encodedTraversal := url.PathEscape("../secret.txt")
+	body, err := json.Marshal(openFileRequest{FileID: entry.ID, Path: encodedTraversal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/_/api/groups/"+group+"/files/open", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	NewHandler(s).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("traversal open: got status %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+// Regression test: Groups() must return deep copies so JSON encoding does
+// not race with Title updates from the file watcher.
+func TestGroupsRaceWithTitleUpdate(t *testing.T) {
+	s := newTestState(t)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "race.md")
+	if err := os.WriteFile(path, []byte("# title-0\n\nbody\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddFile(path, DefaultGroup); err != nil {
+		t.Fatal(err)
+	}
+
+	const iterations = 200
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Reader: mimics handleGroups / handleStatus — encode after the lock is released.
+	go func() {
+		defer wg.Done()
+		enc := json.NewEncoder(io.Discard)
+		for range iterations {
+			groups := s.Groups()
+			if err := enc.Encode(groups); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}()
+
+	// Writer: mimics the fsnotify path — rewrite the H1 so Title always changes.
+	go func() {
+		defer wg.Done()
+		for i := range iterations {
+			content := fmt.Sprintf("# title-%d\n\nbody\n", i+1)
+			if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+				t.Error(err)
+				return
+			}
+			s.notifyFileChangedByPath(path)
+		}
+	}()
+
+	wg.Wait()
+}
+
+// TestGroupsReturnsDeepCopies verifies that Groups() returns FileEntry copies
+// that are independent of internal state: mutating the returned FileEntry
+// values or the returned Files slice must not affect subsequent Groups() calls.
+func TestGroupsReturnsDeepCopies(t *testing.T) {
+	s := newTestState(t)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "deepcopy.md")
+	if err := os.WriteFile(path, []byte("# original-title\n\nbody\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := s.AddFile(path, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	groups := s.Groups()
+	if len(groups) != 1 || len(groups[0].Files) != 1 {
+		t.Fatalf("unexpected initial state: %+v", groups)
+	}
+
+	// (a) Mutating a returned FileEntry's fields must not affect internal state.
+	// Capture the expected values before mutating: entry aliases internal
+	// state, so comparing against entry after the mutation would be
+	// tautological if Groups() leaked shared pointers.
+	wantTitle := entry.Title
+	wantName := entry.Name
+	groups[0].Files[0].Title = "mutated-title"
+	groups[0].Files[0].Name = "mutated-name"
+
+	again := s.Groups()
+	if len(again) != 1 || len(again[0].Files) != 1 {
+		t.Fatalf("unexpected state after mutation: %+v", again)
+	}
+	if again[0].Files[0].Title != wantTitle {
+		t.Fatalf("internal Title mutated via returned copy: got %q, want %q", again[0].Files[0].Title, wantTitle)
+	}
+	if again[0].Files[0].Name != wantName {
+		t.Fatalf("internal Name mutated via returned copy: got %q, want %q", again[0].Files[0].Name, wantName)
+	}
+
+	// (b) The returned Files slice must have its own backing array: replacing
+	// an element in the returned slice must not affect internal state.
+	groups2 := s.Groups()
+	groups2[0].Files[0] = &FileEntry{ID: "injected", Name: "injected.md"}
+
+	final := s.Groups()
+	if len(final) != 1 || len(final[0].Files) != 1 {
+		t.Fatalf("unexpected state after slice element replacement: %+v", final)
+	}
+	if final[0].Files[0].ID == "injected" {
+		t.Fatal("internal Files backing array mutated via returned slice")
+	}
+	if final[0].Files[0].ID != entry.ID {
+		t.Fatalf("got file ID %q, want %q", final[0].Files[0].ID, entry.ID)
 	}
 }
 
@@ -1895,7 +2628,7 @@ func TestAddFile_SetsFileType(t *testing.T) {
 			}
 
 			// Clean up for next test.
-			s.RemoveFile(entry.ID)
+			s.RemoveFile(entry.ID, DefaultGroup)
 		})
 	}
 }
@@ -1965,7 +2698,7 @@ func TestHandleFileServe(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw", nil)
+		req := httptest.NewRequest("GET", "/_/api/groups/default/files/"+entry.ID+"/raw", nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -1985,7 +2718,7 @@ func TestHandleFileServe(t *testing.T) {
 		s := newTestState(t)
 		handler := NewHandler(s)
 
-		req := httptest.NewRequest("GET", "/_/api/files/nonexistent/raw", nil)
+		req := httptest.NewRequest("GET", "/_/api/groups/default/files/nonexistent/raw", nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -2001,7 +2734,7 @@ func TestHandleFileServe(t *testing.T) {
 		s.AddUploadedFile("test.md", "# Hello", DefaultGroup) //nolint:errcheck
 
 		entry := s.Groups()[0].Files[0]
-		req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw", nil)
+		req := httptest.NewRequest("GET", "/_/api/groups/default/files/"+entry.ID+"/raw", nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -2022,7 +2755,7 @@ func TestHandleFileServe(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw?v=42", nil)
+		req := httptest.NewRequest("GET", "/_/api/groups/default/files/"+entry.ID+"/raw?v=42", nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -2053,7 +2786,7 @@ func TestHandleFileServe_RouteCoexistence(t *testing.T) {
 	}
 
 	// /raw → handleFileServe (serves the file itself).
-	req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw", nil)
+	req := httptest.NewRequest("GET", "/_/api/groups/default/files/"+entry.ID+"/raw", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -2064,7 +2797,7 @@ func TestHandleFileServe_RouteCoexistence(t *testing.T) {
 	}
 
 	// /raw/image.png → handleFileAsset (serves sibling asset).
-	req = httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/raw/image.png", nil)
+	req = httptest.NewRequest("GET", "/_/api/groups/default/files/"+entry.ID+"/raw/image.png", nil)
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -2072,69 +2805,6 @@ func TestHandleFileServe_RouteCoexistence(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "fakepng") {
 		t.Error("/raw/image.png: expected sibling asset content")
-	}
-}
-
-func TestResolveWithinBase(t *testing.T) {
-	base := filepath.Join(string(filepath.Separator), "home", "user", "docs")
-	tests := []struct {
-		name    string
-		rel     string
-		wantOK  bool
-		wantAbs string
-	}{
-		{"sibling", "image.png", true, filepath.Join(base, "image.png")},
-		{"subdir", "assets/image.png", true, filepath.Join(base, "assets", "image.png")},
-		{"dot prefix", "./image.png", true, filepath.Join(base, "image.png")},
-		{"parent escape", "../secret.txt", false, ""},
-		{"deep escape", "../../../../etc/passwd", false, ""},
-		{"sneaky escape", "assets/../../secret.txt", false, ""},
-		{"absolute is contained by join", "/etc/passwd", true, filepath.Join(base, "etc", "passwd")},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			abs, ok := resolveWithinBase(base, tt.rel)
-			if ok != tt.wantOK {
-				t.Fatalf("resolveWithinBase(%q, %q) ok = %v, want %v", base, tt.rel, ok, tt.wantOK)
-			}
-			if ok && abs != tt.wantAbs {
-				t.Fatalf("resolveWithinBase(%q, %q) = %q, want %q", base, tt.rel, abs, tt.wantAbs)
-			}
-		})
-	}
-}
-
-func TestHandleOpenFile_RejectsTraversal(t *testing.T) {
-	dir := t.TempDir()
-	s := newTestState(t)
-	handler := NewHandler(s)
-
-	// Document lives in a subdirectory so "../" escapes its directory.
-	subDir := filepath.Join(dir, "sub")
-	if err := os.MkdirAll(subDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	mdFile := filepath.Join(subDir, "doc.md")
-	os.WriteFile(mdFile, []byte("# Doc"), 0o600) //nolint:errcheck
-	// A sensitive sibling of the document directory, outside it.
-	os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("secret"), 0o600) //nolint:errcheck
-
-	entry, err := s.AddFile(mdFile, DefaultGroup)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	body, err := json.Marshal(openFileRequest{FileID: entry.ID, Path: "../secret.txt"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest("POST", "/_/api/files/open", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("traversal open: got status %d, want %d", rec.Code, http.StatusForbidden)
 	}
 }
 
@@ -2151,7 +2821,7 @@ func TestHandleFileContent_RejectsBinaryTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/content", nil)
+	req := httptest.NewRequest("GET", "/_/api/groups/default/files/"+entry.ID+"/content", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -2206,38 +2876,62 @@ func TestAddFileSkipsCheckboxesForNonMarkdown(t *testing.T) {
 	}
 }
 
-func TestRemoveFileCleansUpCheckboxState(t *testing.T) {
+func TestAddUploadedFilePopulatesCheckboxState(t *testing.T) {
+	s := newTestState(t)
+	entry := s.AddUploadedFile("tasks.md", "- [ ] First\n- [x] Second\n", DefaultGroup)
+
+	sources, _, orderedKeys, found := s.CheckboxState(entry.ID)
+	if !found {
+		t.Fatal("uploaded file checkbox state was not found")
+	}
+	if len(sources) != 2 {
+		t.Fatalf("got %d checkbox sources, want 2", len(sources))
+	}
+	if len(orderedKeys) != 2 || orderedKeys[0] != "First" || orderedKeys[1] != "Second" {
+		t.Fatalf("ordered keys = %v, want [First Second]", orderedKeys)
+	}
+}
+
+func TestRemoveFileCleansCheckboxStateAfterFinalReference(t *testing.T) {
 	s := newTestState(t)
 	dir := t.TempDir()
 	mdFile := filepath.Join(dir, "tasks.md")
-	os.WriteFile(mdFile, []byte("- [ ] Item\n"), 0o600) //nolint:errcheck
-
-	entry, err := s.AddFile(mdFile, DefaultGroup)
-	if err != nil {
+	if err := os.WriteFile(mdFile, []byte("- [ ] Task\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	// Manually add an override.
-	s.mu.Lock()
-	s.checkboxOverrides[entry.ID] = map[string]bool{"Item": true}
-	s.mu.Unlock()
-
-	s.RemoveFile(entry.ID)
-
-	s.mu.RLock()
-	_, hasSources := s.checkboxSources[entry.ID]
-	_, hasOverrides := s.checkboxOverrides[entry.ID]
-	_, hasOrdered := s.checkboxOrderedKeys[entry.ID]
-	s.mu.RUnlock()
-
-	if hasSources {
-		t.Fatal("sources should be deleted after RemoveFile")
+	entry, err := s.AddFile(mdFile, "first")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if hasOverrides {
-		t.Fatal("overrides should be deleted after RemoveFile")
+	if _, err := s.AddFile(mdFile, "second"); err != nil {
+		t.Fatal(err)
 	}
-	if hasOrdered {
-		t.Fatal("orderedKeys should be deleted after RemoveFile")
+	if !s.SetCheckbox(entry.ID, "Task", true) {
+		t.Fatal("failed to set checkbox override")
+	}
+
+	if !s.RemoveFile(entry.ID, "first") {
+		t.Fatal("failed to remove first reference")
+	}
+	if _, _, _, found := s.CheckboxState(entry.ID); !found {
+		t.Fatal("checkbox state was removed while another group still referenced the file")
+	}
+	if len(s.checkboxOverrides[entry.ID]) != 1 {
+		t.Fatalf("checkbox overrides = %v, want one retained override", s.checkboxOverrides[entry.ID])
+	}
+
+	if !s.RemoveFile(entry.ID, "second") {
+		t.Fatal("failed to remove final reference")
+	}
+	if _, ok := s.checkboxSources[entry.ID]; ok {
+		t.Fatal("checkbox sources retained after final reference removal")
+	}
+	if _, ok := s.checkboxOverrides[entry.ID]; ok {
+		t.Fatal("checkbox overrides retained after final reference removal")
+	}
+	if _, ok := s.checkboxOrderedKeys[entry.ID]; ok {
+		t.Fatal("checkbox ordered keys retained after final reference removal")
 	}
 }
 
@@ -2277,7 +2971,7 @@ func TestHandleGetCheckboxes(t *testing.T) {
 	handler := NewHandler(s)
 
 	t.Run("returns sources and empty overrides", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/_/api/files/"+entry.ID+"/checkboxes", nil)
+		req := httptest.NewRequest("GET", "/_/api/groups/default/files/"+entry.ID+"/checkboxes", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 
@@ -2304,7 +2998,7 @@ func TestHandleGetCheckboxes(t *testing.T) {
 	})
 
 	t.Run("returns 404 for unknown file", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/_/api/files/deadbeef/checkboxes", nil)
+		req := httptest.NewRequest("GET", "/_/api/groups/default/files/deadbeef/checkboxes", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		if w.Code != http.StatusNotFound {
@@ -2327,7 +3021,7 @@ func TestHandlePutCheckbox(t *testing.T) {
 
 	t.Run("toggles checkbox and stores override", func(t *testing.T) {
 		body := strings.NewReader(`{"checked": true}`)
-		req := httptest.NewRequest("PUT", "/_/api/files/"+entry.ID+"/checkboxes/Alpha", body)
+		req := httptest.NewRequest("PUT", "/_/api/groups/default/files/"+entry.ID+"/checkboxes/Alpha", body)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 
@@ -2346,7 +3040,7 @@ func TestHandlePutCheckbox(t *testing.T) {
 	t.Run("removes override when matching source", func(t *testing.T) {
 		// Beta source is true. Setting checked=true should remove override.
 		body := strings.NewReader(`{"checked": true}`)
-		req := httptest.NewRequest("PUT", "/_/api/files/"+entry.ID+"/checkboxes/Beta", body)
+		req := httptest.NewRequest("PUT", "/_/api/groups/default/files/"+entry.ID+"/checkboxes/Beta", body)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 
@@ -2371,7 +3065,7 @@ func TestHandlePutCheckbox(t *testing.T) {
 		}
 
 		body := strings.NewReader(`{"checked": true}`)
-		req := httptest.NewRequest("PUT", "/_/api/files/"+entry2.ID+"/checkboxes/Buy%20milk", body)
+		req := httptest.NewRequest("PUT", "/_/api/groups/default/files/"+entry2.ID+"/checkboxes/Buy%20milk", body)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 
@@ -2389,7 +3083,7 @@ func TestHandlePutCheckbox(t *testing.T) {
 
 	t.Run("returns 404 for unknown file", func(t *testing.T) {
 		body := strings.NewReader(`{"checked": true}`)
-		req := httptest.NewRequest("PUT", "/_/api/files/deadbeef/checkboxes/Alpha", body)
+		req := httptest.NewRequest("PUT", "/_/api/groups/default/files/deadbeef/checkboxes/Alpha", body)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		if w.Code != http.StatusNotFound {
@@ -2416,7 +3110,7 @@ func TestHandleDeleteCheckboxes(t *testing.T) {
 	s.mu.Unlock()
 
 	t.Run("unchecks all", func(t *testing.T) {
-		req := httptest.NewRequest("DELETE", "/_/api/files/"+entry.ID+"/checkboxes", nil)
+		req := httptest.NewRequest("DELETE", "/_/api/groups/default/files/"+entry.ID+"/checkboxes", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 
@@ -2443,7 +3137,7 @@ func TestHandleDeleteCheckboxes(t *testing.T) {
 	})
 
 	t.Run("returns 404 for unknown file", func(t *testing.T) {
-		req := httptest.NewRequest("DELETE", "/_/api/files/deadbeef/checkboxes", nil)
+		req := httptest.NewRequest("DELETE", "/_/api/groups/default/files/deadbeef/checkboxes", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		if w.Code != http.StatusNotFound {
@@ -2557,7 +3251,7 @@ func TestHandleCheckAll(t *testing.T) {
 	s.mu.Unlock()
 
 	t.Run("checks all", func(t *testing.T) {
-		req := httptest.NewRequest("POST", "/_/api/files/"+entry.ID+"/checkboxes/check-all", nil)
+		req := httptest.NewRequest("POST", "/_/api/groups/default/files/"+entry.ID+"/checkboxes/check-all", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 
@@ -2584,7 +3278,7 @@ func TestHandleCheckAll(t *testing.T) {
 	})
 
 	t.Run("returns 404 for unknown file", func(t *testing.T) {
-		req := httptest.NewRequest("POST", "/_/api/files/deadbeef/checkboxes/check-all", nil)
+		req := httptest.NewRequest("POST", "/_/api/groups/default/files/deadbeef/checkboxes/check-all", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		if w.Code != http.StatusNotFound {

@@ -1,6 +1,6 @@
 # Long Document
 
-This file tests scrolling and rendering performance with a longer document.
+This file tests scrolling and rendering performance with a longer document[^1].
 
 ## Section 1: Introduction
 
@@ -134,3 +134,5 @@ export async function fetchFileContent(
 ---
 
 *End of document*
+
+[^1]: This is a footnote near the top of the document, referenced from the introduction. It demonstrates smooth scroll navigation between footnote references and their definitions.
