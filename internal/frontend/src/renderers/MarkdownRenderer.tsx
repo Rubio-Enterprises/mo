@@ -906,7 +906,7 @@ export function MarkdownRenderer({
     };
 
     updateMarkers();
-    const resizeObserver = new ResizeObserver(updateMarkers);
+    const resizeObserver = new ResizeObserver(() => updateMarkers());
     resizeObserver.observe(articleRef.current);
     for (const element of articleRef.current.querySelectorAll("img, svg")) {
       resizeObserver.observe(element);
