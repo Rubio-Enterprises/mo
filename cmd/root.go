@@ -58,6 +58,7 @@ var (
 	clearBackup                  bool
 	jsonOutput                   bool
 	dangerouslyAllowRemoteAccess bool
+	trustedHosts                 []string
 )
 
 var rootCmd = &cobra.Command{
@@ -177,6 +178,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&clearBackup, "clear", false, "Clear saved session for the specified port")
 	rootCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output structured data as JSON to stdout")
 	rootCmd.Flags().BoolVar(&dangerouslyAllowRemoteAccess, "dangerously-allow-remote-access", false, "Allow remote access without authentication. Recommended only for trusted networks.")
+	rootCmd.Flags().StringArrayVar(&trustedHosts, "trusted-host", nil, "Additional Host header value to accept when mo is reached through a trusted reverse proxy such as Tailscale Serve (repeatable; include the port unless it is the scheme default, e.g. host.example.ts.net:8443). Loopback hosts stay accepted and the DNS-rebinding allowlist still rejects every other Host.")
 }
 
 func run(cmd *cobra.Command, args []string) error {
@@ -356,6 +358,10 @@ func run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	if err := validateTrustedHosts(trustedHosts); err != nil {
+		return err
+	}
+
 	filesByGroup := map[string][]string{target: files}
 	var patternsByGroup map[string][]string
 	if len(patterns) > 0 {
@@ -475,6 +481,19 @@ func isLoopbackBind(bind string) bool {
 	}
 	ip := net.ParseIP(bind)
 	return ip != nil && ip.IsLoopback()
+}
+
+// validateTrustedHosts rejects --trusted-host values that are not bare Host
+// header values (host or host:port). A pasted URL or path would never match
+// r.Host, silently leaving the proxy forbidden; catching it here fails fast
+// with an actionable message instead.
+func validateTrustedHosts(hosts []string) error {
+	for _, h := range hosts {
+		if h == "" || strings.ContainsAny(h, "/ \t") || strings.Contains(h, "://") {
+			return fmt.Errorf("invalid --trusted-host %q: expected a Host header value like host or host:port (no scheme, path, or spaces)", h)
+		}
+	}
+	return nil
 }
 
 func hasGlobChars(s string) bool {
@@ -817,11 +836,16 @@ func allowedHostsForAddr(addr string) []string {
 	if err != nil || dangerouslyAllowRemoteAccess {
 		return nil
 	}
-	return []string{
+	hosts := []string{
 		net.JoinHostPort("localhost", p),
 		net.JoinHostPort("127.0.0.1", p),
 		net.JoinHostPort("::1", p),
 	}
+	// Hostnames the operator explicitly vouches for: a trusted reverse proxy
+	// (e.g. Tailscale Serve) forwards its own Host header, not localhost. These
+	// are appended to the loopback allowlist rather than disabling it, so the
+	// DNS-rebinding defense still rejects every Host the operator did not name.
+	return append(hosts, trustedHosts...)
 }
 
 // probeServer checks that a mo server is running on addr by calling
@@ -1326,6 +1350,9 @@ func spawnNewProcess(addr string, restoreFile string) (*os.Process, error) {
 	}
 	if dangerouslyAllowRemoteAccess {
 		args = append(args, "--dangerously-allow-remote-access")
+	}
+	for _, h := range trustedHosts {
+		args = append(args, "--trusted-host", h)
 	}
 	cmd := exec.Command(binPath, args...) //nolint:gosec
 	setSysProcAttr(cmd)

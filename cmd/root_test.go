@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -574,6 +575,73 @@ func TestIsLoopbackBind(t *testing.T) {
 			got := isLoopbackBind(tt.bind)
 			if got != tt.want {
 				t.Errorf("isLoopbackBind(%q) = %v, want %v", tt.bind, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAllowedHostsForAddr(t *testing.T) {
+	origTrusted := trustedHosts
+	origDangerous := dangerouslyAllowRemoteAccess
+	t.Cleanup(func() {
+		trustedHosts = origTrusted
+		dangerouslyAllowRemoteAccess = origDangerous
+	})
+
+	t.Run("loopback set without trusted hosts", func(t *testing.T) {
+		trustedHosts = nil
+		dangerouslyAllowRemoteAccess = false
+		got := allowedHostsForAddr("localhost:6275")
+		want := []string{"localhost:6275", "127.0.0.1:6275", "[::1]:6275"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("trusted hosts are appended to the loopback set", func(t *testing.T) {
+		trustedHosts = []string{"host.example.ts.net:8443", "host.example.ts.net"}
+		dangerouslyAllowRemoteAccess = false
+		got := allowedHostsForAddr("localhost:6275")
+		want := []string{
+			"localhost:6275", "127.0.0.1:6275", "[::1]:6275",
+			"host.example.ts.net:8443", "host.example.ts.net",
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("dangerous remote access disables the allowlist entirely", func(t *testing.T) {
+		trustedHosts = []string{"host.example.ts.net:8443"}
+		dangerouslyAllowRemoteAccess = true
+		if got := allowedHostsForAddr("localhost:6275"); got != nil {
+			t.Fatalf("got %v, want nil (allowlist disabled)", got)
+		}
+	})
+}
+
+func TestValidateTrustedHosts(t *testing.T) {
+	t.Run("valid host values", func(t *testing.T) {
+		valid := []string{"host.example.ts.net", "host.example.ts.net:8443", "127.0.0.1:6275"}
+		if err := validateTrustedHosts(valid); err != nil {
+			t.Fatalf("validateTrustedHosts(%v) returned error: %v", valid, err)
+		}
+	})
+
+	invalid := []struct {
+		name string
+		host string
+	}{
+		{"scheme and path", "https://host.example.ts.net:8443/operations"},
+		{"leading scheme", "http://host"},
+		{"path only", "host/operations"},
+		{"embedded space", "host example"},
+		{"empty", ""},
+	}
+	for _, tt := range invalid {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateTrustedHosts([]string{tt.host}); err == nil {
+				t.Fatalf("validateTrustedHosts(%q) = nil, want error", tt.host)
 			}
 		})
 	}
