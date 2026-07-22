@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import { execSync, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,11 +10,29 @@ const PORT = 16275;
 const BASE = `http://localhost:${PORT}`;
 const IMAGES_DIR = resolve(ROOT, "images");
 const TESTDATA = resolve(ROOT, "testdata");
+const STATE_HOME = process.env.XDG_STATE_HOME || resolve(process.env.HOME, ".local/state");
+const TOKEN_FILE = resolve(STATE_HOME, "mo", "token", `mo-${PORT}.token`);
+
+function readToken() {
+  try {
+    return readFileSync(TOKEN_FILE, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+function apiHeaders(extra = {}) {
+  const token = readToken();
+  if (!token) return extra;
+  return { ...extra, "X-Mo-Token": token };
+}
 
 async function waitForServer(maxRetries = 30) {
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const res = await fetch(`${BASE}/_/api/groups`);
+      const res = await fetch(`${BASE}/_/api/groups`, {
+        headers: apiHeaders(),
+      });
       if (res.ok) return;
     } catch {}
     await new Promise((r) => setTimeout(r, 500));
@@ -24,7 +43,7 @@ async function waitForServer(maxRetries = 30) {
 async function addFile(path, group = "default") {
   const res = await fetch(`${BASE}/_/api/groups/${encodeURIComponent(group)}/files`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: apiHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ path }),
   });
   if (!res.ok) throw new Error(`Failed to add file: ${path}`);
@@ -157,21 +176,29 @@ async function main() {
       const peekWidth = Math.round(flatBox.width / 3);
       await page3.screenshot({
         path: resolve(IMAGES_DIR, "sidebar-flat.png"),
-        clip: { x: flatBox.x, y: flatBox.y, width: flatBox.width + peekWidth, height: flatBox.height / 2 },
+        clip: {
+          x: flatBox.x,
+          y: flatBox.y,
+          width: flatBox.width + peekWidth,
+          height: flatBox.height / 2,
+        },
       });
       console.log("Saved sidebar-flat.png");
 
       // Switch to tree view
-      await page3
-        .locator('button[title="Switch to tree view"]')
-        .click();
+      await page3.locator('button[title="Switch to tree view"]').click();
       await page3.waitForTimeout(500);
 
       // Tree mode — capture top half of sidebar + peek into content
       const treeBox = await page3.locator("aside").boundingBox();
       await page3.screenshot({
         path: resolve(IMAGES_DIR, "sidebar-tree.png"),
-        clip: { x: treeBox.x, y: treeBox.y, width: treeBox.width + peekWidth, height: treeBox.height / 2 },
+        clip: {
+          x: treeBox.x,
+          y: treeBox.y,
+          width: treeBox.width + peekWidth,
+          height: treeBox.height / 2,
+        },
       });
       console.log("Saved sidebar-tree.png");
       await page3.close();
@@ -180,9 +207,10 @@ async function main() {
     }
   } finally {
     server.kill();
-    // Kill any remaining mo process on the port
+    // Kill any remaining mo process on the port. Restrict to LISTEN sockets
+    // so we don't pick up our own outbound HTTP/SSE connections to that port.
     try {
-      execSync(`lsof -i :${PORT} -t | xargs kill 2>/dev/null`, {
+      execSync(`lsof -i :${PORT} -sTCP:LISTEN -t | xargs kill 2>/dev/null`, {
         stdio: "ignore",
       });
     } catch {}
@@ -193,7 +221,7 @@ async function main() {
 main().catch((err) => {
   console.error(err);
   try {
-    execSync(`lsof -i :${PORT} -t | xargs kill 2>/dev/null`, {
+    execSync(`lsof -i :${PORT} -sTCP:LISTEN -t | xargs kill 2>/dev/null`, {
       stdio: "ignore",
     });
   } catch {}

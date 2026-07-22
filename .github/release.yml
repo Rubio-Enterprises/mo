@@ -15,7 +15,7 @@ changelog:
         - bug
     - title: Dependency Updates ⬆️
       labels:
-        - dependencies        
+        - dependencies
     - title: Other Changes
       labels:
         - "*"

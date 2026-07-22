@@ -68,7 +68,7 @@ describe("EmptyGroupMessage", () => {
   it('falls back to "No file selected" when the group still has files', () => {
     const group = makeGroup({
       patterns: ["/abs/foo/*.md"],
-      files: [{ name: "a.md", id: "abc12345", path: "/abs/foo/a.md" }],
+      files: [{ name: "a.md", id: "abc12345", path: "/abs/foo/a.md", type: "markdown" }],
     });
     render(<EmptyGroupMessage group={group} />);
     expect(screen.getByText("No file selected")).toBeInTheDocument();

@@ -1,8 +1,6 @@
-const markdownExtensions = new Set(["md", "mdx", "markdown", "mdown", "mkdn", "mkd"]);
-
 export function isMarkdownFile(fileName: string): boolean {
-  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
-  return markdownExtensions.has(ext);
+  const lower = fileName.toLowerCase();
+  return lower.endsWith(".md") || lower.endsWith(".mdx");
 }
 
 // Map file extension to Shiki language identifier.

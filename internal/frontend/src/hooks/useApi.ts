@@ -1,9 +1,12 @@
+export type FileType = "markdown" | "code" | "pdf" | "image" | "binary" | "unknown";
+
 export interface FileEntry {
   name: string;
   id: string;
   path: string;
   title?: string;
   uploaded?: boolean;
+  type: FileType;
 }
 
 export interface Group {
@@ -53,6 +56,12 @@ export interface SearchResponse {
   context: number;
   total: number;
   results: SearchResult[];
+}
+
+export interface CheckboxState {
+  sources: Record<string, boolean>;
+  overrides: Record<string, boolean>;
+  orderedKeys: string[];
 }
 
 function groupPath(group: string): string {
@@ -153,4 +162,41 @@ export async function fetchSearchResults(
   const res = await fetch(`/_/api/search?${params.toString()}`);
   if (!res.ok) throw new Error("Failed to search file contents");
   return res.json();
+}
+
+export function rawFileUrl(group: string, id: string, revision?: number): string {
+  const base = `${groupPath(group)}/files/${id}/raw`;
+  return revision != null ? `${base}?v=${revision}` : base;
+}
+
+export async function fetchCheckboxes(group: string, id: string): Promise<CheckboxState> {
+  const res = await fetch(`${groupPath(group)}/files/${id}/checkboxes`);
+  if (!res.ok) throw new Error("Failed to fetch checkboxes");
+  return res.json();
+}
+
+export async function toggleCheckbox(
+  group: string,
+  id: string,
+  key: string,
+  checked: boolean,
+): Promise<void> {
+  const res = await fetch(`${groupPath(group)}/files/${id}/checkboxes/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ checked }),
+  });
+  if (!res.ok) throw new Error("Failed to toggle checkbox");
+}
+
+export async function uncheckAllCheckboxes(group: string, id: string): Promise<void> {
+  const res = await fetch(`${groupPath(group)}/files/${id}/checkboxes`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to uncheck all");
+}
+
+export async function checkAllCheckboxes(group: string, id: string): Promise<void> {
+  const res = await fetch(`${groupPath(group)}/files/${id}/checkboxes/check-all`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to check all");
 }

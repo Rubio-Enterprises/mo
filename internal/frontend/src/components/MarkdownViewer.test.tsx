@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { MarkdownViewer } from "./MarkdownViewer";
+import { FileViewer } from "./FileViewer";
 import { fetchFileContent, openRelativeFile } from "../hooks/useApi";
 
 vi.mock("mermaid", () => ({
@@ -10,10 +10,22 @@ vi.mock("mermaid", () => ({
   },
 }));
 
-vi.mock("../hooks/useApi", () => ({
-  fetchFileContent: vi.fn().mockResolvedValue({ content: "# Hello", baseDir: "/repo" }),
-  openRelativeFile: vi.fn(),
-}));
+vi.mock("../hooks/useApi", async () => {
+  const actual = await vi.importActual<typeof import("../hooks/useApi")>("../hooks/useApi");
+  return {
+    ...actual,
+    fetchFileContent: vi.fn().mockResolvedValue({ content: "# Hello", baseDir: "/repo" }),
+    openRelativeFile: vi.fn(),
+    fetchCheckboxes: vi.fn().mockResolvedValue({
+      sources: {},
+      overrides: {},
+      orderedKeys: [],
+    }),
+    toggleCheckbox: vi.fn().mockResolvedValue(undefined),
+    uncheckAllCheckboxes: vi.fn().mockResolvedValue(undefined),
+    checkAllCheckboxes: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 // jsdom has no layout, so stub getBoundingClientRect: the scroll container and
 // the sticky bar sit at the top, and the heading goes wherever a test wants it.
@@ -35,11 +47,12 @@ function rect(top: number, bottom: number): DOMRect {
   } as DOMRect;
 }
 
-function renderViewer(props: Partial<Parameters<typeof MarkdownViewer>[0]> = {}) {
+function renderViewer(props: Partial<Parameters<typeof FileViewer>[0]> = {}) {
   return render(
-    <MarkdownViewer
+    <FileViewer
       fileId="aaa11111"
       fileName="README.md"
+      fileType="markdown"
       activeGroup="default"
       revision={0}
       scrollContainer={scrollContainer}
@@ -73,7 +86,7 @@ afterEach(() => {
   Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
 });
 
-describe("MarkdownViewer file label", () => {
+describe("FileViewer file label", () => {
   it("shows the file name alone while the title is on screen", async () => {
     headingRect = { top: 100, bottom: 150 };
     renderViewer({ title: "Project Readme", filePath: "/home/me/code/mo/docs/README.md" });
@@ -117,7 +130,7 @@ describe("MarkdownViewer file label", () => {
   });
 });
 
-describe("MarkdownViewer images", () => {
+describe("FileViewer images", () => {
   const pngDataUri =
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+P+/HgAFhAJ/wlseKgAAAABJRU5ErkJggg==";
 
@@ -145,7 +158,7 @@ describe("MarkdownViewer images", () => {
   });
 });
 
-describe("MarkdownViewer relative links", () => {
+describe("FileViewer relative links", () => {
   beforeEach(() => {
     vi.mocked(fetchFileContent).mockResolvedValue({
       content: "[Next page](next.md)",
@@ -155,6 +168,7 @@ describe("MarkdownViewer relative links", () => {
       id: "bbb22222",
       name: "next.md",
       path: "/repo/next.md",
+      type: "markdown",
     });
   });
 
@@ -162,6 +176,16 @@ describe("MarkdownViewer relative links", () => {
     renderViewer();
     const link = await screen.findByRole("link", { name: "Next page" });
     expect(link).toHaveAttribute("href", "/?from=aaa11111&open=next.md");
+  });
+
+  it("preserves a fragment in the self-resolving new-tab URL", async () => {
+    vi.mocked(fetchFileContent).mockResolvedValue({
+      content: "[Details](next.md#details)",
+      baseDir: "/repo",
+    });
+    renderViewer();
+    const link = await screen.findByRole("link", { name: "Details" });
+    expect(link).toHaveAttribute("href", "/?from=aaa11111&open=next.md&hash=%23details");
   });
 
   it("opens in place on a plain click", async () => {
@@ -172,7 +196,7 @@ describe("MarkdownViewer relative links", () => {
     const notPrevented = fireEvent.click(link);
 
     expect(notPrevented).toBe(false); // preventDefault was called
-    await waitFor(() => expect(onFileOpened).toHaveBeenCalledWith("bbb22222"));
+    await waitFor(() => expect(onFileOpened).toHaveBeenCalledWith("bbb22222", ""));
     expect(openRelativeFile).toHaveBeenCalledWith("default", "aaa11111", "next.md");
   });
 

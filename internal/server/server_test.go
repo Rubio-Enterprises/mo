@@ -32,13 +32,18 @@ func newTestState(t *testing.T) *State {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	s := &State{
-		groups:             make(map[string]*Group),
-		subscribers:        make(map[chan sseEvent]struct{}),
-		restartCh:          make(chan string, 1),
-		shutdownCh:         make(chan struct{}, 1),
-		watchedDirs:        make(map[string]int),
-		fileChangeDebounce: defaultFileChangeDebounce,
-		fileChangeTimers:   make(map[string]*time.Timer),
+		groups:              make(map[string]*Group),
+		subscribers:         make(map[chan sseEvent]struct{}),
+		restartCh:           make(chan string, 1),
+		shutdownCh:          make(chan struct{}, 1),
+		watchedDirs:         make(map[string]int),
+		pathAliases:         make(map[string]string),
+		aliasReverse:        make(map[string]string),
+		fileChangeDebounce:  defaultFileChangeDebounce,
+		fileChangeTimers:    make(map[string]*time.Timer),
+		checkboxSources:     make(map[string]map[string]bool),
+		checkboxOverrides:   make(map[string]map[string]bool),
+		checkboxOrderedKeys: make(map[string][]string),
 	}
 	_ = ctx
 	return s
@@ -1151,9 +1156,10 @@ func TestAddFile_RejectsBinaryFile(t *testing.T) {
 
 	dir := t.TempDir()
 
-	// Binary file (contains NUL bytes)
-	binFile := filepath.Join(dir, "image.png")
-	os.WriteFile(binFile, []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00}, 0o600) //nolint:errcheck
+	// A text-classified file containing NUL bytes is rejected. Known binary
+	// formats such as images and PDFs are covered by file-type tests below.
+	binFile := filepath.Join(dir, "main.go")
+	os.WriteFile(binFile, []byte("package\x00main"), 0o600) //nolint:errcheck
 
 	_, err := s.AddFile(binFile, DefaultGroup)
 	if err == nil {
@@ -1267,12 +1273,12 @@ func TestAddUploadedFile(t *testing.T) {
 func TestHandleAddFile_RejectsBinaryFile(t *testing.T) {
 	dir := t.TempDir()
 
-	t.Run("returns 400 for binary file", func(t *testing.T) {
+	t.Run("returns 400 for binary content in a text type", func(t *testing.T) {
 		s := newTestState(t)
 		handler := NewHandler(s)
 
-		binFile := filepath.Join(dir, "image.png")
-		os.WriteFile(binFile, []byte{0x89, 0x50, 0x4e, 0x47, 0x00}, 0o600) //nolint:errcheck
+		binFile := filepath.Join(dir, "main.go")
+		os.WriteFile(binFile, []byte("package\x00main"), 0o600) //nolint:errcheck
 
 		body, err := json.Marshal(addFileRequest{Path: binFile})
 		if err != nil {
@@ -2378,6 +2384,104 @@ func TestHandleFileRaw_PercentEncodedNonASCII(t *testing.T) {
 	}
 }
 
+func TestResolveWithinBase(t *testing.T) {
+	base := filepath.Join(string(filepath.Separator), "home", "user", "docs")
+	tests := []struct {
+		name    string
+		rel     string
+		wantOK  bool
+		wantAbs string
+	}{
+		{"sibling", "image.png", true, filepath.Join(base, "image.png")},
+		{"subdir", "assets/image.png", true, filepath.Join(base, "assets", "image.png")},
+		{"dot prefix", "./image.png", true, filepath.Join(base, "image.png")},
+		{"parent escape", "../secret.txt", false, ""},
+		{"deep escape", "../../../../etc/passwd", false, ""},
+		{"sneaky escape", "assets/../../secret.txt", false, ""},
+		{"absolute is contained by join", "/etc/passwd", true, filepath.Join(base, "etc", "passwd")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			abs, ok := resolveWithinBase(base, tt.rel)
+			if ok != tt.wantOK {
+				t.Fatalf("resolveWithinBase(%q, %q) ok = %v, want %v", base, tt.rel, ok, tt.wantOK)
+			}
+			if ok && abs != tt.wantAbs {
+				t.Fatalf("resolveWithinBase(%q, %q) = %q, want %q", base, tt.rel, abs, tt.wantAbs)
+			}
+		})
+	}
+}
+
+func TestHandleFileRaw_RejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(subDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	mdFile := filepath.Join(subDir, "doc.md")
+	if err := os.WriteFile(mdFile, []byte("# Doc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const group = "docs"
+	s := newTestState(t)
+	entry, err := s.AddFile(mdFile, group)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.SetPathValue("group", group)
+	req.SetPathValue("id", entry.ID)
+	req.SetPathValue("path", "../secret.txt")
+	rec := httptest.NewRecorder()
+	handleFileRaw(s).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("traversal raw asset: got status %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestHandleOpenFile_RejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(subDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	mdFile := filepath.Join(subDir, "doc.md")
+	if err := os.WriteFile(mdFile, []byte("# Doc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	const group = "docs"
+	s := newTestState(t)
+	entry, err := s.AddFile(mdFile, group)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	encodedTraversal := url.PathEscape("../secret.txt")
+	body, err := json.Marshal(openFileRequest{FileID: entry.ID, Path: encodedTraversal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/_/api/groups/"+group+"/files/open", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	NewHandler(s).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("traversal open: got status %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
 // Regression test: Groups() must return deep copies so JSON encoding does
 // not race with Title updates from the file watcher.
 func TestGroupsRaceWithTitleUpdate(t *testing.T) {
@@ -2481,4 +2585,704 @@ func TestGroupsReturnsDeepCopies(t *testing.T) {
 	if final[0].Files[0].ID != entry.ID {
 		t.Fatalf("got file ID %q, want %q", final[0].Files[0].ID, entry.ID)
 	}
+}
+
+func TestAddFile_SetsFileType(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+
+	tests := []struct {
+		name     string
+		filename string
+		content  []byte
+		wantType FileType
+		wantErr  bool
+	}{
+		{"markdown", "readme.md", []byte("# Hello"), FileTypeMarkdown, false},
+		{"code", "main.go", []byte("package main"), FileTypeCode, false},
+		{"pdf", "doc.pdf", []byte("%PDF-1.4\x00binary"), FileTypePDF, false},
+		{"image", "photo.png", []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00}, FileTypeImage, false},
+		{"unknown text", "data.xyz", []byte("some text"), FileTypeUnknown, false},
+		{"unknown binary promoted", "data.bin", []byte("has\x00null"), FileTypeBinary, false},
+		{"markdown with null bytes", "bad.md", []byte("# Hi\x00"), FileTypeMarkdown, true},
+		{"code with null bytes", "bad.go", []byte("package\x00main"), FileTypeCode, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(dir, tt.filename)
+			os.WriteFile(path, tt.content, 0o600) //nolint:errcheck
+
+			entry, err := s.AddFile(path, DefaultGroup)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if entry.Type != tt.wantType {
+				t.Errorf("Type = %q, want %q", entry.Type, tt.wantType)
+			}
+
+			// Clean up for next test.
+			s.RemoveFile(entry.ID, DefaultGroup)
+		})
+	}
+}
+
+func TestAddFile_RejectsDirectoryWithPDFExtension(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	pdfDir := filepath.Join(dir, "something.pdf")
+	os.Mkdir(pdfDir, 0o755) //nolint:errcheck
+
+	_, err := s.AddFile(pdfDir, DefaultGroup)
+	if err == nil {
+		t.Fatal("expected error for directory with .pdf extension")
+	}
+}
+
+func TestAddFile_TitleExtractionByType(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+
+	// Markdown gets title.
+	mdPath := filepath.Join(dir, "doc.md")
+	os.WriteFile(mdPath, []byte("# My Title"), 0o600) //nolint:errcheck
+	entry, err := s.AddFile(mdPath, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Title != "My Title" {
+		t.Errorf("markdown Title = %q, want %q", entry.Title, "My Title")
+	}
+
+	// Code with # comment also gets title (preserves existing behavior).
+	goPath := filepath.Join(dir, "script.sh")
+	os.WriteFile(goPath, []byte("# Setup Script"), 0o600) //nolint:errcheck
+	entry2, err := s.AddFile(goPath, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry2.Title != "Setup Script" {
+		t.Errorf("code Title = %q, want %q", entry2.Title, "Setup Script")
+	}
+
+	// PDF skips title extraction.
+	pdfPath := filepath.Join(dir, "doc.pdf")
+	os.WriteFile(pdfPath, []byte("%PDF-1.4\x00binary"), 0o600) //nolint:errcheck
+	entry3, err := s.AddFile(pdfPath, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry3.Title != "" {
+		t.Errorf("pdf Title = %q, want empty", entry3.Title)
+	}
+}
+
+func TestHandleFileServe(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("serves PDF with correct content type", func(t *testing.T) {
+		s := newTestState(t)
+		handler := NewHandler(s)
+
+		pdfFile := filepath.Join(dir, "doc.pdf")
+		os.WriteFile(pdfFile, []byte("%PDF-1.4\x00test content"), 0o600) //nolint:errcheck
+
+		entry, err := s.AddFile(pdfFile, DefaultGroup)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest("GET", "/_/api/groups/default/files/"+entry.ID+"/raw", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+		}
+		ct := rec.Header().Get("Content-Type")
+		if !strings.Contains(ct, "application/pdf") {
+			t.Errorf("Content-Type = %q, want application/pdf", ct)
+		}
+		if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Error("missing X-Content-Type-Options: nosniff header")
+		}
+	})
+
+	t.Run("returns 404 for unknown ID", func(t *testing.T) {
+		s := newTestState(t)
+		handler := NewHandler(s)
+
+		req := httptest.NewRequest("GET", "/_/api/groups/default/files/nonexistent/raw", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("got status %d, want %d", rec.Code, http.StatusNotFound)
+		}
+	})
+
+	t.Run("returns 404 for uploaded file", func(t *testing.T) {
+		s := newTestState(t)
+		handler := NewHandler(s)
+
+		s.AddUploadedFile("test.md", "# Hello", DefaultGroup) //nolint:errcheck
+
+		entry := s.Groups()[0].Files[0]
+		req := httptest.NewRequest("GET", "/_/api/groups/default/files/"+entry.ID+"/raw", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("got status %d, want %d", rec.Code, http.StatusNotFound)
+		}
+	})
+
+	t.Run("cache busting param does not affect response", func(t *testing.T) {
+		s := newTestState(t)
+		handler := NewHandler(s)
+
+		txtFile := filepath.Join(dir, "hello.md")
+		os.WriteFile(txtFile, []byte("# Hello"), 0o600) //nolint:errcheck
+
+		entry, err := s.AddFile(txtFile, DefaultGroup)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest("GET", "/_/api/groups/default/files/"+entry.ID+"/raw?v=42", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+		}
+		if !strings.Contains(rec.Body.String(), "# Hello") {
+			t.Error("response body does not contain file content")
+		}
+	})
+}
+
+func TestHandleFileServe_RouteCoexistence(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestState(t)
+	handler := NewHandler(s)
+
+	mdFile := filepath.Join(dir, "readme.md")
+	os.WriteFile(mdFile, []byte("# Hello"), 0o600) //nolint:errcheck
+
+	// Create a sibling image file.
+	imgFile := filepath.Join(dir, "image.png")
+	os.WriteFile(imgFile, []byte("fakepng"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// /raw → handleFileServe (serves the file itself).
+	req := httptest.NewRequest("GET", "/_/api/groups/default/files/"+entry.ID+"/raw", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/raw: got status %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "# Hello") {
+		t.Error("/raw: expected file content")
+	}
+
+	// /raw/image.png → handleFileAsset (serves sibling asset).
+	req = httptest.NewRequest("GET", "/_/api/groups/default/files/"+entry.ID+"/raw/image.png", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/raw/image.png: got status %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "fakepng") {
+		t.Error("/raw/image.png: expected sibling asset content")
+	}
+}
+
+func TestHandleFileContent_RejectsBinaryTypes(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestState(t)
+	handler := NewHandler(s)
+
+	pdfFile := filepath.Join(dir, "doc.pdf")
+	os.WriteFile(pdfFile, []byte("%PDF-1.4\x00binary"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(pdfFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "/_/api/groups/default/files/"+entry.ID+"/content", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusUnsupportedMediaType)
+	}
+}
+
+func TestAddFilePopulatesCheckboxSources(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] First\n- [x] Second\n"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.mu.RLock()
+	sources := s.checkboxSources[entry.ID]
+	s.mu.RUnlock()
+
+	if len(sources) != 2 {
+		t.Fatalf("got %d sources, want 2", len(sources))
+	}
+	if sources["First"] != false {
+		t.Fatal("First should be unchecked")
+	}
+	if sources["Second"] != true {
+		t.Fatal("Second should be checked")
+	}
+}
+
+func TestAddFileSkipsCheckboxesForNonMarkdown(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	goFile := filepath.Join(dir, "main.go")
+	os.WriteFile(goFile, []byte("package main\n"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(goFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.mu.RLock()
+	sources := s.checkboxSources[entry.ID]
+	s.mu.RUnlock()
+
+	if len(sources) != 0 {
+		t.Fatalf("got %d sources for non-markdown, want 0", len(sources))
+	}
+}
+
+func TestAddUploadedFilePopulatesCheckboxState(t *testing.T) {
+	s := newTestState(t)
+	entry := s.AddUploadedFile("tasks.md", "- [ ] First\n- [x] Second\n", DefaultGroup)
+
+	sources, _, orderedKeys, found := s.CheckboxState(entry.ID)
+	if !found {
+		t.Fatal("uploaded file checkbox state was not found")
+	}
+	if len(sources) != 2 {
+		t.Fatalf("got %d checkbox sources, want 2", len(sources))
+	}
+	if len(orderedKeys) != 2 || orderedKeys[0] != "First" || orderedKeys[1] != "Second" {
+		t.Fatalf("ordered keys = %v, want [First Second]", orderedKeys)
+	}
+}
+
+func TestRemoveFileCleansCheckboxStateAfterFinalReference(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	if err := os.WriteFile(mdFile, []byte("- [ ] Task\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	entry, err := s.AddFile(mdFile, "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddFile(mdFile, "second"); err != nil {
+		t.Fatal(err)
+	}
+	if !s.SetCheckbox(entry.ID, "Task", true) {
+		t.Fatal("failed to set checkbox override")
+	}
+
+	if !s.RemoveFile(entry.ID, "first") {
+		t.Fatal("failed to remove first reference")
+	}
+	if _, _, _, found := s.CheckboxState(entry.ID); !found {
+		t.Fatal("checkbox state was removed while another group still referenced the file")
+	}
+	if len(s.checkboxOverrides[entry.ID]) != 1 {
+		t.Fatalf("checkbox overrides = %v, want one retained override", s.checkboxOverrides[entry.ID])
+	}
+
+	if !s.RemoveFile(entry.ID, "second") {
+		t.Fatal("failed to remove final reference")
+	}
+	if _, ok := s.checkboxSources[entry.ID]; ok {
+		t.Fatal("checkbox sources retained after final reference removal")
+	}
+	if _, ok := s.checkboxOverrides[entry.ID]; ok {
+		t.Fatal("checkbox overrides retained after final reference removal")
+	}
+	if _, ok := s.checkboxOrderedKeys[entry.ID]; ok {
+		t.Fatal("checkbox ordered keys retained after final reference removal")
+	}
+}
+
+func TestAddFilePopulatesCheckboxOrderedKeys(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] First\n- [x] Second\n"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.mu.RLock()
+	ordered := s.checkboxOrderedKeys[entry.ID]
+	s.mu.RUnlock()
+
+	if len(ordered) != 2 {
+		t.Fatalf("got %d ordered keys, want 2", len(ordered))
+	}
+	if ordered[0] != "First" || ordered[1] != "Second" {
+		t.Fatalf("ordered keys wrong: %v", ordered)
+	}
+}
+
+func TestHandleGetCheckboxes(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(s)
+
+	t.Run("returns sources and empty overrides", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/_/api/groups/default/files/"+entry.ID+"/checkboxes", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("got status %d, want 200", w.Code)
+		}
+		var resp struct {
+			Sources   map[string]bool `json:"sources"`
+			Overrides map[string]bool `json:"overrides"`
+		}
+		json.NewDecoder(w.Body).Decode(&resp) //nolint:errcheck
+		if len(resp.Sources) != 2 {
+			t.Fatalf("got %d sources, want 2", len(resp.Sources))
+		}
+		if resp.Sources["Alpha"] != false {
+			t.Fatal("Alpha should be false")
+		}
+		if resp.Sources["Beta"] != true {
+			t.Fatal("Beta should be true")
+		}
+		if len(resp.Overrides) != 0 {
+			t.Fatalf("got %d overrides, want 0", len(resp.Overrides))
+		}
+	})
+
+	t.Run("returns 404 for unknown file", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/_/api/groups/default/files/deadbeef/checkboxes", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("got status %d, want 404", w.Code)
+		}
+	})
+}
+
+func TestHandlePutCheckbox(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(s)
+
+	t.Run("toggles checkbox and stores override", func(t *testing.T) {
+		body := strings.NewReader(`{"checked": true}`)
+		req := httptest.NewRequest("PUT", "/_/api/groups/default/files/"+entry.ID+"/checkboxes/Alpha", body)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("got status %d, want 204", w.Code)
+		}
+
+		s.mu.RLock()
+		overrides := s.checkboxOverrides[entry.ID]
+		s.mu.RUnlock()
+		if overrides["Alpha"] != true {
+			t.Fatal("Alpha override should be true")
+		}
+	})
+
+	t.Run("removes override when matching source", func(t *testing.T) {
+		// Beta source is true. Setting checked=true should remove override.
+		body := strings.NewReader(`{"checked": true}`)
+		req := httptest.NewRequest("PUT", "/_/api/groups/default/files/"+entry.ID+"/checkboxes/Beta", body)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("got status %d, want 204", w.Code)
+		}
+
+		s.mu.RLock()
+		overrides := s.checkboxOverrides[entry.ID]
+		s.mu.RUnlock()
+		if _, exists := overrides["Beta"]; exists {
+			t.Fatal("Beta override should be removed (matches source)")
+		}
+	})
+
+	t.Run("handles URL-encoded keys", func(t *testing.T) {
+		mdFile2 := filepath.Join(dir, "spaces.md")
+		os.WriteFile(mdFile2, []byte("- [ ] Buy milk\n"), 0o600) //nolint:errcheck
+		entry2, err := s.AddFile(mdFile2, DefaultGroup)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		body := strings.NewReader(`{"checked": true}`)
+		req := httptest.NewRequest("PUT", "/_/api/groups/default/files/"+entry2.ID+"/checkboxes/Buy%20milk", body)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("got status %d, want 204", w.Code)
+		}
+
+		s.mu.RLock()
+		overrides := s.checkboxOverrides[entry2.ID]
+		s.mu.RUnlock()
+		if overrides["Buy milk"] != true {
+			t.Fatal("Buy milk override should be true")
+		}
+	})
+
+	t.Run("returns 404 for unknown file", func(t *testing.T) {
+		body := strings.NewReader(`{"checked": true}`)
+		req := httptest.NewRequest("PUT", "/_/api/groups/default/files/deadbeef/checkboxes/Alpha", body)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("got status %d, want 404", w.Code)
+		}
+	})
+}
+
+func TestHandleDeleteCheckboxes(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [x] Gamma\n"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(s)
+
+	// Toggle Alpha to true (source is false).
+	s.mu.Lock()
+	s.checkboxOverrides[entry.ID] = map[string]bool{"Alpha": true}
+	s.mu.Unlock()
+
+	t.Run("unchecks all", func(t *testing.T) {
+		req := httptest.NewRequest("DELETE", "/_/api/groups/default/files/"+entry.ID+"/checkboxes", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("got status %d, want 204", w.Code)
+		}
+
+		s.mu.RLock()
+		overrides := s.checkboxOverrides[entry.ID]
+		s.mu.RUnlock()
+
+		// Alpha: source false, should have no override (unchecked = source).
+		if _, exists := overrides["Alpha"]; exists {
+			t.Fatal("Alpha override should be removed (source is already false)")
+		}
+		// Beta: source true, should have override false.
+		if overrides["Beta"] != false {
+			t.Fatal("Beta override should be false")
+		}
+		// Gamma: source true, should have override false.
+		if overrides["Gamma"] != false {
+			t.Fatal("Gamma override should be false")
+		}
+	})
+
+	t.Run("returns 404 for unknown file", func(t *testing.T) {
+		req := httptest.NewRequest("DELETE", "/_/api/groups/default/files/deadbeef/checkboxes", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("got status %d, want 404", w.Code)
+		}
+	})
+}
+
+func TestCheckboxReconciliationOnFileChange(t *testing.T) {
+	ctx, cancel := donegroup.WithCancel(context.Background())
+	defer cancel()
+	s := NewState(ctx)
+	s.fileChangeDebounce = 0 // Disable debounce for testing.
+
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [ ] Gamma\n"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up overrides.
+	s.mu.Lock()
+	s.checkboxOverrides[entry.ID] = map[string]bool{
+		"Alpha": true,  // Differs from source (false) — should survive.
+		"Beta":  false, // Differs from source (true) — should survive.
+		"Gamma": false, // Matches source (false) — should be pruned.
+	}
+	s.mu.Unlock()
+
+	// Rewrite the file: remove Gamma, change Beta to unchecked.
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [ ] Beta\n"), 0o600) //nolint:errcheck
+
+	// Trigger reconciliation.
+	s.notifyFileChangedByPath(mdFile)
+
+	s.mu.RLock()
+	overrides := s.checkboxOverrides[entry.ID]
+	sources := s.checkboxSources[entry.ID]
+	s.mu.RUnlock()
+
+	// Alpha: source is still false, override true — should remain.
+	if overrides["Alpha"] != true {
+		t.Fatal("Alpha override should survive (differs from source)")
+	}
+	// Beta: source changed to false, override is false — should be pruned (matches new source).
+	if _, exists := overrides["Beta"]; exists {
+		t.Fatal("Beta override should be pruned (matches new source)")
+	}
+	// Gamma: removed from file — should be pruned.
+	if _, exists := overrides["Gamma"]; exists {
+		t.Fatal("Gamma override should be pruned (key no longer in source)")
+	}
+	// Sources should be updated.
+	if len(sources) != 2 {
+		t.Fatalf("got %d sources, want 2", len(sources))
+	}
+}
+
+func TestRestoreCheckboxOverrides(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	overrides := map[string]map[string]bool{
+		entry.ID: {"Alpha": true, "Beta": true, "Deleted": false},
+	}
+	s.RestoreCheckboxOverrides(overrides)
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	ovr := s.checkboxOverrides[entry.ID]
+	// Alpha: source false, override true — should survive.
+	if ovr["Alpha"] != true {
+		t.Fatal("Alpha override should survive")
+	}
+	// Beta: source true, override true — matches source, should be pruned.
+	if _, exists := ovr["Beta"]; exists {
+		t.Fatal("Beta override should be pruned (matches source)")
+	}
+	// Deleted: not in source — should be pruned.
+	if _, exists := ovr["Deleted"]; exists {
+		t.Fatal("Deleted override should be pruned (not in source)")
+	}
+}
+
+func TestHandleCheckAll(t *testing.T) {
+	s := newTestState(t)
+	dir := t.TempDir()
+	mdFile := filepath.Join(dir, "tasks.md")
+	os.WriteFile(mdFile, []byte("- [ ] Alpha\n- [x] Beta\n- [ ] Gamma\n"), 0o600) //nolint:errcheck
+
+	entry, err := s.AddFile(mdFile, DefaultGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(s)
+
+	// Set an existing override: Beta overridden to false.
+	s.mu.Lock()
+	s.checkboxOverrides[entry.ID] = map[string]bool{"Beta": false}
+	s.mu.Unlock()
+
+	t.Run("checks all", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/_/api/groups/default/files/"+entry.ID+"/checkboxes/check-all", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("got status %d, want 204", w.Code)
+		}
+
+		s.mu.RLock()
+		overrides := s.checkboxOverrides[entry.ID]
+		s.mu.RUnlock()
+
+		// Alpha: source false, should have override true.
+		if overrides["Alpha"] != true {
+			t.Fatal("Alpha override should be true")
+		}
+		// Beta: source true, should have no override (checked = source).
+		if _, exists := overrides["Beta"]; exists {
+			t.Fatal("Beta override should be removed (matches source)")
+		}
+		// Gamma: source false, should have override true.
+		if overrides["Gamma"] != true {
+			t.Fatal("Gamma override should be true")
+		}
+	})
+
+	t.Run("returns 404 for unknown file", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/_/api/groups/default/files/deadbeef/checkboxes/check-all", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("got status %d, want 404", w.Code)
+		}
+	})
 }

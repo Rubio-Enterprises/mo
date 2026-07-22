@@ -79,6 +79,11 @@ body,
   list-style-type: decimal;
 }
 
+.markdown-body li.task-list-item:hover {
+  background-color: var(--color-gh-bg-hover);
+  border-radius: 4px;
+}
+
 [data-theme="light"] .markdown-body {
   --fgColor-accent: #0969da;
   --fgColor-danger: #d1242f;

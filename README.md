@@ -6,11 +6,17 @@
 
 # mo
 
+<!-- badges: start -->
 [![build](https://github.com/k1LoW/mo/actions/workflows/ci.yml/badge.svg)](https://github.com/k1LoW/mo/actions/workflows/ci.yml) ![Coverage](https://raw.githubusercontent.com/k1LoW/octocovs/main/badges/k1LoW/mo/coverage.svg) ![Code to Test Ratio](https://raw.githubusercontent.com/k1LoW/octocovs/main/badges/k1LoW/mo/ratio.svg) ![Test Execution Time](https://raw.githubusercontent.com/k1LoW/octocovs/main/badges/k1LoW/mo/time.svg)
+<!-- badges: end -->
 
-`mo` is a **M**arkdown viewer that **o**pens `.md` files in a browser.
+> `mo` is a **M**arkdown viewer that **o**pens `.md` files in a browser.
 
-## Features
+## What it is
+
+`mo` is an experimental Go CLI that opens Markdown files in your browser with live-reload. It runs a small HTTP server (default port `6275`) that embeds a React SPA as a single binary, so saving a watched file refreshes the browser automatically. Use it for previewing docs, drafting specs, or wiring rendered Markdown into scripts and LLM-driven workflows.
+
+Highlights:
 
 - GitHub-flavored Markdown (tables, task lists, footnotes, etc.)
 - Syntax highlighting ([Shiki](https://shiki.style/))
@@ -41,21 +47,27 @@
 **homebrew tap:**
 
 ```console
-$ brew install k1LoW/tap/mo
+brew install k1LoW/tap/mo
+```
+
+**go install:**
+
+```console
+go install github.com/k1LoW/mo@latest
 ```
 
 **manually:**
 
-Download binary from [releases page](https://github.com/k1LoW/mo/releases)
+Download a binary from the [releases page](https://github.com/k1LoW/mo/releases).
 
 ## Usage
 
-``` console
-$ mo README.md                          # Open a single file
-$ mo README.md CHANGELOG.md docs/*.md   # Open multiple files
-$ mo docs/                              # Open all .md files in a directory
-$ mo spec.md --target design            # Open in a named group
-$ cat notes.md | mo                     # Read Markdown from stdin
+```console
+mo README.md                          # Open a single file
+mo README.md CHANGELOG.md docs/*.md   # Open multiple files
+mo docs/                              # Open all .md files in a directory
+mo spec.md --target design            # Open in a named group
+cat notes.md | mo                     # Read Markdown from stdin
 ```
 
 `mo` opens Markdown files in a browser with live-reload. When you save a file, the browser automatically reflects the changes.
@@ -64,10 +76,10 @@ $ cat notes.md | mo                     # Read Markdown from stdin
 
 When no positional arguments are given and stdin is redirected (not a terminal), `mo` reads Markdown content from stdin.
 
-``` console
-$ cat notes.md | mo
-$ some-command | mo --target output
-$ mo < notes.md
+```console
+cat notes.md | mo
+some-command | mo --target output
+mo < notes.md
 ```
 
 The content is loaded in-memory with a generated name (`stdin-<hash>.md`). Piping the same content again reuses the existing entry (deduplicated by content hash).
@@ -76,15 +88,15 @@ The content is loaded in-memory with a generated name (`stdin-<hash>.md`). Pipin
 
 By default, `mo` runs a single server on port `6275`. If a server is already running on the same port, subsequent `mo` invocations add files to the existing session instead of starting a new one.
 
-``` console
-$ mo README.md          # Starts a mo server in the background
-$ mo CHANGELOG.md       # Adds the file to the running mo server
+```console
+mo README.md          # Starts a mo server in the background
+mo CHANGELOG.md       # Adds the file to the running mo server
 ```
 
 To run a completely separate session, use a different port:
 
-``` console
-$ mo draft.md -p 6276
+```console
+mo draft.md -p 6276
 ```
 
 ![Multiple files with sidebar](images/multiple-files.png)
@@ -93,10 +105,10 @@ $ mo draft.md -p 6276
 
 Files can be organized into named groups using the `--target` (`-t`) flag. Each group gets its own URL path and sidebar.
 
-``` console
-$ mo spec.md --target design      # Opens at http://localhost:6275/design
-$ mo api.md --target design       # Adds to the "design" group
-$ mo notes.md --target notes      # Opens at http://localhost:6275/notes
+```console
+mo spec.md --target design      # Opens at http://localhost:6275/design
+mo api.md --target design       # Adds to the "design" group
+mo notes.md --target notes      # Opens at http://localhost:6275/notes
 ```
 
 ![Group view](images/groups.png)
@@ -105,42 +117,43 @@ $ mo notes.md --target notes      # Opens at http://localhost:6275/notes
 
 `--watch` (`-w`) turns on watch mode. Directory and glob positional arguments are registered as watch patterns, matching files are opened, and new matching files are picked up automatically.
 
-``` console
-$ mo -w '**/*.md'                              # Watch and open all .md files recursively
-$ mo -w 'docs/**/*.md' --target docs           # Watch docs/ tree in "docs" group
-$ mo -w '*.md' 'docs/**/*.md'                  # Multiple patterns (positional)
-$ mo -w docs/                                  # Watch docs/*.md
+```console
+mo -w '**/*.md'                              # Watch and open all .md files recursively
+mo -w 'docs/**/*.md' --target docs           # Watch docs/ tree in "docs" group
+mo -w '*.md' 'docs/**/*.md'                  # Multiple patterns (positional)
+mo -w docs/                                  # Watch docs/*.md
 ```
 
 Combine with `--recursive` (`-R`) to descend into subdirectories. Short flags can be combined:
 
-``` console
-$ mo -w -R docs/                               # Watch docs/**/*.md
-$ mo -wR docs/                                 # Same, short-combined
+```console
+mo -w -R docs/                               # Watch docs/**/*.md
+mo -wR docs/                                 # Same, short-combined
 ```
 
 Without `--watch`, globs are expanded once and directory arguments open matching files without live-watching new additions:
 
-``` console
-$ mo docs/                                     # Open every .md directly in docs/
-$ mo -R docs/                                  # Open every .md under docs/ (recursive)
-$ mo 'docs/*.md'                               # Expand and open matching .md files
+```console
+mo docs/                                     # Open every .md directly in docs/
+mo -R docs/                                  # Open every .md under docs/ (recursive)
+mo 'docs/*.md'                               # Expand and open matching .md files
 ```
 
 #### Removing watch patterns
 
 `--unwatch` removes previously registered patterns. Pass glob patterns or directories as positional arguments to specify which patterns to remove. Regular file paths are not accepted (use `--close` to remove individual files from the sidebar). Files already added by a pattern remain in the sidebar.
 
-``` console
-$ mo --unwatch '**/*.md'                              # Stop watching a pattern (default group)
-$ mo --unwatch docs/                                  # Stop watching docs/*.md
-$ mo --unwatch 'docs/**/*.md' --target docs            # Stop watching in a specific group
+```console
+mo --unwatch '**/*.md'                              # Stop watching a pattern (default group)
+mo --unwatch docs/                                  # Stop watching docs/*.md
+mo --unwatch 'docs/**/*.md' --target docs            # Stop watching in a specific group
+mo --unwatch '/Users/you/project/**/*.md'            # Stop watching by absolute path
 ```
 
 With `-R`, a directory argument removes **all** registered patterns under that directory at once. For example, if `docs/*.md`, `docs/sub/*.md`, and `docs/**/*.md` are all registered, a single command removes them all:
 
-``` console
-$ mo --unwatch -R docs/                               # Removes docs/*.md, docs/sub/*.md, docs/**/*.md, etc.
+```console
+mo --unwatch -R docs/                               # Removes docs/*.md, docs/sub/*.md, docs/**/*.md, etc.
 ```
 
 Patterns are resolved to absolute paths before matching, so you can specify either a relative glob or the full path shown by `--status`.
@@ -149,7 +162,7 @@ Patterns are resolved to absolute paths before matching, so you can specify eith
 
 The sidebar supports flat and tree view modes. Flat view shows file names only, while tree view displays the directory hierarchy.
 
-| <img src="images/icons/view-flat.svg" height="16"> Flat | <img src="images/icons/view-tree.svg" height="16"> Tree |
+| <img src="images/icons/view-flat.svg" alt="flat view icon" height="16"> Flat | <img src="images/icons/view-tree.svg" alt="tree view icon" height="16"> Tree |
 |------|------|
 | ![Flat view](images/sidebar-flat.png) | ![Tree view](images/sidebar-tree.png) |
 
@@ -157,7 +170,7 @@ The sidebar supports flat and tree view modes. Flat view shows file names only, 
 
 `mo` runs in the background by default — the command returns immediately, leaving the shell free for other work. This makes it easy to incorporate into scripts, tool chains, or LLM-driven workflows.
 
-``` console
+```console
 $ mo README.md
 mo: serving at http://localhost:6275 (pid 12345)
 $ # shell is available immediately
@@ -165,7 +178,7 @@ $ # shell is available immediately
 
 Use `--status` to check all running mo servers, and `--shutdown` to stop one:
 
-``` console
+```console
 $ mo --status              # Show all running mo servers
 http://localhost:6275 (pid 12345, v0.12.0)
   default: 5 file(s)
@@ -180,8 +193,8 @@ $ mo --restart             # Restart the mo server on the default port
 
 If you need the mo server to run in the foreground (e.g. for debugging), use `--foreground`:
 
-``` console
-$ mo --foreground README.md
+```console
+mo --foreground README.md
 ```
 
 ### Server restart
@@ -192,32 +205,32 @@ Click the <img src="images/icons/restart.svg" width="16" height="16" alt="restar
 
 `mo` automatically saves session state (open files and watch patterns per group) when files are added or removed. When starting a new server, the previous session is automatically restored and merged with any files specified on the command line. Restored session entries appear first, followed by newly specified files.
 
-``` console
-$ mo README.md CHANGELOG.md       # Start with two files
-$ mo --shutdown                   # Shut down the server
-$ mo                              # Restores README.md and CHANGELOG.md
-$ mo TODO.md                      # Restores previous session + adds TODO.md
+```console
+mo README.md CHANGELOG.md       # Start with two files
+mo --shutdown                   # Shut down the server
+mo                              # Restores README.md and CHANGELOG.md
+mo TODO.md                      # Restores previous session + adds TODO.md
 ```
 
 Use `--close` to remove specific files from the running server:
 
-``` console
-$ mo --close README.md            # Close a file from the default group
-$ mo --close docs/*.md -t docs    # Close files from the "docs" group
+```console
+mo --close README.md            # Close a file from the default group
+mo --close docs/*.md -t docs    # Close files from the "docs" group
 ```
 
 Use `--clear` to remove a saved session. If a server is running, it is automatically restarted with an empty state:
 
-``` console
-$ mo --clear                      # Clear saved session for the default port
-$ mo --clear -p 6276              # Clear saved session for a specific port
+```console
+mo --clear                      # Clear saved session for the default port
+mo --clear -p 6276              # Clear saved session for a specific port
 ```
 
 ### JSON output
 
 Use `--json` to get structured JSON output on stdout, useful for scripting and integration with other tools.
 
-``` console
+```console
 $ mo --json README.md
 {
   "url": "http://localhost:6275",
@@ -233,7 +246,7 @@ $ mo --json README.md
 
 `--status` also supports `--json`:
 
-``` console
+```console
 $ mo --status --json
 [
   {
@@ -253,7 +266,9 @@ $ mo --status --json
 ]
 ```
 
-### Flags
+## Configuration
+
+`mo` is configured entirely via CLI flags — there is no config file. Flags apply per invocation; persistent state (open files, watch patterns per group) is auto-saved to the on-disk session and restored on the next start.
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
@@ -273,25 +288,52 @@ $ mo --status --json
 | `--foreground` | | | Run mo server in foreground |
 | `--json` | | | Output structured data as JSON to stdout |
 | `--dangerously-allow-remote-access` | | | Allow remote access without authentication (trusted networks only) |
+| `--trusted-host` | | | Extra `Host` header value to accept behind a trusted reverse proxy, repeatable (e.g. `host.example.ts.net:8443`) |
 
 > [!WARNING]
 > Binding to a non-localhost address exposes mo to the network **without any authentication**. Remote clients can read any file accessible by the user, browse the filesystem via glob patterns, and shut down the server. A confirmation prompt is shown when `--bind` is set to a non-loopback address.
 
-## Build
+<!-- -->
 
-Requires Go and [pnpm](https://pnpm.io/).
+> [!NOTE]
+> **Behind a reverse proxy (e.g. Tailscale Serve):** keep the default `--bind localhost` and let the proxy terminate TLS. A proxy forwards its own `Host` header, which mo's DNS-rebinding allowlist rejects by default (`403 forbidden`). Add that hostname with `--trusted-host host.example.ts.net:8443` (repeatable, and include the port unless it is the scheme default). Loopback binding, the token cookie, and rebinding defense for every other `Host` all stay in force. mo's auth cookie is `Secure`, so the proxy must serve HTTPS — Tailscale Serve does. A root-mounted SPA like mo needs its **own** listener at `/`, not a sub-path, so its absolute asset URLs resolve.
 
-``` console
-$ make build
+## Development
+
+Requires Go 1.26+ and [pnpm](https://pnpm.io/). Node.js is pinned via `pnpm.executionEnv.nodeVersion` in `internal/frontend/package.json`; other runtimes are pinned via `.tool-versions` / `.mise.toml`.
+
+```bash
+git clone https://github.com/Rubio-Enterprises/mo.git
+cd mo
+mise install                       # install pinned runtimes from .tool-versions
+lefthook install                   # register git hooks
+
+# Full build (frontend + Go binary, with ldflags)
+make build
+
+# Dev: build frontend then run with args (uses port 16275, foreground mode)
+make dev ARGS="testdata/basic.md"
+
+# Lint
+golangci-lint run
+
+# Tests with JUnit output (Rubio-Enterprises go-cli standard)
+gotestsum --junitfile=reports/unit/junit.xml -- ./...
+
+# Or via make
+make test
+make lint
 ```
 
-## References
-
-- [yusukebe/gh-markdown-preview](https://github.com/yusukebe/gh-markdown-preview): GitHub CLI extension to preview Markdown looks like GitHub.
+For deeper agent / contributor notes (single-test invocations, frontend dev server, screenshots), see [`AGENTS.md`](AGENTS.md).
 
 ## License
 
 - [MIT License](LICENSE)
-    - Include logo as well as source code.
-    - Only logo license can be selected [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-    - Also, if there is no alteration to the logo and it is used for technical information about mo, I would not say anything if the copyright notice is omitted.
+  - Include logo as well as source code.
+  - Only logo license can be selected [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+  - Also, if there is no alteration to the logo and it is used for technical information about mo, I would not say anything if the copyright notice is omitted.
+
+### References
+
+- [yusukebe/gh-markdown-preview](https://github.com/yusukebe/gh-markdown-preview): GitHub CLI extension to preview Markdown looks like GitHub.

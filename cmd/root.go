@@ -29,6 +29,7 @@ import (
 	"github.com/k1LoW/mo/internal/backup"
 	"github.com/k1LoW/mo/internal/logfile"
 	"github.com/k1LoW/mo/internal/server"
+	"github.com/k1LoW/mo/internal/token"
 	"github.com/k1LoW/mo/version"
 	"github.com/muesli/termenv"
 	"github.com/pkg/browser"
@@ -65,6 +66,7 @@ var (
 	clearBackup                  bool
 	jsonOutput                   bool
 	dangerouslyAllowRemoteAccess bool
+	trustedHosts                 []string
 )
 
 var rootCmd = &cobra.Command{
@@ -201,10 +203,14 @@ func init() {
 	rootCmd.Flags().BoolVar(&clearBackup, "clear", false, "Clear saved session for the specified port")
 	rootCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output structured data as JSON to stdout")
 	rootCmd.Flags().BoolVar(&dangerouslyAllowRemoteAccess, "dangerously-allow-remote-access", false, "Allow remote access without authentication. Recommended only for trusted networks.")
+	rootCmd.Flags().StringArrayVar(&trustedHosts, "trusted-host", nil, "Additional Host header value to accept when mo is reached through a trusted reverse proxy such as Tailscale Serve (repeatable; include the port unless it is the scheme default, e.g. host.example.ts.net:8443). Loopback hosts stay accepted and the DNS-rebinding allowlist still rejects every other Host.")
 }
 
 func run(cmd *cobra.Command, args []string) error {
-	if !foreground || restore != "" {
+	// Set up the log file whenever a server may be started (regardless of
+	// foreground mode) so that --status can discover it via the log directory.
+	// We skip this only for client-side commands that do not start a server.
+	if !statusServer && !shutdownServer && !restartServer && !clearBackup && !closeFiles && !unwatchMode {
 		logCleanup, err := logfile.Setup(port)
 		if err != nil {
 			slog.Warn("failed to setup log file, using stderr", "error", err)
@@ -254,6 +260,11 @@ func run(cmd *cobra.Command, args []string) error {
 			if err := backup.Remove(port); err != nil {
 				return err
 			}
+		}
+
+		// Drop any stale auth token; a restarted server mints a fresh one.
+		if err := token.Remove(port); err != nil {
+			slog.Warn("failed to remove auth token", "error", err)
 		}
 
 		if wasServerRunning {
@@ -326,11 +337,11 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	if restore != "" {
-		filesByGroup, patternsByGroup, uploadedFiles, err := loadRestoreData(restore)
+		filesByGroup, patternsByGroup, uploadedFiles, cbOverrides, err := loadRestoreData(restore)
 		if err != nil {
 			return fmt.Errorf("failed to restore state: %w", err)
 		}
-		return startServer(cmd.Context(), addr, filesByGroup, patternsByGroup, uploadedFiles)
+		return startServer(cmd.Context(), addr, filesByGroup, patternsByGroup, uploadedFiles, cbOverrides)
 	}
 
 	resolved, err := server.ResolveGroupName(target)
@@ -390,27 +401,26 @@ func run(cmd *cobra.Command, args []string) error {
 		if probeErr == nil {
 			isNewGroup := !slices.Contains(result.groups, target)
 
-			var deeplinks []deeplinkEntry
-			deeplinks = append(deeplinks, postFiles(result.client, addr, target, files)...)
-			deeplinks = append(deeplinks, postPatterns(result.client, addr, target, patterns)...)
+			deeplinks, err := postFiles(result.client, addr, target, files)
+			if err != nil {
+				return err
+			}
+			patternDeeplinks, err := postPatterns(result.client, addr, target, patterns)
+			if err != nil {
+				return err
+			}
+			deeplinks = append(deeplinks, patternDeeplinks...)
 
-			var stdinUploadErr error
 			if stdinData != nil {
 				entry, err := postUploadedFile(result.client, addr, target, stdinData.Name, stdinData.Content)
 				if err != nil {
-					stdinUploadErr = err
-					slog.Warn("failed to upload stdin content", "error", err)
-				} else {
-					deeplinks = append(deeplinks, entry)
+					return fmt.Errorf("failed to upload stdin content: %w", err)
 				}
-			}
-
-			if stdinData != nil && len(files) == 0 && len(patterns) == 0 && stdinUploadErr != nil {
-				return stdinUploadErr
+				deeplinks = append(deeplinks, entry)
 			}
 
 			added := len(files) + len(patterns)
-			if stdinData != nil && stdinUploadErr == nil {
+			if stdinData != nil {
 				added++
 			}
 			slog.Info("added to existing server", "files", len(files), "patterns", len(patterns), "stdin", stdinData != nil, "addr", addr)
@@ -422,6 +432,10 @@ func run(cmd *cobra.Command, args []string) error {
 			}
 			return nil
 		}
+	}
+
+	if err := validateTrustedHosts(trustedHosts); err != nil {
+		return err
 	}
 
 	filesByGroup := map[string][]string{target: files}
@@ -482,9 +496,9 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	if foreground {
-		return startServer(cmd.Context(), addr, filesByGroup, patternsByGroup, uploadedFiles)
+		return startServer(cmd.Context(), addr, filesByGroup, patternsByGroup, uploadedFiles, rd.CheckboxOverrides)
 	}
-	return startBackground(addr, filesByGroup, patternsByGroup, uploadedFiles)
+	return startBackground(addr, filesByGroup, patternsByGroup, uploadedFiles, rd.CheckboxOverrides)
 }
 
 // mergeGroups merges base and additional group maps, with base entries first.
@@ -531,18 +545,18 @@ func filterValidRestoreData(rd *server.RestoreData) (map[string][]string, map[st
 	return filesByGroup, patternsByGroup, rd.UploadedFiles
 }
 
-func loadRestoreData(path string) (map[string][]string, map[string][]string, []server.UploadedFileData, error) {
+func loadRestoreData(path string) (map[string][]string, map[string][]string, []server.UploadedFileData, map[string]map[string]bool, error) {
 	data, err := os.ReadFile(path) //nolint:gosec
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	os.Remove(path)
 
 	var rd server.RestoreData
 	if err := json.Unmarshal(data, &rd); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return rd.Groups, rd.Patterns, rd.UploadedFiles, nil
+	return rd.Groups, rd.Patterns, rd.UploadedFiles, rd.CheckboxOverrides, nil
 }
 
 func isLoopbackBind(bind string) bool {
@@ -551,6 +565,19 @@ func isLoopbackBind(bind string) bool {
 	}
 	ip := net.ParseIP(bind)
 	return ip != nil && ip.IsLoopback()
+}
+
+// validateTrustedHosts rejects --trusted-host values that are not bare Host
+// header values (host or host:port). A pasted URL or path would never match
+// r.Host, silently leaving the proxy forbidden; catching it here fails fast
+// with an actionable message instead.
+func validateTrustedHosts(hosts []string) error {
+	for _, h := range hosts {
+		if h == "" || strings.ContainsAny(h, "/ \t") || strings.Contains(h, "://") {
+			return fmt.Errorf("invalid --trusted-host %q: expected a Host header value like host or host:port (no scheme, path, or spaces)", h)
+		}
+	}
+	return nil
 }
 
 func hasGlobChars(s string) bool {
@@ -624,7 +651,7 @@ func resolveUnwatchArgs(args []string, recursive bool, addr, groupName string) (
 }
 
 func fetchRegisteredPatterns(addr, groupName string) ([]string, error) {
-	client := &http.Client{Timeout: probeTimeoutDefault}
+	client := &http.Client{Timeout: probeTimeoutDefault, Transport: newTokenTransport(addr)}
 	resp, err := client.Get(fmt.Sprintf("http://%s/_/api/status", addr))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query server status: %w", err)
@@ -720,15 +747,14 @@ func expandGlobPattern(absPattern string) ([]string, error) {
 	return matches, nil
 }
 
-func postFiles(client *http.Client, addr, group string, files []string) []deeplinkEntry {
+func postFiles(client *http.Client, addr, group string, files []string) ([]deeplinkEntry, error) {
 	var entries []deeplinkEntry
 	for _, f := range files {
 		body, err := json.Marshal(map[string]string{
 			"path": f,
 		})
 		if err != nil {
-			slog.Warn("failed to marshal request", "path", f, "error", err)
-			continue
+			return entries, fmt.Errorf("failed to encode request for file %q: %w", f, err)
 		}
 		resp, err := client.Post(
 			fmt.Sprintf("http://%s/_/api/groups/%s/files", addr, url.PathEscape(group)),
@@ -736,19 +762,19 @@ func postFiles(client *http.Client, addr, group string, files []string) []deepli
 			bytes.NewReader(body),
 		)
 		if err != nil {
-			slog.Warn("failed to post file", "path", f, "error", err)
-			continue
+			return entries, fmt.Errorf("failed to add file %q: %w", f, err)
 		}
 		if resp.StatusCode != http.StatusOK {
-			slog.Warn("failed to add file", "path", f, "status", resp.StatusCode)
 			resp.Body.Close()
-			continue
+			if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+				return entries, incompatibleGroupedFileEndpointError(resp.Status)
+			}
+			return entries, fmt.Errorf("failed to add file %q: server returned %s", f, resp.Status)
 		}
 		var entry server.FileEntry
 		if err := json.NewDecoder(resp.Body).Decode(&entry); err != nil {
-			slog.Warn("failed to decode file response", "error", err)
 			resp.Body.Close()
-			continue
+			return entries, fmt.Errorf("failed to decode response after adding file %q: %w", f, err)
 		}
 		resp.Body.Close()
 		entries = append(entries, deeplinkEntry{
@@ -756,10 +782,10 @@ func postFiles(client *http.Client, addr, group string, files []string) []deepli
 			Path: entry.Path,
 		})
 	}
-	return entries
+	return entries, nil
 }
 
-func postPatterns(client *http.Client, addr, group string, patterns []string) []deeplinkEntry {
+func postPatterns(client *http.Client, addr, group string, patterns []string) ([]deeplinkEntry, error) {
 	var entries []deeplinkEntry
 	for _, pat := range patterns {
 		body, err := json.Marshal(map[string]string{
@@ -767,8 +793,7 @@ func postPatterns(client *http.Client, addr, group string, patterns []string) []
 			"group":   group,
 		})
 		if err != nil {
-			slog.Warn("failed to marshal request", "pattern", pat, "error", err)
-			continue
+			return entries, fmt.Errorf("failed to encode request for pattern %q: %w", pat, err)
 		}
 		resp, err := client.Post(
 			fmt.Sprintf("http://%s/_/api/patterns", addr),
@@ -776,19 +801,16 @@ func postPatterns(client *http.Client, addr, group string, patterns []string) []
 			bytes.NewReader(body),
 		)
 		if err != nil {
-			slog.Warn("failed to post pattern", "pattern", pat, "error", err)
-			continue
+			return entries, fmt.Errorf("failed to add pattern %q: %w", pat, err)
 		}
 		if resp.StatusCode != http.StatusOK {
-			slog.Warn("failed to add pattern", "pattern", pat, "status", resp.StatusCode)
 			resp.Body.Close()
-			continue
+			return entries, fmt.Errorf("failed to add pattern %q: server returned %s", pat, resp.Status)
 		}
 		var patResp server.AddPatternResponse
 		if err := json.NewDecoder(resp.Body).Decode(&patResp); err != nil {
-			slog.Warn("failed to decode pattern response", "error", err)
 			resp.Body.Close()
-			continue
+			return entries, fmt.Errorf("failed to decode response after adding pattern %q: %w", pat, err)
 		}
 		resp.Body.Close()
 		for _, f := range patResp.Files {
@@ -798,7 +820,11 @@ func postPatterns(client *http.Client, addr, group string, patterns []string) []
 			})
 		}
 	}
-	return entries
+	return entries, nil
+}
+
+func incompatibleGroupedFileEndpointError(status string) error {
+	return fmt.Errorf("the running mo server is incompatible with this CLI: grouped file endpoint returned %s; restart it with `mo --restart` and retry", status)
 }
 
 type deeplinkEntry struct {
@@ -946,6 +972,71 @@ type probeResult struct {
 	groups []string
 }
 
+// authHeaderName must match the server's expected auth header.
+const authHeaderName = "X-Mo-Token" //nolint:gosec // header name, not a credential
+
+// tokenRoundTripper injects the per-server auth token on every request so all
+// CLI → server calls are authenticated without touching individual call sites.
+// The token is loaded per request so a client created before the server has
+// written its token file (e.g. while waiting for a freshly spawned server to
+// become ready) still authenticates once the file appears.
+type tokenRoundTripper struct {
+	addr string
+	base http.RoundTripper
+}
+
+func (t *tokenRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if tok := loadTokenForAddr(t.addr); tok != "" {
+		req = req.Clone(req.Context())
+		req.Header.Set(authHeaderName, tok)
+	}
+	return t.base.RoundTrip(req)
+}
+
+// newTokenTransport builds a RoundTripper that authenticates with the token of
+// the mo server listening on addr (host:port). If no token file exists, requests
+// are sent unauthenticated (e.g. when probing whether any server is present).
+func newTokenTransport(addr string) http.RoundTripper {
+	return &tokenRoundTripper{addr: addr, base: http.DefaultTransport}
+}
+
+// loadTokenForAddr reads the persisted auth token for the server on addr.
+func loadTokenForAddr(addr string) string {
+	_, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		return ""
+	}
+	prt, err := strconv.Atoi(p)
+	if err != nil {
+		return ""
+	}
+	tok, err := token.Load(prt)
+	if err != nil {
+		return ""
+	}
+	return tok
+}
+
+// allowedHostsForAddr returns the Host header values the server should accept
+// (DNS-rebinding defense). Remote-access mode may be reached via arbitrary
+// external hostnames, so it relies on the token instead of a Host allowlist.
+func allowedHostsForAddr(addr string) []string {
+	_, p, err := net.SplitHostPort(addr)
+	if err != nil || dangerouslyAllowRemoteAccess {
+		return nil
+	}
+	hosts := []string{
+		net.JoinHostPort("localhost", p),
+		net.JoinHostPort("127.0.0.1", p),
+		net.JoinHostPort("::1", p),
+	}
+	// Hostnames the operator explicitly vouches for: a trusted reverse proxy
+	// (e.g. Tailscale Serve) forwards its own Host header, not localhost. These
+	// are appended to the loopback allowlist rather than disabling it, so the
+	// DNS-rebinding defense still rejects every Host the operator did not name.
+	return append(hosts, trustedHosts...)
+}
+
 // probeServer checks that a mo server is running on addr by calling
 // GET /_/api/status and validating the response contains a version field.
 func probeServer(addr string, timeout ...time.Duration) (*probeResult, error) {
@@ -953,7 +1044,7 @@ func probeServer(addr string, timeout ...time.Duration) (*probeResult, error) {
 	if len(timeout) > 0 {
 		t = timeout[0]
 	}
-	client := &http.Client{Timeout: t}
+	client := &http.Client{Timeout: t, Transport: newTokenTransport(addr)}
 	resp, err := client.Get(fmt.Sprintf("http://%s/_/api/status", addr))
 	if err != nil {
 		return nil, fmt.Errorf("no mo server found on %s", addr)
@@ -1183,12 +1274,12 @@ func doStatus() error {
 		return nil
 	}
 
-	client := &http.Client{Timeout: 2 * time.Second}
 	found := false
 	var jsonEntries []jsonStatusEntry
 
 	for i, p := range ports {
 		addr := fmt.Sprintf("localhost:%d", p)
+		client := &http.Client{Timeout: 2 * time.Second, Transport: newTokenTransport(addr)}
 		resp, err := client.Get(fmt.Sprintf("http://%s/_/api/status", addr))
 		if err != nil {
 			found = true
@@ -1289,7 +1380,7 @@ func discoverPorts() []int {
 	return ports
 }
 
-func startServer(ctx context.Context, addr string, filesByGroup map[string][]string, patternsByGroup map[string][]string, uploadedFiles []server.UploadedFileData) error {
+func startServer(ctx context.Context, addr string, filesByGroup map[string][]string, patternsByGroup map[string][]string, uploadedFiles []server.UploadedFileData, checkboxOverrides map[string]map[string]bool) error {
 	sigCtx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -1308,6 +1399,25 @@ func startServer(ctx context.Context, addr string, filesByGroup map[string][]str
 	defer cleanup()
 
 	state := server.NewState(ctx)
+
+	// Generate and persist the per-server auth token, then enable auth. This
+	// gates the API to the local CLI (via the token file) and the same-origin
+	// SPA (via a SameSite=Strict cookie), without restricting which files open.
+	// MO_DISABLE_AUTH is an escape hatch for the cross-origin frontend dev proxy
+	// (pnpm run dev), where the SPA is served by Vite and never receives the
+	// cookie. Never set it in normal use.
+	if os.Getenv("MO_DISABLE_AUTH") != "1" {
+		tok, err := token.Generate()
+		if err != nil {
+			return fmt.Errorf("failed to generate auth token: %w", err)
+		}
+		if err := token.Save(port, tok); err != nil {
+			return fmt.Errorf("failed to persist auth token: %w", err)
+		}
+		state.SetAuth(tok, allowedHostsForAddr(addr))
+	} else {
+		slog.Warn("MO_DISABLE_AUTH set: API authentication is disabled")
+	}
 
 	state.EnableBackup(ctx, func(data server.RestoreData) {
 		if err := backup.Save(port, data); err != nil {
@@ -1352,6 +1462,10 @@ func startServer(ctx context.Context, addr string, filesByGroup map[string][]str
 
 	for _, uf := range uploadedFiles {
 		state.AddUploadedFile(uf.Name, uf.Content, uf.Group)
+	}
+
+	if len(checkboxOverrides) > 0 {
+		state.RestoreCheckboxOverrides(checkboxOverrides)
 	}
 
 	if totalFiles > 0 && skippedFiles == totalFiles && patternsAdded == 0 && len(uploadedFiles) == 0 {
@@ -1426,6 +1540,9 @@ func spawnNewProcess(addr string, restoreFile string) (*os.Process, error) {
 	if dangerouslyAllowRemoteAccess {
 		args = append(args, "--dangerously-allow-remote-access")
 	}
+	for _, h := range trustedHosts {
+		args = append(args, "--trusted-host", h)
+	}
 	cmd := exec.Command(binPath, args...) //nolint:gosec
 	setSysProcAttr(cmd)
 	if err := cmd.Start(); err != nil {
@@ -1436,8 +1553,8 @@ func spawnNewProcess(addr string, restoreFile string) (*os.Process, error) {
 	return cmd.Process, nil
 }
 
-func startBackground(addr string, filesByGroup map[string][]string, patternsByGroup map[string][]string, uploadedFiles []server.UploadedFileData) error {
-	restoreFile, err := server.WriteRestoreFile(server.RestoreData{Groups: filesByGroup, Patterns: patternsByGroup, UploadedFiles: uploadedFiles})
+func startBackground(addr string, filesByGroup map[string][]string, patternsByGroup map[string][]string, uploadedFiles []server.UploadedFileData, checkboxOverrides map[string]map[string]bool) error {
+	restoreFile, err := server.WriteRestoreFile(server.RestoreData{Groups: filesByGroup, Patterns: patternsByGroup, UploadedFiles: uploadedFiles, CheckboxOverrides: checkboxOverrides})
 	if err != nil {
 		return err
 	}
@@ -1492,7 +1609,7 @@ func openBrowser(addr string) {
 }
 
 func waitForReady(addr string, timeout time.Duration) (*statusResponse, error) {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
+	client := &http.Client{Timeout: 500 * time.Millisecond, Transport: newTokenTransport(addr)}
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {

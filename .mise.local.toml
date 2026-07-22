@@ -1,0 +1,45 @@
+# .mise.local.toml — repo-owned task overlay (the template task seam).
+# mise merges this file over .mise.toml, so template re-renders never
+# conflict with these customizations. Committed on purpose.
+
+[tools]
+# pnpm backs every frontend task below. Pinned here because the org
+# typecheck gate (typecheck-ts.yml) provisions tools via mise only — its
+# pnpm/action-setup step keys off a ROOT pnpm-lock.yaml, and this repo's
+# lockfile lives in internal/frontend/.
+"npm:pnpm" = "11.9.0"
+
+# The template's ts-facet tasks delegate to a root package.json this repo
+# does not have (upstream keeps the frontend in internal/frontend/). Each
+# override below self-installs with a frozen lockfile so it works on a
+# fresh CI runner (same pattern as the former [tasks.test] override, whose
+# Go half now lives in the rendered [tasks.test-go]).
+
+[tasks.typecheck]
+description = "Strict TS type-check of the frontend (tsc --noEmit)"
+run = [
+  "pnpm --dir internal/frontend install --frozen-lockfile",
+  "pnpm --dir internal/frontend exec tsc --noEmit",
+]
+
+[tasks.lint-ts]
+description = "frontend oxlint + oxfmt check (linter_floor: oxc, upstream's floor)"
+run = [
+  "pnpm --dir internal/frontend install --frozen-lockfile",
+  "pnpm --dir internal/frontend run lint",
+  "pnpm --dir internal/frontend run fmt:check",
+]
+
+[tasks.test-ts]
+description = "frontend Vitest"
+run = [
+  "pnpm --dir internal/frontend install --frozen-lockfile",
+  "pnpm --dir internal/frontend run test",
+]
+
+[tasks.build-ts]
+description = "frontend production build (tsc && vite build)"
+run = [
+  "pnpm --dir internal/frontend install --frozen-lockfile",
+  "pnpm --dir internal/frontend run build",
+]

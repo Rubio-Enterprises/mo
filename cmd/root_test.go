@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -655,24 +654,13 @@ func TestEmitServeOutput(t *testing.T) {
 		jsonOutput = true
 		defer func() { jsonOutput = false }()
 
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		oldStdout := os.Stdout
-		os.Stdout = w
-
-		emitServeOutput("localhost:6275", entries, true)
-
-		w.Close()
-		os.Stdout = oldStdout
-
-		var buf bytes.Buffer
-		buf.ReadFrom(r) //nolint:errcheck
+		out := captureStdout(t, func() {
+			emitServeOutput("localhost:6275", entries, true)
+		})
 
 		var output jsonServeOutput
-		if err := json.Unmarshal(buf.Bytes(), &output); err != nil {
-			t.Fatalf("invalid JSON: %v\noutput: %s", err, buf.String())
+		if err := json.Unmarshal([]byte(out), &output); err != nil {
+			t.Fatalf("invalid JSON: %v\noutput: %s", err, out)
 		}
 		if output.URL != "http://localhost:6275" {
 			t.Errorf("got URL %q, want %q", output.URL, "http://localhost:6275")
@@ -688,54 +676,30 @@ func TestEmitServeOutput(t *testing.T) {
 	t.Run("text mode with printURL prints URL line", func(t *testing.T) {
 		jsonOutput = false
 
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
+		out := captureStdout(t, func() {
+			emitServeOutput("localhost:6275", entries, true)
+		})
+
+		if !strings.Contains(out, "http://localhost:6275\n") {
+			t.Errorf("expected URL line in output, got %q", out)
 		}
-		oldStdout := os.Stdout
-		os.Stdout = w
-
-		emitServeOutput("localhost:6275", entries, true)
-
-		w.Close()
-		os.Stdout = oldStdout
-
-		var buf bytes.Buffer
-		buf.ReadFrom(r) //nolint:errcheck
-
-		output := buf.String()
-		if !strings.Contains(output, "http://localhost:6275\n") {
-			t.Errorf("expected URL line in output, got %q", output)
-		}
-		if !strings.Contains(output, "README.md") {
-			t.Errorf("expected deeplink in output, got %q", output)
+		if !strings.Contains(out, "README.md") {
+			t.Errorf("expected deeplink in output, got %q", out)
 		}
 	})
 
 	t.Run("text mode without printURL omits URL line", func(t *testing.T) {
 		jsonOutput = false
 
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
+		out := captureStdout(t, func() {
+			emitServeOutput("localhost:6275", entries, false)
+		})
+
+		if strings.Contains(out, "http://localhost:6275\n") {
+			t.Errorf("URL line should not appear, got %q", out)
 		}
-		oldStdout := os.Stdout
-		os.Stdout = w
-
-		emitServeOutput("localhost:6275", entries, false)
-
-		w.Close()
-		os.Stdout = oldStdout
-
-		var buf bytes.Buffer
-		buf.ReadFrom(r) //nolint:errcheck
-
-		output := buf.String()
-		if strings.Contains(output, "http://localhost:6275\n") {
-			t.Errorf("URL line should not appear, got %q", output)
-		}
-		if !strings.Contains(output, "README.md") {
-			t.Errorf("expected deeplink in output, got %q", output)
+		if !strings.Contains(out, "README.md") {
+			t.Errorf("expected deeplink in output, got %q", out)
 		}
 	})
 
@@ -747,23 +711,12 @@ func TestEmitServeOutput(t *testing.T) {
 			{URL: "http://localhost:6275/?file=xyz", Path: "", Name: "upload.md"},
 		}
 
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		oldStdout := os.Stdout
-		os.Stdout = w
-
-		emitServeOutput("localhost:6275", uploaded, true)
-
-		w.Close()
-		os.Stdout = oldStdout
-
-		var buf bytes.Buffer
-		buf.ReadFrom(r) //nolint:errcheck
+		out := captureStdout(t, func() {
+			emitServeOutput("localhost:6275", uploaded, true)
+		})
 
 		var output jsonServeOutput
-		if err := json.Unmarshal(buf.Bytes(), &output); err != nil {
+		if err := json.Unmarshal([]byte(out), &output); err != nil {
 			t.Fatalf("invalid JSON: %v", err)
 		}
 		if output.Files[0].Path != "" {
@@ -863,6 +816,73 @@ func TestIsLoopbackBind(t *testing.T) {
 			got := isLoopbackBind(tt.bind)
 			if got != tt.want {
 				t.Errorf("isLoopbackBind(%q) = %v, want %v", tt.bind, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAllowedHostsForAddr(t *testing.T) {
+	origTrusted := trustedHosts
+	origDangerous := dangerouslyAllowRemoteAccess
+	t.Cleanup(func() {
+		trustedHosts = origTrusted
+		dangerouslyAllowRemoteAccess = origDangerous
+	})
+
+	t.Run("loopback set without trusted hosts", func(t *testing.T) {
+		trustedHosts = nil
+		dangerouslyAllowRemoteAccess = false
+		got := allowedHostsForAddr("localhost:6275")
+		want := []string{"localhost:6275", "127.0.0.1:6275", "[::1]:6275"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("trusted hosts are appended to the loopback set", func(t *testing.T) {
+		trustedHosts = []string{"host.example.ts.net:8443", "host.example.ts.net"}
+		dangerouslyAllowRemoteAccess = false
+		got := allowedHostsForAddr("localhost:6275")
+		want := []string{
+			"localhost:6275", "127.0.0.1:6275", "[::1]:6275",
+			"host.example.ts.net:8443", "host.example.ts.net",
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("dangerous remote access disables the allowlist entirely", func(t *testing.T) {
+		trustedHosts = []string{"host.example.ts.net:8443"}
+		dangerouslyAllowRemoteAccess = true
+		if got := allowedHostsForAddr("localhost:6275"); len(got) != 0 {
+			t.Fatalf("got %v, want an empty allowlist (rebinding check disabled)", got)
+		}
+	})
+}
+
+func TestValidateTrustedHosts(t *testing.T) {
+	t.Run("valid host values", func(t *testing.T) {
+		valid := []string{"host.example.ts.net", "host.example.ts.net:8443", "127.0.0.1:6275"}
+		if err := validateTrustedHosts(valid); err != nil {
+			t.Fatalf("validateTrustedHosts(%v) returned error: %v", valid, err)
+		}
+	})
+
+	invalid := []struct {
+		name string
+		host string
+	}{
+		{"scheme and path", "https://host.example.ts.net:8443/operations"},
+		{"leading scheme", "http://host"},
+		{"path only", "host/operations"},
+		{"embedded space", "host example"},
+		{"empty", ""},
+	}
+	for _, tt := range invalid {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateTrustedHosts([]string{tt.host}); err == nil {
+				t.Fatalf("validateTrustedHosts(%q) = nil, want error", tt.host)
 			}
 		})
 	}
