@@ -614,8 +614,8 @@ func TestAllowedHostsForAddr(t *testing.T) {
 	t.Run("dangerous remote access disables the allowlist entirely", func(t *testing.T) {
 		trustedHosts = []string{"host.example.ts.net:8443"}
 		dangerouslyAllowRemoteAccess = true
-		if got := allowedHostsForAddr("localhost:6275"); got != nil {
-			t.Fatalf("got %v, want nil (allowlist disabled)", got)
+		if got := allowedHostsForAddr("localhost:6275"); len(got) != 0 {
+			t.Fatalf("got %v, want an empty allowlist (rebinding check disabled)", got)
 		}
 	})
 }
