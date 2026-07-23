@@ -4,6 +4,20 @@ This repo follows Rubio-Enterprises standards. Run `/audit-standards` from a Cla
 
 ---
 
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked in GitHub Issues for `Rubio-Enterprises/mo`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage uses the canonical `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix` labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repository uses a single-context domain documentation layout. See `docs/agents/domain.md`.
+
 ## What is mo
 
 `mo` is a CLI tool that opens Markdown files in a browser with live-reload. It runs a Go HTTP server that embeds a React SPA as a single binary. The Go module is `github.com/k1LoW/mo`.
