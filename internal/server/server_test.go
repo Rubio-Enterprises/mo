@@ -1014,6 +1014,24 @@ func (f *flushRecorder) WriteHeader(_ int) {}
 
 func (f *flushRecorder) Flush() {}
 
+func waitForBackupFileCount(t *testing.T, saved <-chan RestoreData, want int) RestoreData {
+	t.Helper()
+
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+
+	for {
+		select {
+		case data := <-saved:
+			if len(data.Groups[DefaultGroup]) == want {
+				return data
+			}
+		case <-timeout.C:
+			t.Fatalf("timed out waiting for backup with %d files", want)
+		}
+	}
+}
+
 func TestEnableBackup_TriggersOnStateChange(t *testing.T) {
 	ctx, cancel := donegroup.WithCancel(context.Background())
 	defer cancel()
@@ -1023,33 +1041,19 @@ func TestEnableBackup_TriggersOnStateChange(t *testing.T) {
 	tmpFile := filepath.Join(t.TempDir(), "test-a.md")
 	os.WriteFile(tmpFile, []byte("# A"), 0o600) //nolint:errcheck
 
-	var mu sync.Mutex
-	var saved []RestoreData
+	saved := make(chan RestoreData)
 	s.EnableBackup(ctx, func(data RestoreData) {
-		mu.Lock()
-		saved = append(saved, data)
-		mu.Unlock()
+		select {
+		case saved <- data:
+		case <-ctx.Done():
+		}
 	})
 
 	if _, err := s.AddFile(tmpFile, DefaultGroup); err != nil {
 		t.Fatal(err)
 	}
 
-	// Wait for debounce (1s) + margin
-	time.Sleep(1500 * time.Millisecond)
-
-	mu.Lock()
-	count := len(saved)
-	mu.Unlock()
-
-	if count == 0 {
-		t.Fatal("backup callback should have been called after state change")
-	}
-
-	mu.Lock()
-	last := saved[count-1]
-	mu.Unlock()
-
+	last := waitForBackupFileCount(t, saved, 1)
 	paths, ok := last.Groups[DefaultGroup]
 	if !ok {
 		t.Fatal("saved data should contain default group")
@@ -1118,12 +1122,12 @@ func TestEnableBackup_ReflectsLatestState(t *testing.T) {
 	os.WriteFile(tmpC, []byte("# C"), 0o600) //nolint:errcheck
 	os.WriteFile(tmpD, []byte("# D"), 0o600) //nolint:errcheck
 
-	var mu sync.Mutex
-	var saved []RestoreData
+	saved := make(chan RestoreData)
 	s.EnableBackup(ctx, func(data RestoreData) {
-		mu.Lock()
-		saved = append(saved, data)
-		mu.Unlock()
+		select {
+		case saved <- data:
+		case <-ctx.Done():
+		}
 	})
 
 	if _, err := s.AddFile(tmpC, DefaultGroup); err != nil {
@@ -1133,18 +1137,7 @@ func TestEnableBackup_ReflectsLatestState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Wait for debounce
-	time.Sleep(1500 * time.Millisecond)
-
-	mu.Lock()
-	count := len(saved)
-	if count == 0 {
-		mu.Unlock()
-		t.Fatal("backup callback should have been called after state change")
-	}
-	last := saved[count-1]
-	mu.Unlock()
-
+	last := waitForBackupFileCount(t, saved, 2)
 	paths := last.Groups[DefaultGroup]
 	if len(paths) != 2 {
 		t.Fatalf("got %d paths, want 2", len(paths))
