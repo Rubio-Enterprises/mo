@@ -1,6 +1,6 @@
 # Changes here will be overwritten by Copier; NEVER edit this file manually.
-_commit: template/v1.55.29
-_rubio_template_version: template/v1.55.29
+_commit: template/v1.55.30
+_rubio_template_version: template/v1.55.30
 _src_path: https://github.com/Rubio-Enterprises/standards.git
 container_registry: ghcr.io/Rubio-Enterprises
 default_branch: main
@@ -32,6 +32,8 @@ linter_floor: oxc
 node_version: 22.23.1
 project_name: mo
 repo_type: extended_fork
+rust_test_timeout_minutes: 20
+rust_test_workload_class: glue
 ts_dom_surface: true
 ts_module_world: bundler
 upstream_branch: main
