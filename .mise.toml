@@ -7,7 +7,7 @@
 # package.json devDep, but Pattern E preserves the consumer's package.json
 # (`_skip_if_exists`), so the assumption broke. mise pinning is the consistent
 # audit-side contract — same as how gitleaks/conftest/check-jsonschema work.
-"npm:@commitlint/cli" = "21.2.0"
+"npm:@commitlint/cli" = "21.2.1"
 "npm:@commitlint/config-conventional" = "21.2.0"
 
 # Hook tools backing lefthook.yml. Universal across archetypes — every
@@ -17,8 +17,8 @@
 # without polluting the developer's global tool surface).
 "aqua:koalaman/shellcheck" = "0.11.0"
 "aqua:mvdan/sh"            = "3.13.1"   # shfmt
-"npm:markdownlint-cli2"    = "0.23.0"
-"npm:prettier"             = "3.9.4"
+"npm:markdownlint-cli2"    = "0.23.1"
+"npm:prettier"             = "3.9.6"
 "pipx:yamllint"            = "1.38.0"
 # lefthook binary itself. The lint-hooks CI job runs `mise exec -- lefthook
 # run pre-commit --all-files`, which requires lefthook on PATH from mise (the
@@ -26,7 +26,7 @@
 # lefthook via Homebrew; pinning here keeps CI and the developer-laptop
 # parity. The audit-side .standards/.mise.toml does NOT pin lefthook because
 # audit.yml doesn't invoke it — only consumer-side lint-hooks does.
-"aqua:evilmartians/lefthook" = "2.1.9"
+"aqua:evilmartians/lefthook" = "2.1.10"
 # gitleaks here mirrors the audit-side pin in .standards/.mise.toml. The
 # lefthook pre-commit gitleaks hook invokes a bare `gitleaks git --staged`,
 # which needs the binary on PATH — the consumer-side lint-hooks CI job
@@ -42,7 +42,7 @@
 # 127 (command not found). Pinning here lands it on the mise PATH for both CI
 # and local `copier update` parity. The reusable workflow also installs copier
 # explicitly as belt-and-braces for consumers not yet re-rendered with this pin.
-"pipx:copier"                = "9.16.0"
+"pipx:copier"                = "9.17.0"
 # Node runtime pin — universal (P5-C unification). Every repo runs the
 # npm:-backend hook tools above (commitlint / markdownlint / prettier), so the
 # node runtime they require is pinned HERE for every repo. Previously most
@@ -69,7 +69,7 @@ node = "22.23.1"
 # want Biome alongside ESLint (e.g. super-productivity's `scripts.lint: "biome
 # check ."`). Consumers who don't want Biome can delete biome.json; `_skip_if_exists`
 # keeps it from coming back on `copier update`.
-"npm:@biomejs/biome"       = "2.5.3"
+"npm:@biomejs/biome"       = "2.5.5"
 # golangci-lint + gotestsum back the [tasks.lint] and [tasks.test] invocations
 # below AND the lefthook `gofmt`/`golangci-lint` pre-commit hooks. The hooks
 # use `mise exec --` so they resolve via the mise-managed PATH, but the tasks
@@ -124,9 +124,10 @@ run = ["gotestsum --junitfile=reports/unit/junit.xml -- ./..."]
 
 # Polyglot composites: wire the per-stack subtasks above into the uniform
 # `mise run lint` / `mise run test` contract. The swift test/build sentinels
-# are deliberately NOT wired in (their xcodebuild scheme + destination are
-# consumer-owned) — extend `depends` in .mise.local.toml to add them once the
-# repo defines its invocation.
+# are deliberately NOT wired in — local Apple builds are disabled by fleet
+# policy and canonical Swift tests run in CI via .github/workflows/test-gate.yml.
+# Extend `depends` in a machine-local .mise.local.toml only for a repo whose
+# suite genuinely cannot run in CI.
 [tasks.lint]
 description = "Composite lint across all stack facets"
 depends = ["lint-ts", "lint-go"]
