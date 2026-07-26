@@ -75,10 +75,14 @@ jobs:
         # [tasks.test-ts] is `pnpm --dir internal/frontend run test`; running it
         # from that working directory is the same invocation, driven through
         # `pnpm exec vitest` so the JUnit reporter flags reach vitest itself.
+        # `default` runs alongside `junit` so a failing suite still prints to the
+        # CI log — junit alone writes only the XML and leaves the log empty.
+        # `outputFile` as a plain string is consumed by the junit reporter;
+        # `default` writes to stdout and ignores it.
         run: |
           set -euo pipefail
           rm -f "$RUBIO_TEST_GATE_COUNT_OUTPUT"
-          pnpm exec vitest run --reporter=junit --outputFile="$RUNNER_TEMP/vitest.xml"
+          pnpm exec vitest run --reporter=default --reporter=junit --outputFile="$RUNNER_TEMP/vitest.xml"
           grep -o '<testcase ' "$RUNNER_TEMP/vitest.xml" | wc -l | tr -d ' ' > "$RUBIO_TEST_GATE_COUNT_OUTPUT"
           test -s "$RUBIO_TEST_GATE_COUNT_OUTPUT"
           test "$(cat "$RUBIO_TEST_GATE_COUNT_OUTPUT")" -gt 0
