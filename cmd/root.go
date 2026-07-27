@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -47,6 +48,10 @@ const (
 	markdownGlob          = "*.md"
 	markdownGlobRecursive = "**/*.md"
 )
+
+// errServerConflict is returned by waitForReady when a mo server other than
+// the spawned child owns the port (e.g. lost a concurrent startup race).
+var errServerConflict = errors.New("another mo server is already running")
 
 var (
 	target                       string
@@ -206,7 +211,7 @@ func init() {
 	rootCmd.Flags().StringArrayVar(&trustedHosts, "trusted-host", nil, "Additional Host header value to accept when mo is reached through a trusted reverse proxy such as Tailscale Serve (repeatable; include the port unless it is the scheme default, e.g. host.example.ts.net:8443). Loopback hosts stay accepted and the DNS-rebinding allowlist still rejects every other Host.")
 }
 
-func run(cmd *cobra.Command, args []string) error {
+func run(cmd *cobra.Command, args []string) (retErr error) {
 	// Set up the log file whenever a server may be started (regardless of
 	// foreground mode) so that --status can discover it via the log directory.
 	// We skip this only for client-side commands that do not start a server.
@@ -216,6 +221,16 @@ func run(cmd *cobra.Command, args []string) error {
 			slog.Warn("failed to setup log file, using stderr", "error", err)
 		} else {
 			defer logCleanup()
+			// Cobra prints RunE errors to stderr, which is /dev/null for
+			// background children. Record fatal errors in the log file too
+			// (registered after logCleanup so it runs before the file is
+			// closed). Skipped when slog still writes to stderr, where cobra
+			// prints the error anyway.
+			defer func() {
+				if retErr != nil {
+					slog.Error("mo exited with error", "error", retErr)
+				}
+			}()
 		}
 	}
 
@@ -401,15 +416,16 @@ func run(cmd *cobra.Command, args []string) error {
 		if probeErr == nil {
 			isNewGroup := !slices.Contains(result.groups, target)
 
-			deeplinks, err := postFiles(result.client, addr, target, files)
+			fileEntries, err := postFiles(result.client, addr, target, files)
 			if err != nil {
 				return err
 			}
-			patternDeeplinks, err := postPatterns(result.client, addr, target, patterns)
+			deeplinks := append([]deeplinkEntry(nil), fileEntries...)
+			patternEntries, patternsAdded, err := postPatterns(result.client, addr, target, patterns)
 			if err != nil {
 				return err
 			}
-			deeplinks = append(deeplinks, patternDeeplinks...)
+			deeplinks = append(deeplinks, patternEntries...)
 
 			if stdinData != nil {
 				entry, err := postUploadedFile(result.client, addr, target, stdinData.Name, stdinData.Content)
@@ -419,7 +435,10 @@ func run(cmd *cobra.Command, args []string) error {
 				deeplinks = append(deeplinks, entry)
 			}
 
-			added := len(files) + len(patterns)
+			// Count only what was actually accepted by the running server so
+			// the "added N item(s)" line does not overstate successful pattern
+			// registrations that match zero files.
+			added := len(fileEntries) + patternsAdded
 			if stdinData != nil {
 				added++
 			}
@@ -785,15 +804,21 @@ func postFiles(client *http.Client, addr, group string, files []string) ([]deepl
 	return entries, nil
 }
 
-func postPatterns(client *http.Client, addr, group string, patterns []string) ([]deeplinkEntry, error) {
+// postPatterns registers each pattern with the running server. It returns the
+// deeplink entries for every file matched by the successful registrations,
+// plus the number of patterns that were actually registered (which is not
+// derivable from len(entries) because a valid pattern may legitimately match
+// zero files).
+func postPatterns(client *http.Client, addr, group string, patterns []string) ([]deeplinkEntry, int, error) {
 	var entries []deeplinkEntry
+	added := 0
 	for _, pat := range patterns {
 		body, err := json.Marshal(map[string]string{
 			"pattern": pat,
 			"group":   group,
 		})
 		if err != nil {
-			return entries, fmt.Errorf("failed to encode request for pattern %q: %w", pat, err)
+			return entries, added, fmt.Errorf("failed to encode request for pattern %q: %w", pat, err)
 		}
 		resp, err := client.Post(
 			fmt.Sprintf("http://%s/_/api/patterns", addr),
@@ -801,18 +826,19 @@ func postPatterns(client *http.Client, addr, group string, patterns []string) ([
 			bytes.NewReader(body),
 		)
 		if err != nil {
-			return entries, fmt.Errorf("failed to add pattern %q: %w", pat, err)
+			return entries, added, fmt.Errorf("failed to add pattern %q: %w", pat, err)
 		}
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
-			return entries, fmt.Errorf("failed to add pattern %q: server returned %s", pat, resp.Status)
+			return entries, added, fmt.Errorf("failed to add pattern %q: server returned %s", pat, resp.Status)
 		}
 		var patResp server.AddPatternResponse
 		if err := json.NewDecoder(resp.Body).Decode(&patResp); err != nil {
 			resp.Body.Close()
-			return entries, fmt.Errorf("failed to decode response after adding pattern %q: %w", pat, err)
+			return entries, added, fmt.Errorf("failed to decode response after adding pattern %q: %w", pat, err)
 		}
 		resp.Body.Close()
+		added++
 		for _, f := range patResp.Files {
 			entries = append(entries, deeplinkEntry{
 				URL:  buildDeeplink(addr, group, f.ID),
@@ -820,11 +846,19 @@ func postPatterns(client *http.Client, addr, group string, patterns []string) ([
 			})
 		}
 	}
-	return entries, nil
+	return entries, added, nil
+}
+
+type groupedFileEndpointError struct {
+	status string
+}
+
+func (e *groupedFileEndpointError) Error() string {
+	return fmt.Sprintf("the running mo server is incompatible with this CLI: grouped file endpoint returned %s; restart it with `mo --restart` and retry", e.status)
 }
 
 func incompatibleGroupedFileEndpointError(status string) error {
-	return fmt.Errorf("the running mo server is incompatible with this CLI: grouped file endpoint returned %s; restart it with `mo --restart` and retry", status)
+	return &groupedFileEndpointError{status: status}
 }
 
 type deeplinkEntry struct {
@@ -1399,31 +1433,11 @@ func startServer(ctx context.Context, addr string, filesByGroup map[string][]str
 	defer cleanup()
 
 	state := server.NewState(ctx)
-
-	// Generate and persist the per-server auth token, then enable auth. This
-	// gates the API to the local CLI (via the token file) and the same-origin
-	// SPA (via a SameSite=Strict cookie), without restricting which files open.
-	// MO_DISABLE_AUTH is an escape hatch for the cross-origin frontend dev proxy
-	// (pnpm run dev), where the SPA is served by Vite and never receives the
-	// cookie. Never set it in normal use.
-	if os.Getenv("MO_DISABLE_AUTH") != "1" {
-		tok, err := token.Generate()
-		if err != nil {
-			return fmt.Errorf("failed to generate auth token: %w", err)
-		}
-		if err := token.Save(port, tok); err != nil {
-			return fmt.Errorf("failed to persist auth token: %w", err)
-		}
-		state.SetAuth(tok, allowedHostsForAddr(addr))
-	} else {
-		slog.Warn("MO_DISABLE_AUTH set: API authentication is disabled")
+	var closeStateOnce sync.Once
+	closeState := func() {
+		closeStateOnce.Do(state.CloseAllSubscribers)
 	}
-
-	state.EnableBackup(ctx, func(data server.RestoreData) {
-		if err := backup.Save(port, data); err != nil {
-			slog.Warn("failed to save backup", "error", err)
-		}
-	})
+	defer closeState()
 
 	var deeplinks []deeplinkEntry
 	var totalFiles, skippedFiles int
@@ -1472,6 +1486,41 @@ func startServer(ctx context.Context, addr string, filesByGroup map[string][]str
 		return fmt.Errorf("all %d file(s) were skipped", totalFiles)
 	}
 
+	// Validate and restore the requested state before claiming the port so an
+	// invalid launch cannot block a concurrent valid launch. Publish the auth
+	// token only after acquiring the listener so a losing launch cannot replace
+	// the winning server's credentials.
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("cannot listen on %s: %w", addr, err)
+	}
+	defer ln.Close() //nolint:errcheck // Serve or shutdown may close it first
+
+	// Generate and persist the per-server auth token, then enable auth. This
+	// gates the API to the local CLI (via the token file) and the same-origin
+	// SPA (via a SameSite=Strict cookie), without restricting which files open.
+	// MO_DISABLE_AUTH is an escape hatch for the cross-origin frontend dev proxy
+	// (pnpm run dev), where the SPA is served by Vite and never receives the
+	// cookie. Never set it in normal use.
+	if os.Getenv("MO_DISABLE_AUTH") != "1" {
+		tok, err := token.Generate()
+		if err != nil {
+			return fmt.Errorf("failed to generate auth token: %w", err)
+		}
+		if err := token.Save(port, tok); err != nil {
+			return fmt.Errorf("failed to persist auth token: %w", err)
+		}
+		state.SetAuth(tok, allowedHostsForAddr(addr))
+	} else {
+		slog.Warn("MO_DISABLE_AUTH set: API authentication is disabled")
+	}
+
+	state.EnableBackup(ctx, func(data server.RestoreData) {
+		if err := backup.Save(port, data); err != nil {
+			slog.Warn("failed to save backup", "error", err)
+		}
+	})
+
 	handler := server.NewHandler(state)
 
 	srv := &http.Server{
@@ -1480,15 +1529,10 @@ func startServer(ctx context.Context, addr string, filesByGroup map[string][]str
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("cannot listen on %s: %w", addr, err)
-	}
-
 	emitServeOutput(addr, deeplinks, true)
 
 	if err := donegroup.Cleanup(ctx, func() error {
-		state.CloseAllSubscribers()
+		closeState()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 		return srv.Shutdown(shutdownCtx)
@@ -1553,6 +1597,19 @@ func spawnNewProcess(addr string, restoreFile string) (*os.Process, error) {
 	return cmd.Process, nil
 }
 
+func stopSpawnedProcess(proc *os.Process) {
+	if err := proc.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		slog.Warn("failed to stop spawned process", "pid", proc.Pid, "error", err)
+		if releaseErr := proc.Release(); releaseErr != nil {
+			slog.Warn("failed to release spawned process", "pid", proc.Pid, "error", releaseErr)
+		}
+		return
+	}
+	if _, err := proc.Wait(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		slog.Warn("failed to reap spawned process", "pid", proc.Pid, "error", err)
+	}
+}
+
 func startBackground(addr string, filesByGroup map[string][]string, patternsByGroup map[string][]string, uploadedFiles []server.UploadedFileData, checkboxOverrides map[string]map[string]bool) error {
 	restoreFile, err := server.WriteRestoreFile(server.RestoreData{Groups: filesByGroup, Patterns: patternsByGroup, UploadedFiles: uploadedFiles, CheckboxOverrides: checkboxOverrides})
 	if err != nil {
@@ -1565,14 +1622,27 @@ func startBackground(addr string, filesByGroup map[string][]string, patternsByGr
 		return err
 	}
 	pid := proc.Pid
-	// Detach so the child survives parent exit.
-	if err := proc.Release(); err != nil {
-		slog.Warn("failed to release process", "error", err)
+
+	status, err := waitForReady(addr, pid, 10*time.Second)
+	if err != nil {
+		// Do not report a failed launch while leaving its detached child free to
+		// begin serving later. The child may already have consumed the restore
+		// file, so cleanup both resources after it has stopped.
+		stopSpawnedProcess(proc)
+		os.Remove(restoreFile) //nolint:errcheck // best-effort; the child may have consumed it already
+		if errors.Is(err, errServerConflict) {
+			// Lost a concurrent startup race: another mo server owns the
+			// port. Add our files to the winner instead of reporting a
+			// false success.
+			return addToRunningServer(addr, status, filesByGroup, patternsByGroup, uploadedFiles)
+		}
+		return fmt.Errorf("%w (spawned pid %d)", err, pid)
 	}
 
-	status, err := waitForReady(addr, 10*time.Second)
-	if err != nil {
-		return fmt.Errorf("%w (pid %d)", err, pid)
+	// Detach only after readiness succeeds so timeout and conflict paths can
+	// terminate and reap the child before returning an error.
+	if err := proc.Release(); err != nil {
+		slog.Warn("failed to release process", "error", err)
 	}
 
 	var deeplinks []deeplinkEntry
@@ -1595,6 +1665,92 @@ func startBackground(addr string, filesByGroup map[string][]string, patternsByGr
 	return nil
 }
 
+// addToRunningServer posts files, patterns, and uploaded files to a mo server
+// that is already running on addr. Used when a background start loses the
+// port to another mo instance (concurrent startup race).
+func addToRunningServer(addr string, status *statusResponse, filesByGroup map[string][]string, patternsByGroup map[string][]string, uploadedFiles []server.UploadedFileData) error {
+	slog.Info("port already served by another mo instance; adding to it", "addr", addr, "pid", status.PID)
+	client := &http.Client{Timeout: probeTimeoutDefault, Transport: newTokenTransport(addr)}
+	var deeplinks []deeplinkEntry
+	var firstErr error
+	var incompatibleErr error
+	added := 0
+	attempted := 0
+	for group, files := range filesByGroup {
+		for _, file := range files {
+			attempted++
+			entries, err := postFiles(client, addr, group, []string{file})
+			if err != nil {
+				slog.Warn("failed to add file", "path", file, "error", err)
+				if firstErr == nil {
+					firstErr = err
+				}
+				var groupedErr *groupedFileEndpointError
+				if errors.As(err, &groupedErr) {
+					incompatibleErr = err
+				}
+				continue
+			}
+			deeplinks = append(deeplinks, entries...)
+			added += len(entries)
+		}
+	}
+	for group, patterns := range patternsByGroup {
+		for _, pattern := range patterns {
+			attempted++
+			entries, patternsAdded, err := postPatterns(client, addr, group, []string{pattern})
+			if err != nil {
+				slog.Warn("failed to add pattern", "pattern", pattern, "error", err)
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			deeplinks = append(deeplinks, entries...)
+			added += patternsAdded
+		}
+	}
+	for _, uf := range uploadedFiles {
+		attempted++
+		entry, err := postUploadedFile(client, addr, uf.Group, uf.Name, uf.Content)
+		if err != nil {
+			slog.Warn("failed to upload file", "name", uf.Name, "error", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		deeplinks = append(deeplinks, entry)
+		added++
+	}
+	if incompatibleErr != nil {
+		firstErr = incompatibleErr
+	}
+	if attempted > 0 && added == 0 {
+		if firstErr != nil {
+			return fmt.Errorf("failed to add any items to the mo server at http://%s (check log file for details): %w", addr, firstErr)
+		}
+		return fmt.Errorf("failed to add any items to the mo server at http://%s (check log file for details)", addr)
+	}
+	if firstErr != nil {
+		return fmt.Errorf("added %d of %d item(s) to the mo server at http://%s; one or more items failed (check log file for details): %w", added, attempted, addr, firstErr)
+	}
+	emitServeOutput(addr, deeplinks, true)
+	fmt.Fprintf(os.Stderr, "mo: another mo server is already running at http://%s (pid %d); added %d item(s) to it\n", addr, status.PID, added)
+
+	isNewGroup := true
+	for _, g := range status.Groups {
+		if g.Name == target {
+			isNewGroup = false
+			break
+		}
+	}
+	if isNewGroup || open {
+		openBrowser(addr)
+	}
+	return nil
+}
+
 func openBrowser(addr string) {
 	if noOpen {
 		return
@@ -1608,7 +1764,14 @@ func openBrowser(addr string) {
 	}
 }
 
-func waitForReady(addr string, timeout time.Duration) (*statusResponse, error) {
+// waitForReady polls addr until a mo server responds as ready or timeout
+// elapses. It keeps polling after the spawned child exits because a concurrent
+// winner may own the listener but still be restoring state before serving.
+//
+// If a mo server responds but its PID does not match childPID, the spawned
+// child lost a concurrent startup race for the port; errServerConflict is
+// returned along with the winning server's status.
+func waitForReady(addr string, childPID int, timeout time.Duration) (*statusResponse, error) {
 	client := &http.Client{Timeout: 500 * time.Millisecond, Transport: newTokenTransport(addr)}
 	deadline := time.Now().Add(timeout)
 
@@ -1617,17 +1780,19 @@ func waitForReady(addr string, timeout time.Duration) (*statusResponse, error) {
 		if err == nil {
 			if resp.StatusCode == http.StatusOK {
 				var status statusResponse
-				if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+				if decErr := json.NewDecoder(resp.Body).Decode(&status); decErr == nil && status.Version != "" {
 					resp.Body.Close()
-					return nil, nil //nolint:nilerr // decode failure is non-fatal; server is ready
+					if childPID > 0 && status.PID != childPID {
+						return &status, errServerConflict
+					}
+					return &status, nil
 				}
-				resp.Body.Close()
-				return &status, nil
 			}
 			resp.Body.Close()
 		}
+
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	return nil, fmt.Errorf("server did not become ready within %s (check log file for details)", timeout)
+	return nil, fmt.Errorf("server did not become ready within %s; the port may be in use by another (non-mo) server (check log file for details)", timeout)
 }

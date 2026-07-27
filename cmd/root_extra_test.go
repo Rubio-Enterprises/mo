@@ -416,19 +416,22 @@ func TestPostPatterns(t *testing.T) {
 		srv := newFullFakeServer(t, mux)
 		addr := strings.TrimPrefix(srv.URL, "http://")
 
-		entries, err := postPatterns(srv.Client(), addr, "default", []string{"/*.md"})
+		entries, added, err := postPatterns(srv.Client(), addr, "default", []string{"/*.md"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if len(entries) != 2 {
 			t.Fatalf("got %d entries, want 2", len(entries))
 		}
+		if added != 1 {
+			t.Fatalf("got %d added patterns, want 1", added)
+		}
 	})
 
 	t.Run("transport error returns error", func(t *testing.T) {
-		entries, err := postPatterns(&http.Client{}, "127.0.0.1:1", "default", []string{"/*.md"})
+		entries, added, err := postPatterns(&http.Client{}, "127.0.0.1:1", "default", []string{"/*.md"})
 		if err == nil {
-			t.Fatalf("expected transport error, got entries=%v", entries)
+			t.Fatalf("expected transport error, got entries=%v added=%d", entries, added)
 		}
 	})
 
@@ -440,9 +443,9 @@ func TestPostPatterns(t *testing.T) {
 		srv := newFullFakeServer(t, mux)
 		addr := strings.TrimPrefix(srv.URL, "http://")
 
-		entries, err := postPatterns(srv.Client(), addr, "default", []string{"/*.md"})
+		entries, added, err := postPatterns(srv.Client(), addr, "default", []string{"/*.md"})
 		if err == nil || !strings.Contains(err.Error(), "400 Bad Request") {
-			t.Fatalf("expected status error, got entries=%v err=%v", entries, err)
+			t.Fatalf("expected status error, got entries=%v added=%d err=%v", entries, added, err)
 		}
 	})
 }
@@ -1172,10 +1175,23 @@ func TestStartServerListenError(t *testing.T) {
 	}
 	defer ln.Close()
 	addr := ln.Addr().String()
+	_, p, err := splitHostPort(addr)
+	if err != nil {
+		t.Fatalf("splitHostPort: %v", err)
+	}
+	const wantToken = "winner-token"
+	if err := token.Save(p, wantToken); err != nil {
+		t.Fatalf("save token: %v", err)
+	}
 
+	prevPort := port
 	prevNoOpen := noOpen
+	port = p
 	noOpen = true
-	defer func() { noOpen = prevNoOpen }()
+	defer func() {
+		port = prevPort
+		noOpen = prevNoOpen
+	}()
 
 	dir := t.TempDir()
 	f := filepath.Join(dir, "a.md")
@@ -1197,6 +1213,13 @@ func TestStartServerListenError(t *testing.T) {
 	if !strings.Contains(err.Error(), "cannot listen") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	gotToken, err := token.Load(p)
+	if err != nil {
+		t.Fatalf("load token: %v", err)
+	}
+	if gotToken != wantToken {
+		t.Fatalf("token = %q, want existing winner token %q", gotToken, wantToken)
+	}
 }
 
 func TestStartServerAllFilesSkipped(t *testing.T) {
@@ -1206,14 +1229,20 @@ func TestStartServerAllFilesSkipped(t *testing.T) {
 	noOpen = true
 	defer func() { noOpen = prevNoOpen }()
 
-	// Use a directory path so AddFile fails on read.
+	// Use a directory path so AddFile fails on read. Keep the target port
+	// occupied to verify validation happens before startServer tries to listen.
 	dir := t.TempDir()
+	ln, err := newTCPListener()
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	addr := ln.Addr().String()
 
-	addr := fmt.Sprintf("127.0.0.1:%d", findFreePort(t))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := captureStderrErr(t, func() error {
+	err = captureStderrErr(t, func() error {
 		return startServer(ctx, addr,
 			map[string][]string{"default": {dir}},
 			nil, nil, nil)
@@ -1228,7 +1257,7 @@ func TestStartServerAllFilesSkipped(t *testing.T) {
 
 func TestWaitForReadyTimeout(t *testing.T) {
 	// No server at this port: should timeout.
-	_, err := waitForReady(fmt.Sprintf("127.0.0.1:%d", findFreePort(t)), 200*time.Millisecond)
+	_, err := waitForReady(fmt.Sprintf("127.0.0.1:%d", findFreePort(t)), 0, 200*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -1248,7 +1277,7 @@ func TestWaitForReadyHappyPath(t *testing.T) {
 	defer srv.Close()
 	addr := strings.TrimPrefix(srv.URL, "http://")
 
-	status, err := waitForReady(addr, 2*time.Second)
+	status, err := waitForReady(addr, 0, 2*time.Second)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

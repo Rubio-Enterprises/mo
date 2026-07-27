@@ -946,6 +946,8 @@ func (s *State) EnableBackup(ctx context.Context, saveFn func(RestoreData)) {
 		s.backupLoop(ctx)
 		return nil
 	})
+	// Persist state that may have been populated before backup was enabled.
+	s.markDirty()
 }
 
 // CheckboxState returns the sources, overrides, and ordered keys for a file.

@@ -2,10 +2,15 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -792,6 +797,268 @@ func newFakeMoServer(t *testing.T, statusHandler http.HandlerFunc) *httptest.Ser
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func TestWaitForReady_Success(t *testing.T) {
+	pid := os.Getpid()
+	srv := newFakeMoServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"version": "test", "pid": pid, "groups": []any{}}) //nolint:errcheck
+	})
+	addr := strings.TrimPrefix(srv.URL, "http://")
+
+	status, err := waitForReady(addr, pid, 2*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status == nil {
+		t.Fatal("expected non-nil status")
+	}
+	if status.PID != pid {
+		t.Fatalf("got PID %d, want %d", status.PID, pid)
+	}
+}
+
+func TestWaitForReady_PIDMismatch(t *testing.T) {
+	childPID := os.Getpid()
+	otherPID := childPID + 1
+	srv := newFakeMoServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"version": "test", "pid": otherPID, "groups": []any{}}) //nolint:errcheck
+	})
+	addr := strings.TrimPrefix(srv.URL, "http://")
+
+	status, err := waitForReady(addr, childPID, 2*time.Second)
+	if !errors.Is(err, errServerConflict) {
+		t.Fatalf("got error %v, want errServerConflict", err)
+	}
+	if status == nil {
+		t.Fatal("expected non-nil status")
+	}
+}
+
+func TestWaitForReady_NonMoServer(t *testing.T) {
+	childPID := os.Getpid()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /_/api/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<html>not mo</html>")
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	addr := strings.TrimPrefix(srv.URL, "http://")
+
+	_, err := waitForReady(addr, childPID, 300*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if !strings.Contains(err.Error(), "did not become ready") {
+		t.Fatalf("got error %q, want 'did not become ready'", err.Error())
+	}
+}
+
+func TestWaitForReady_ChildExitedWaitsForWinner(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires the Unix 'true' binary")
+	}
+
+	exited := exec.Command("true")
+	if err := exited.Start(); err != nil {
+		t.Fatalf("failed to start helper process: %v", err)
+	}
+	deadPID := exited.Process.Pid
+	defer exited.Wait() //nolint:errcheck // best-effort reap for the helper process
+
+	ln, err := newTCPListener()
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /_/api/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"version": "test", "pid": os.Getpid(), "groups": []any{}}) //nolint:errcheck
+	})
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: time.Second}
+	t.Cleanup(func() {
+		if err := srv.Close(); err != nil {
+			t.Errorf("close server: %v", err)
+		}
+		if err := ln.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			t.Errorf("close listener: %v", err)
+		}
+	})
+	go func() {
+		time.Sleep(2200 * time.Millisecond)
+		if serveErr := srv.Serve(ln); serveErr != nil && serveErr != http.ErrServerClosed {
+			t.Errorf("serve: %v", serveErr)
+		}
+	}()
+
+	start := time.Now()
+	status, err := waitForReady(addr, deadPID, 4*time.Second)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, errServerConflict) {
+		t.Fatalf("got error %v, want errServerConflict", err)
+	}
+	if status == nil || status.PID != os.Getpid() {
+		t.Fatalf("got status %+v, want winner PID %d", status, os.Getpid())
+	}
+	if elapsed < 2*time.Second {
+		t.Fatalf("waitForReady returned after %s, before the winner was ready", elapsed)
+	}
+}
+
+func TestStopSpawnedProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires the Unix 'sleep' binary")
+	}
+
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start helper process: %v", err)
+	}
+
+	stopSpawnedProcess(cmd.Process)
+	if err := cmd.Process.Kill(); !errors.Is(err, os.ErrProcessDone) {
+		t.Fatalf("second kill error = %v, want os.ErrProcessDone", err)
+	}
+}
+
+func TestAddToRunningServer(t *testing.T) {
+	origNoOpen := noOpen
+	noOpen = true
+	t.Cleanup(func() { noOpen = origNoOpen })
+
+	var postCount int
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /_/api/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"version": "test", "pid": 12345, "groups": []any{}}) //nolint:errcheck
+	})
+	mux.HandleFunc("POST /_/api/groups/{group}/files", func(w http.ResponseWriter, r *http.Request) {
+		postCount++
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(server.FileEntry{ID: "abc12345", Path: "/tmp/x.md", Name: "x.md"}) //nolint:errcheck
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	addr := strings.TrimPrefix(srv.URL, "http://")
+
+	status := &statusResponse{PID: 12345}
+	err := addToRunningServer(addr, status, map[string][]string{"default": {"/tmp/x.md"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if postCount != 1 {
+		t.Fatalf("got %d POSTs, want 1", postCount)
+	}
+}
+
+func TestAddToRunningServer_AllPostsFail(t *testing.T) {
+	origNoOpen := noOpen
+	noOpen = true
+	t.Cleanup(func() { noOpen = origNoOpen })
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /_/api/groups/{group}/files", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "shutting down", http.StatusServiceUnavailable)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	addr := strings.TrimPrefix(srv.URL, "http://")
+
+	status := &statusResponse{PID: 12345}
+	err := addToRunningServer(addr, status, map[string][]string{"default": {"/tmp/x.md"}}, nil, nil)
+	if err == nil {
+		t.Fatal("expected error when every POST fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to add any items") {
+		t.Fatalf("got error %q, want 'failed to add any items'", err.Error())
+	}
+}
+
+func TestAddToRunningServer_PartialFailure(t *testing.T) {
+	origNoOpen := noOpen
+	noOpen = true
+	t.Cleanup(func() { noOpen = origNoOpen })
+
+	var postCount int
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /_/api/groups/{group}/files", func(w http.ResponseWriter, r *http.Request) {
+		postCount++
+		if postCount == 2 {
+			http.Error(w, "shutting down", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(server.FileEntry{ID: "abc12345", Path: "/tmp/a.md", Name: "a.md"}) //nolint:errcheck
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	addr := strings.TrimPrefix(srv.URL, "http://")
+
+	status := &statusResponse{PID: 12345}
+	err := addToRunningServer(addr, status, map[string][]string{"default": {"/tmp/a.md", "/tmp/b.md"}}, nil, nil)
+	if err == nil {
+		t.Fatal("expected error after a partial transfer, got nil")
+	}
+	if !strings.Contains(err.Error(), "added 1 of 2 item(s)") {
+		t.Fatalf("got error %q, want partial-transfer counts", err.Error())
+	}
+	if postCount != 2 {
+		t.Fatalf("got %d POSTs, want 2", postCount)
+	}
+}
+
+// A pattern-only invocation must not report success when every pattern POST
+// fails on the winning server. Previously len(patterns) was added to the
+// counter unconditionally, defeating the "attempted > 0 && added == 0" guard.
+func TestAddToRunningServer_PatternsAllFail(t *testing.T) {
+	origNoOpen := noOpen
+	noOpen = true
+	t.Cleanup(func() { noOpen = origNoOpen })
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /_/api/patterns", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "shutting down", http.StatusServiceUnavailable)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	addr := strings.TrimPrefix(srv.URL, "http://")
+
+	status := &statusResponse{PID: 12345}
+	err := addToRunningServer(addr, status, nil, map[string][]string{"default": {"*.md"}}, nil)
+	if err == nil {
+		t.Fatal("expected error when every pattern POST fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to add any items") {
+		t.Fatalf("got error %q, want 'failed to add any items'", err.Error())
+	}
+}
+
+// A pattern that legitimately matches zero files must still count as added,
+// so the "added N item(s)" line does not misreport it as a failure.
+func TestAddToRunningServer_PatternWithZeroMatches(t *testing.T) {
+	origNoOpen := noOpen
+	noOpen = true
+	t.Cleanup(func() { noOpen = origNoOpen })
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /_/api/patterns", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(server.AddPatternResponse{Files: nil}) //nolint:errcheck
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	addr := strings.TrimPrefix(srv.URL, "http://")
+
+	status := &statusResponse{PID: 12345}
+	err := addToRunningServer(addr, status, nil, map[string][]string{"default": {"*.md"}}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestIsLoopbackBind(t *testing.T) {
