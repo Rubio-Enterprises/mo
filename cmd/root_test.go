@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -880,8 +881,12 @@ func TestWaitForReady_ChildExitedWaitsForWinner(t *testing.T) {
 	})
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: time.Second}
 	t.Cleanup(func() {
-		_ = srv.Close()
-		_ = ln.Close()
+		if err := srv.Close(); err != nil {
+			t.Errorf("close server: %v", err)
+		}
+		if err := ln.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			t.Errorf("close listener: %v", err)
+		}
 	})
 	go func() {
 		time.Sleep(2200 * time.Millisecond)
