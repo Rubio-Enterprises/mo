@@ -1229,14 +1229,20 @@ func TestStartServerAllFilesSkipped(t *testing.T) {
 	noOpen = true
 	defer func() { noOpen = prevNoOpen }()
 
-	// Use a directory path so AddFile fails on read.
+	// Use a directory path so AddFile fails on read. Keep the target port
+	// occupied to verify validation happens before startServer tries to listen.
 	dir := t.TempDir()
+	ln, err := newTCPListener()
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	addr := ln.Addr().String()
 
-	addr := fmt.Sprintf("127.0.0.1:%d", findFreePort(t))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := captureStderrErr(t, func() error {
+	err = captureStderrErr(t, func() error {
 		return startServer(ctx, addr,
 			map[string][]string{"default": {dir}},
 			nil, nil, nil)

@@ -856,65 +856,69 @@ func TestWaitForReady_NonMoServer(t *testing.T) {
 	}
 }
 
-func TestWaitForReady_ChildExited(t *testing.T) {
+func TestWaitForReady_ChildExitedWaitsForWinner(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("requires the Unix 'true' binary")
 	}
-	// Start a child without waiting: it exits immediately but stays a zombie,
-	// so its pid cannot be reused and processAlive's non-blocking reap is
-	// what detects the death (same as a real spawned server child).
+
 	exited := exec.Command("true")
 	if err := exited.Start(); err != nil {
 		t.Fatalf("failed to start helper process: %v", err)
 	}
 	deadPID := exited.Process.Pid
+	defer exited.Wait() //nolint:errcheck // best-effort reap for the helper process
 
+	ln, err := newTCPListener()
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /_/api/status", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprint(w, "<html>not mo</html>")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"version": "test", "pid": os.Getpid(), "groups": []any{}}) //nolint:errcheck
 	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	addr := strings.TrimPrefix(srv.URL, "http://")
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: time.Second}
+	t.Cleanup(func() {
+		_ = srv.Close()
+		_ = ln.Close()
+	})
+	go func() {
+		time.Sleep(2200 * time.Millisecond)
+		if serveErr := srv.Serve(ln); serveErr != nil && serveErr != http.ErrServerClosed {
+			t.Errorf("serve: %v", serveErr)
+		}
+	}()
 
 	start := time.Now()
-	_, err := waitForReady(addr, deadPID, 5*time.Second)
+	status, err := waitForReady(addr, deadPID, 4*time.Second)
 	elapsed := time.Since(start)
 
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	if !errors.Is(err, errServerConflict) {
+		t.Fatalf("got error %v, want errServerConflict", err)
 	}
-	if !strings.Contains(err.Error(), "exited unexpectedly") {
-		t.Fatalf("got error %q, want 'exited unexpectedly'", err.Error())
+	if status == nil || status.PID != os.Getpid() {
+		t.Fatalf("got status %+v, want winner PID %d", status, os.Getpid())
 	}
-	// Death detection plus the deadChildGrace window should still finish
-	// well before the 5s timeout.
-	if elapsed > 3*time.Second {
-		t.Fatalf("waitForReady took %s, want fail-fast (<3s)", elapsed)
+	if elapsed < 2*time.Second {
+		t.Fatalf("waitForReady returned after %s, before the winner was ready", elapsed)
 	}
 }
 
-func TestProcessAlive_ZombieChild(t *testing.T) {
+func TestStopSpawnedProcess(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("zombie processes are a Unix concept")
+		t.Skip("requires the Unix 'sleep' binary")
 	}
-	// Start a child and do not Wait: after exit it stays a zombie, for which
-	// kill(pid, 0) still succeeds. processAlive must detect it as dead.
-	cmd := exec.Command("true")
+
+	cmd := exec.Command("sleep", "30")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("failed to start helper process: %v", err)
 	}
-	pid := cmd.Process.Pid
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if !processAlive(pid) {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	stopSpawnedProcess(cmd.Process)
+	if err := cmd.Process.Kill(); !errors.Is(err, os.ErrProcessDone) {
+		t.Fatalf("second kill error = %v, want os.ErrProcessDone", err)
 	}
-	t.Fatal("processAlive still reports true for exited (zombie) child after 2s")
 }
 
 func TestAddToRunningServer(t *testing.T) {
@@ -967,6 +971,39 @@ func TestAddToRunningServer_AllPostsFail(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to add any items") {
 		t.Fatalf("got error %q, want 'failed to add any items'", err.Error())
+	}
+}
+
+func TestAddToRunningServer_PartialFailure(t *testing.T) {
+	origNoOpen := noOpen
+	noOpen = true
+	t.Cleanup(func() { noOpen = origNoOpen })
+
+	var postCount int
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /_/api/groups/{group}/files", func(w http.ResponseWriter, r *http.Request) {
+		postCount++
+		if postCount == 2 {
+			http.Error(w, "shutting down", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(server.FileEntry{ID: "abc12345", Path: "/tmp/a.md", Name: "a.md"}) //nolint:errcheck
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	addr := strings.TrimPrefix(srv.URL, "http://")
+
+	status := &statusResponse{PID: 12345}
+	err := addToRunningServer(addr, status, map[string][]string{"default": {"/tmp/a.md", "/tmp/b.md"}}, nil, nil)
+	if err == nil {
+		t.Fatal("expected error after a partial transfer, got nil")
+	}
+	if !strings.Contains(err.Error(), "added 1 of 2 item(s)") {
+		t.Fatalf("got error %q, want partial-transfer counts", err.Error())
+	}
+	if postCount != 2 {
+		t.Fatalf("got %d POSTs, want 2", postCount)
 	}
 }
 

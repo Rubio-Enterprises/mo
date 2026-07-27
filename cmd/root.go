@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -43,10 +44,6 @@ const (
 	probeTimeoutFast = 500 * time.Millisecond
 	// probeTimeoutDefault is used when the server is expected to be running.
 	probeTimeoutDefault = 2 * time.Second
-	// deadChildGrace is how long waitForReady keeps polling after the spawned
-	// child dies, giving a race-winning server a chance to respond before the
-	// failure is reported.
-	deadChildGrace = 1 * time.Second
 
 	markdownGlob          = "*.md"
 	markdownGlobRecursive = "**/*.md"
@@ -1435,41 +1432,12 @@ func startServer(ctx context.Context, addr string, filesByGroup map[string][]str
 	}
 	defer cleanup()
 
-	// Acquire the port before publishing its authentication token. In a
-	// concurrent startup race, only the process that owns the listener may
-	// replace the token used to authenticate to that port.
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("cannot listen on %s: %w", addr, err)
-	}
-	defer ln.Close() //nolint:errcheck // Serve or shutdown may close it first
-
 	state := server.NewState(ctx)
-
-	// Generate and persist the per-server auth token, then enable auth. This
-	// gates the API to the local CLI (via the token file) and the same-origin
-	// SPA (via a SameSite=Strict cookie), without restricting which files open.
-	// MO_DISABLE_AUTH is an escape hatch for the cross-origin frontend dev proxy
-	// (pnpm run dev), where the SPA is served by Vite and never receives the
-	// cookie. Never set it in normal use.
-	if os.Getenv("MO_DISABLE_AUTH") != "1" {
-		tok, err := token.Generate()
-		if err != nil {
-			return fmt.Errorf("failed to generate auth token: %w", err)
-		}
-		if err := token.Save(port, tok); err != nil {
-			return fmt.Errorf("failed to persist auth token: %w", err)
-		}
-		state.SetAuth(tok, allowedHostsForAddr(addr))
-	} else {
-		slog.Warn("MO_DISABLE_AUTH set: API authentication is disabled")
+	var closeStateOnce sync.Once
+	closeState := func() {
+		closeStateOnce.Do(state.CloseAllSubscribers)
 	}
-
-	state.EnableBackup(ctx, func(data server.RestoreData) {
-		if err := backup.Save(port, data); err != nil {
-			slog.Warn("failed to save backup", "error", err)
-		}
-	})
+	defer closeState()
 
 	var deeplinks []deeplinkEntry
 	var totalFiles, skippedFiles int
@@ -1518,6 +1486,41 @@ func startServer(ctx context.Context, addr string, filesByGroup map[string][]str
 		return fmt.Errorf("all %d file(s) were skipped", totalFiles)
 	}
 
+	// Validate and restore the requested state before claiming the port so an
+	// invalid launch cannot block a concurrent valid launch. Publish the auth
+	// token only after acquiring the listener so a losing launch cannot replace
+	// the winning server's credentials.
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("cannot listen on %s: %w", addr, err)
+	}
+	defer ln.Close() //nolint:errcheck // Serve or shutdown may close it first
+
+	// Generate and persist the per-server auth token, then enable auth. This
+	// gates the API to the local CLI (via the token file) and the same-origin
+	// SPA (via a SameSite=Strict cookie), without restricting which files open.
+	// MO_DISABLE_AUTH is an escape hatch for the cross-origin frontend dev proxy
+	// (pnpm run dev), where the SPA is served by Vite and never receives the
+	// cookie. Never set it in normal use.
+	if os.Getenv("MO_DISABLE_AUTH") != "1" {
+		tok, err := token.Generate()
+		if err != nil {
+			return fmt.Errorf("failed to generate auth token: %w", err)
+		}
+		if err := token.Save(port, tok); err != nil {
+			return fmt.Errorf("failed to persist auth token: %w", err)
+		}
+		state.SetAuth(tok, allowedHostsForAddr(addr))
+	} else {
+		slog.Warn("MO_DISABLE_AUTH set: API authentication is disabled")
+	}
+
+	state.EnableBackup(ctx, func(data server.RestoreData) {
+		if err := backup.Save(port, data); err != nil {
+			slog.Warn("failed to save backup", "error", err)
+		}
+	})
+
 	handler := server.NewHandler(state)
 
 	srv := &http.Server{
@@ -1529,7 +1532,7 @@ func startServer(ctx context.Context, addr string, filesByGroup map[string][]str
 	emitServeOutput(addr, deeplinks, true)
 
 	if err := donegroup.Cleanup(ctx, func() error {
-		state.CloseAllSubscribers()
+		closeState()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 		return srv.Shutdown(shutdownCtx)
@@ -1594,6 +1597,19 @@ func spawnNewProcess(addr string, restoreFile string) (*os.Process, error) {
 	return cmd.Process, nil
 }
 
+func stopSpawnedProcess(proc *os.Process) {
+	if err := proc.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		slog.Warn("failed to stop spawned process", "pid", proc.Pid, "error", err)
+		if releaseErr := proc.Release(); releaseErr != nil {
+			slog.Warn("failed to release spawned process", "pid", proc.Pid, "error", releaseErr)
+		}
+		return
+	}
+	if _, err := proc.Wait(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		slog.Warn("failed to reap spawned process", "pid", proc.Pid, "error", err)
+	}
+}
+
 func startBackground(addr string, filesByGroup map[string][]string, patternsByGroup map[string][]string, uploadedFiles []server.UploadedFileData, checkboxOverrides map[string]map[string]bool) error {
 	restoreFile, err := server.WriteRestoreFile(server.RestoreData{Groups: filesByGroup, Patterns: patternsByGroup, UploadedFiles: uploadedFiles, CheckboxOverrides: checkboxOverrides})
 	if err != nil {
@@ -1606,19 +1622,14 @@ func startBackground(addr string, filesByGroup map[string][]string, patternsByGr
 		return err
 	}
 	pid := proc.Pid
-	// Detach so the child survives parent exit.
-	if err := proc.Release(); err != nil {
-		slog.Warn("failed to release process", "error", err)
-	}
 
 	status, err := waitForReady(addr, pid, 10*time.Second)
 	if err != nil {
-		// Remove the restore file only once the child is confirmed dead: a
-		// slow-but-alive child may not have consumed it yet, and an alive
-		// child removes it itself after loading.
-		if !processAlive(pid) {
-			os.Remove(restoreFile) //nolint:errcheck // best-effort; the child may have consumed it already
-		}
+		// Do not report a failed launch while leaving its detached child free to
+		// begin serving later. The child may already have consumed the restore
+		// file, so cleanup both resources after it has stopped.
+		stopSpawnedProcess(proc)
+		os.Remove(restoreFile) //nolint:errcheck // best-effort; the child may have consumed it already
 		if errors.Is(err, errServerConflict) {
 			// Lost a concurrent startup race: another mo server owns the
 			// port. Add our files to the winner instead of reporting a
@@ -1626,6 +1637,12 @@ func startBackground(addr string, filesByGroup map[string][]string, patternsByGr
 			return addToRunningServer(addr, status, filesByGroup, patternsByGroup, uploadedFiles)
 		}
 		return fmt.Errorf("%w (spawned pid %d)", err, pid)
+	}
+
+	// Detach only after readiness succeeds so timeout and conflict paths can
+	// terminate and reap the child before returning an error.
+	if err := proc.Release(); err != nil {
+		slog.Warn("failed to release process", "error", err)
 	}
 
 	var deeplinks []deeplinkEntry
@@ -1706,14 +1723,17 @@ func addToRunningServer(addr string, status *statusResponse, filesByGroup map[st
 		deeplinks = append(deeplinks, entry)
 		added++
 	}
+	if incompatibleErr != nil {
+		firstErr = incompatibleErr
+	}
 	if attempted > 0 && added == 0 {
-		if incompatibleErr != nil {
-			firstErr = incompatibleErr
-		}
 		if firstErr != nil {
 			return fmt.Errorf("failed to add any items to the mo server at http://%s (check log file for details): %w", addr, firstErr)
 		}
 		return fmt.Errorf("failed to add any items to the mo server at http://%s (check log file for details)", addr)
+	}
+	if firstErr != nil {
+		return fmt.Errorf("added %d of %d item(s) to the mo server at http://%s; one or more items failed (check log file for details): %w", added, attempted, addr, firstErr)
 	}
 	emitServeOutput(addr, deeplinks, true)
 	fmt.Fprintf(os.Stderr, "mo: another mo server is already running at http://%s (pid %d); added %d item(s) to it\n", addr, status.PID, added)
@@ -1744,8 +1764,9 @@ func openBrowser(addr string) {
 	}
 }
 
-// waitForReady polls addr until a mo server responds as ready, the spawned
-// child (childPID) dies, or timeout elapses.
+// waitForReady polls addr until a mo server responds as ready or timeout
+// elapses. It keeps polling after the spawned child exits because a concurrent
+// winner may own the listener but still be restoring state before serving.
 //
 // If a mo server responds but its PID does not match childPID, the spawned
 // child lost a concurrent startup race for the port; errServerConflict is
@@ -1754,7 +1775,6 @@ func waitForReady(addr string, childPID int, timeout time.Duration) (*statusResp
 	client := &http.Client{Timeout: 500 * time.Millisecond, Transport: newTokenTransport(addr)}
 	deadline := time.Now().Add(timeout)
 
-	var childDeadSince time.Time
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(fmt.Sprintf("http://%s/_/api/status", addr))
 		if err == nil {
@@ -1769,16 +1789,6 @@ func waitForReady(addr string, childPID int, timeout time.Duration) (*statusResp
 				}
 			}
 			resp.Body.Close()
-		}
-
-		// Not ready yet: if the spawned child has died, keep polling briefly —
-		// in a lost startup race the winner may not be serving yet — then fail
-		// fast instead of waiting out the full timeout.
-		if childPID > 0 && childDeadSince.IsZero() && !processAlive(childPID) {
-			childDeadSince = time.Now()
-		}
-		if !childDeadSince.IsZero() && time.Since(childDeadSince) >= deadChildGrace {
-			return nil, errors.New("server process exited unexpectedly; the port may be in use by another server (check log file for details)")
 		}
 
 		time.Sleep(50 * time.Millisecond)
