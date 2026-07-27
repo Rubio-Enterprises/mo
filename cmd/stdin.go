@@ -60,7 +60,7 @@ func postUploadedFile(client *http.Client, addr, group, name, content string) (d
 		Content: content,
 	})
 	if err != nil {
-		return deeplinkEntry{}, err
+		return deeplinkEntry{}, fmt.Errorf("failed to encode upload request: %w", err)
 	}
 	resp, err := client.Post(
 		fmt.Sprintf("http://%s/_/api/groups/%s/files/upload", addr, url.PathEscape(group)),
@@ -68,9 +68,12 @@ func postUploadedFile(client *http.Client, addr, group, name, content string) (d
 		bytes.NewReader(body),
 	)
 	if err != nil {
-		return deeplinkEntry{}, err
+		return deeplinkEntry{}, fmt.Errorf("failed to upload %q: %w", name, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+		return deeplinkEntry{}, incompatibleGroupedFileEndpointError(resp.Status)
+	}
 	if resp.StatusCode != http.StatusOK {
 		errBody, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		if err != nil {
@@ -84,7 +87,7 @@ func postUploadedFile(client *http.Client, addr, group, name, content string) (d
 	}
 	var entry server.FileEntry
 	if err := json.NewDecoder(resp.Body).Decode(&entry); err != nil {
-		return deeplinkEntry{}, err
+		return deeplinkEntry{}, fmt.Errorf("failed to decode upload response for %q: %w", name, err)
 	}
 	return deeplinkEntry{
 		URL:  buildDeeplink(addr, group, entry.ID),

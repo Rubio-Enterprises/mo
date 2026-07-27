@@ -7,27 +7,22 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
 import rehypeKatex from "rehype-katex";
 import { rehypeGithubAlerts } from "rehype-github-alerts";
+import { rehypeCheckboxIndices } from "../plugins/rehypeCheckboxIndices";
+import { useCheckboxState } from "../hooks/useCheckboxState";
 import "katex/dist/katex.min.css";
 import { codeToHtml } from "shiki";
 import mermaid from "mermaid";
-import { fetchFileContent, openRelativeFile } from "../hooks/useApi";
+import { openRelativeFile } from "../hooks/useApi";
 import { isPlainLeftClick } from "../utils/linkClick";
 import { escapeRegExp } from "../utils/regex";
-import { RawToggle } from "./RawToggle";
-import { TocToggle } from "./TocToggle";
-import { CopyButton } from "./CopyButton";
-import { CloseFileButton } from "./CloseFileButton";
 import { resolveLink, resolveImageSrc, extractLanguage } from "../utils/resolve";
 import { buildRelativeOpenUrl } from "../utils/groups";
 import { parseFrontmatter } from "../utils/frontmatter";
 import { stripMdxSyntax } from "../utils/mdx";
-import { isMarkdownFile, detectLanguage } from "../utils/filetype";
-import { formatFileLabel } from "../utils/fileLabel";
-import type { ZoomContent } from "./ZoomModal";
-import type { TocHeading } from "./TocPanel";
+import type { TextRendererProps, TocHeading } from "./registry";
+import type { ZoomContent } from "../components/ZoomModal";
 import type { Components } from "react-markdown";
 import "github-markdown-css/github-markdown.css";
-import type { FontSize } from "./FontSizeToggle";
 
 // Strip the `user-content-` prefix that remark-gfm bakes into footnote IDs,
 // so rehype-sanitize can re-add it exactly once (avoiding double-prefixed IDs).
@@ -61,6 +56,7 @@ const sanitizeSchema = {
     ...defaultSchema.attributes,
     span: [...(defaultSchema.attributes?.["span"] || []), "style"],
     div: [...(defaultSchema.attributes?.["div"] || []), "style", "align"],
+    input: [...(defaultSchema.attributes?.["input"] || []), "dataCheckboxKey"],
   },
   protocols: {
     ...defaultSchema.protocols,
@@ -76,29 +72,6 @@ function urlTransform(url: string, key: string): string {
     return url;
   }
   return defaultUrlTransform(url);
-}
-
-interface MarkdownViewerProps {
-  fileId: string;
-  fileName: string;
-  title?: string;
-  filePath?: string;
-  scrollContainer?: HTMLElement | null;
-  activeGroup: string;
-  revision: number;
-  onFileOpened: (fileId: string) => void;
-  onHeadingsChange: (headings: TocHeading[]) => void;
-  onContentRendered?: () => void;
-  isTocOpen: boolean;
-  onTocToggle: () => void;
-  onRemoveFile: () => void;
-  uploaded?: boolean;
-  isWide: boolean;
-  fontSize: FontSize;
-  onZoom?: (content: ZoomContent) => void;
-  scrollToHeading?: string | null;
-  onScrolledToHeading?: () => void;
-  searchQuery?: string | null;
 }
 
 interface SearchHitMarker {
@@ -557,73 +530,58 @@ function RawView({ content }: { content: string }) {
   return <HighlightedView content={content} language="markdown" />;
 }
 
-export function MarkdownViewer({
+export function MarkdownRenderer({
+  activeGroup,
   fileId,
   fileName,
-  title,
-  filePath,
-  scrollContainer,
-  activeGroup,
-  revision,
+  content,
+  revision: _revision,
+  isRawView,
   onFileOpened,
   onHeadingsChange,
   onContentRendered,
-  isTocOpen,
-  onTocToggle,
-  onRemoveFile,
-  uploaded,
-  isWide,
-  fontSize,
+  onCheckboxInfo,
   onZoom,
   scrollToHeading,
   onScrolledToHeading,
   searchQuery,
-}: MarkdownViewerProps) {
-  const [content, setContent] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [isRawView, setIsRawView] = useState(false);
+}: TextRendererProps) {
+  const articleRef = useRef<HTMLDivElement>(null);
+  const pendingHashRef = useRef<string>("");
   const [searchHitMarkers, setSearchHitMarkers] = useState<SearchHitMarker[]>([]);
-  // The sticky bar shows the file name only while the document's own title is on
-  // screen (so it never duplicates it), then folds the title into the label once
-  // that heading scrolls up behind the bar.
-  const [showFullLabel, setShowFullLabel] = useState(false);
-  const articleRef = useRef<HTMLElement>(null);
-  const stickyLabelRef = useRef<HTMLDivElement>(null);
-  const [prevFetchKey, setPrevFetchKey] = useState({ fileId, revision });
 
-  if (fileId !== prevFetchKey.fileId || revision !== prevFetchKey.revision) {
-    setPrevFetchKey({ fileId, revision });
-    setLoading(true);
-  }
+  const {
+    getChecked,
+    toggle,
+    uncheckAll,
+    checkAll,
+    hasCheckboxes,
+    totalCheckboxes,
+    orderedKeys,
+    checkboxesLoaded,
+    checkboxRevision,
+  } = useCheckboxState(activeGroup, fileId);
+
+  // Use refs for checkbox callbacks so the components useMemo stays stable
+  // across checkbox state changes, preventing full re-render flicker.
+  const getCheckedRef = useRef(getChecked);
+  getCheckedRef.current = getChecked;
+  const toggleRef = useRef(toggle);
+  toggleRef.current = toggle;
 
   useEffect(() => {
-    let cancelled = false;
-    fetchFileContent(activeGroup, fileId)
-      .then((data) => {
-        if (!cancelled) {
-          setContent(data.content);
-          setLoading(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setContent("Failed to load file.");
-          setLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeGroup, fileId, revision]);
+    onCheckboxInfo?.({ hasCheckboxes, totalCheckboxes, uncheckAll, checkAll });
+  }, [hasCheckboxes, totalCheckboxes, uncheckAll, checkAll, onCheckboxInfo]);
 
   const handleLinkClick = useCallback(
-    async (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    async (e: React.MouseEvent<HTMLAnchorElement>, href: string, hash: string) => {
       e.preventDefault();
       try {
+        pendingHashRef.current = hash;
         const entry = await openRelativeFile(activeGroup, fileId, href);
-        onFileOpened(entry.id);
+        onFileOpened?.(entry.id, hash);
       } catch {
-        // fallback: do nothing
+        pendingHashRef.current = "";
       }
     },
     [activeGroup, fileId, onFileOpened],
@@ -703,13 +661,13 @@ export function MarkdownViewer({
           case "markdown":
             return (
               <a
-                href={buildRelativeOpenUrl(activeGroup, fileId, resolved.hrefPath)}
+                href={buildRelativeOpenUrl(activeGroup, fileId, resolved.hrefPath, resolved.hash)}
                 onClick={(e) => {
                   // Modifier / middle clicks fall through so the browser opens the
                   // self-resolving href in a new tab (App resolves it on load); only a
                   // plain click navigates in place.
                   if (!isPlainLeftClick(e)) return;
-                  handleLinkClick(e, resolved.hrefPath);
+                  handleLinkClick(e, resolved.hrefPath, resolved.hash);
                 }}
                 {...props}
               >
@@ -730,28 +688,125 @@ export function MarkdownViewer({
             );
         }
       },
+      li: ({ className, children, ...props }) => {
+        const isTask = typeof className === "string" && className.includes("task-list-item");
+        if (!isTask) {
+          return (
+            <li className={className} {...props}>
+              {children}
+            </li>
+          );
+        }
+        // Extract checkbox key from children. Check direct children first,
+        // then one level deeper (loose lists wrap content in <p>).
+        let checkboxKey: string | undefined;
+        const childArray = Array.isArray(children) ? children : [children];
+        for (const child of childArray) {
+          if (child && typeof child === "object" && "props" in child) {
+            if (child.props?.type === "checkbox" && child.props?.["data-checkbox-key"]) {
+              checkboxKey = child.props["data-checkbox-key"] as string;
+              break;
+            }
+            // Check inside <p> wrapper (loose list items).
+            const nested = child.props?.children;
+            const nestedArray = Array.isArray(nested) ? nested : [nested];
+            for (const inner of nestedArray) {
+              if (
+                inner &&
+                typeof inner === "object" &&
+                "props" in inner &&
+                inner.props?.type === "checkbox" &&
+                inner.props?.["data-checkbox-key"]
+              ) {
+                checkboxKey = inner.props["data-checkbox-key"] as string;
+                break;
+              }
+            }
+            if (checkboxKey) break;
+          }
+        }
+        return (
+          <li
+            className={className}
+            style={{
+              cursor: checkboxKey ? "pointer" : undefined,
+              borderRadius: "4px",
+            }}
+            onClick={(e) => {
+              if (!checkboxKey) return;
+              // Don't toggle if user was selecting text.
+              const selection = window.getSelection();
+              if (selection && selection.toString().length > 0) return;
+              // Don't toggle if user clicked a link or button (e.g. code block copy).
+              let target = e.target as HTMLElement | null;
+              while (target && target !== e.currentTarget) {
+                if (target.tagName === "A" || target.tagName === "BUTTON") return;
+                target = target.parentElement;
+              }
+              // Don't toggle if user clicked the checkbox input directly (it has its own handler).
+              if ((e.target as HTMLElement).tagName === "INPUT") return;
+              toggleRef.current(checkboxKey);
+            }}
+            {...props}
+          >
+            {children}
+          </li>
+        );
+      },
+      input: ({ disabled: _disabled, type, checked, ...props }) => {
+        if (type !== "checkbox") {
+          return <input type={type} checked={checked} {...props} />;
+        }
+        const key = (props as Record<string, unknown>)["data-checkbox-key"] as string | undefined;
+        if (!key) {
+          return <input type="checkbox" checked={checked} disabled {...props} />;
+        }
+        const effectiveChecked = getCheckedRef.current(key);
+        return (
+          <input
+            type="checkbox"
+            checked={effectiveChecked}
+            onChange={(e) => {
+              // Prevent li handler from also firing.
+              e.stopPropagation();
+            }}
+            onClick={() => {
+              toggleRef.current(key);
+            }}
+            style={{ cursor: "pointer" }}
+            {...props}
+          />
+        );
+      },
     }),
     [activeGroup, fileId, handleLinkClick, onZoom],
   );
 
-  const isMarkdown = isMarkdownFile(fileName);
-  const codeLanguage = isMarkdown ? null : detectLanguage(fileName);
-
   const parsed = useMemo(
-    () => (isMarkdown && !isRawView ? parseFrontmatter(content) : null),
-    [content, isRawView, isMarkdown],
+    () => (!isRawView ? parseFrontmatter(content) : null),
+    [content, isRawView],
   );
 
+  const previousRenderedRef = useRef<React.ReactNode>(null);
+
   const renderedContent = useMemo(() => {
-    if (!isMarkdown) {
-      return <HighlightedView content={content} language={codeLanguage!} />;
-    }
     if (isRawView) {
-      return <RawView content={content} />;
+      const node = <RawView content={content} />;
+      previousRenderedRef.current = node;
+      return node;
+    }
+    // Gate interactive rendering on checkbox keys being ready. While the
+    // initial fetch is in flight, render the previously rendered tree (if
+    // any) to avoid a flicker where checkboxes briefly appear unkeyed and
+    // therefore disabled. On file switch, `checkboxesLoaded` resets to
+    // false inside useCheckboxState and flips true once the new fetch
+    // resolves.
+    if (!checkboxesLoaded) {
+      return previousRenderedRef.current ?? null;
     }
     const base = parsed ? parsed.content : content;
     const md = fileName.toLowerCase().endsWith(".mdx") ? stripMdxSyntax(base) : base;
-    return (
+    const node = (
       <>
         {parsed && <FrontmatterBlock yaml={parsed.yaml} />}
         <Markdown
@@ -759,6 +814,7 @@ export function MarkdownViewer({
           rehypePlugins={[
             rehypeRaw,
             rehypeStripClobberPrefix,
+            [rehypeCheckboxIndices, { orderedKeys }],
             [rehypeSanitize, sanitizeSchema],
             rehypeGithubAlerts,
             rehypeSlug,
@@ -771,10 +827,23 @@ export function MarkdownViewer({
         </Markdown>
       </>
     );
-  }, [content, isRawView, isMarkdown, codeLanguage, parsed, components, fileName]);
+    previousRenderedRef.current = node;
+    return node;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    content,
+    isRawView,
+    parsed,
+    components,
+    fileName,
+    checkboxRevision,
+    checkboxesLoaded,
+    orderedKeys,
+  ]);
 
   const prevHeadingsKey = useRef("");
   useEffect(() => {
+    if (renderedContent == null) return;
     const newHeadings: TocHeading[] = [];
     if (!isRawView && articleRef.current) {
       const els = articleRef.current.querySelectorAll("h1, h2, h3, h4, h5, h6");
@@ -801,15 +870,18 @@ export function MarkdownViewer({
   });
 
   useLayoutEffect(() => {
-    if (!loading) {
-      onContentRenderedRef.current?.();
+    if (renderedContent == null) return;
+    onContentRenderedRef.current?.();
+    const hash = pendingHashRef.current;
+    if (hash) {
+      pendingHashRef.current = "";
+      const target = document.getElementById(hash.slice(1));
+      target?.scrollIntoView({ behavior: "instant" });
     }
-  }, [loading, renderedContent]);
+  }, [renderedContent]);
 
   useLayoutEffect(() => {
-    if (loading || !scrollToHeading || !articleRef.current) {
-      return;
-    }
+    if (renderedContent == null || !scrollToHeading || !articleRef.current) return;
 
     const headings = articleRef.current.querySelectorAll("h1, h2, h3, h4, h5, h6");
     const target = Array.from(headings).find(
@@ -819,121 +891,45 @@ export function MarkdownViewer({
       target.scrollIntoView({ behavior: "smooth", block: "start" });
       onScrolledToHeading?.();
     }
-  }, [loading, renderedContent, scrollToHeading, onScrolledToHeading]);
+  }, [renderedContent, scrollToHeading, onScrolledToHeading]);
 
   useLayoutEffect(() => {
-    if (loading || !articleRef.current || !isMarkdown || isRawView || !searchQuery?.trim()) {
+    if (renderedContent == null || !articleRef.current || isRawView || !searchQuery?.trim()) {
       setSearchHitMarkers([]);
       return;
     }
 
     const updateMarkers = () => {
-      if (!articleRef.current) {
-        return;
+      if (articleRef.current) {
+        setSearchHitMarkers(collectSearchHitMarkers(articleRef.current, searchQuery));
       }
-      setSearchHitMarkers(collectSearchHitMarkers(articleRef.current, searchQuery));
     };
 
     updateMarkers();
-
     const resizeObserver = new ResizeObserver(() => updateMarkers());
     resizeObserver.observe(articleRef.current);
     for (const element of articleRef.current.querySelectorAll("img, svg")) {
       resizeObserver.observe(element);
     }
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [loading, renderedContent, isMarkdown, isRawView, searchQuery]);
-
-  useEffect(() => {
-    const article = articleRef.current;
-    const label = stickyLabelRef.current;
-    if (loading || !scrollContainer || !article || !label) {
-      setShowFullLabel(false);
-      return;
-    }
-    // The first heading is stable for this render, so query it once and reuse it
-    // across scroll/resize updates instead of re-querying on every frame.
-    const heading = article.querySelector("h1, h2, h3, h4, h5, h6");
-    if (!heading) {
-      // Nothing to fold in: the label is already just the file name.
-      setShowFullLabel(false);
-      return;
-    }
-    // Fold the title into the label once that heading scrolls up behind the
-    // sticky bar. A direct geometry read avoids the IntersectionObserver
-    // first-callback race that can latch a stale rect when content mounts.
-    let frame = 0;
-    const update = () => {
-      frame = 0;
-      setShowFullLabel(
-        heading.getBoundingClientRect().bottom <= label.getBoundingClientRect().bottom,
-      );
-    };
-    const schedule = () => {
-      if (frame === 0) frame = requestAnimationFrame(update);
-    };
-    update();
-    scrollContainer.addEventListener("scroll", schedule, { passive: true });
-    window.addEventListener("resize", schedule);
-    return () => {
-      if (frame !== 0) cancelAnimationFrame(frame);
-      scrollContainer.removeEventListener("scroll", schedule);
-      window.removeEventListener("resize", schedule);
-    };
-    // isWide/fontSize/isTocOpen change the layout, so recompute on those too.
-  }, [loading, renderedContent, scrollContainer, isWide, fontSize, isTocOpen]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-50 text-gh-text-secondary text-sm">
-        Loading...
-      </div>
-    );
-  }
+    return () => resizeObserver.disconnect();
+  }, [renderedContent, isRawView, searchQuery]);
 
   return (
-    <div className="flex items-start gap-2">
-      <div className="min-w-0 flex-1">
-        {/* Always-visible sticky label. The negative top cancels the scroll
-            container's p-8 top padding so the bar pins flush under the global
-            header instead of leaving a gap that scrolling content would show
-            through. */}
-        <div
-          ref={stickyLabelRef}
-          className={`sticky -top-8 z-20 mx-auto mb-4 border-b border-gh-border bg-gh-bg py-2 text-sm font-medium text-right text-gh-text-secondary overflow-hidden text-ellipsis whitespace-nowrap${isWide ? "" : " max-w-[980px]"}`}
-          title={!uploaded && filePath ? filePath : fileName}
-        >
-          {showFullLabel ? formatFileLabel(fileName, title) : fileName}
-        </div>
-        <article
-          ref={articleRef}
-          className={`markdown-body relative overflow-visible${isWide ? " markdown-body--wide" : ""}${fontSize !== "medium" ? ` markdown-body--${fontSize}` : ""}`}
-        >
-          <div className="pointer-events-none absolute inset-0 z-10 overflow-visible">
-            {searchHitMarkers.map((marker, index) => (
-              <div
-                key={`${marker.top}:${marker.height}:${index}`}
-                className="absolute w-1 rounded-none bg-gh-text/80"
-                style={{
-                  left: SEARCH_HIT_COLUMN_OFFSET,
-                  top: marker.top,
-                  height: marker.height,
-                }}
-              />
-            ))}
-          </div>
-          {renderedContent}
-        </article>
+    <div ref={articleRef} className="relative overflow-visible">
+      <div className="pointer-events-none absolute inset-0 z-10 overflow-visible">
+        {searchHitMarkers.map((marker, index) => (
+          <div
+            key={`${marker.top}:${marker.height}:${index}`}
+            className="absolute w-1 rounded-none bg-gh-text/80"
+            style={{
+              left: SEARCH_HIT_COLUMN_OFFSET,
+              top: marker.top,
+              height: marker.height,
+            }}
+          />
+        ))}
       </div>
-      <div className="shrink-0 flex flex-col gap-2 -mr-4 -mt-4 sticky -top-4">
-        {isMarkdown && <TocToggle isTocOpen={isTocOpen} onToggle={onTocToggle} />}
-        {isMarkdown && <RawToggle isRaw={isRawView} onToggle={() => setIsRawView((v) => !v)} />}
-        <CopyButton content={content} />
-        <CloseFileButton onClose={onRemoveFile} uploaded={uploaded} />
-      </div>
+      {renderedContent}
     </div>
   );
 }

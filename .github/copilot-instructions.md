@@ -74,6 +74,7 @@ make ci
 All internal API endpoints are under `/_/api/` and SSE under `/_/events`. The `/_/` prefix is intentional to avoid collisions with user-facing group name routes (e.g., `/mygroup`).
 
 Key endpoints:
+
 - `GET /_/api/groups` — List all groups with files
 - `POST /_/api/files` — Add file
 - `DELETE /_/api/files/{id}` — Remove file

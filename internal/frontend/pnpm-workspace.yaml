@@ -1,0 +1,4 @@
+allowBuilds:
+  esbuild: true
+executionEnv:
+  nodeVersion: 22.16.0
