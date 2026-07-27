@@ -26,7 +26,7 @@ concurrency:
 jobs:
   go-tests:
     name: go tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
     outputs:
       tests_ran: ${{ steps.test.outputs.tests_ran }}
     steps:
@@ -53,7 +53,7 @@ jobs:
 
   ts-tests:
     name: frontend tests (vitest)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
     outputs:
       tests_ran: ${{ steps.test.outputs.tests_ran }}
     steps:
@@ -92,7 +92,7 @@ jobs:
     name: test-gate
     if: ${{ always() }}
     needs: [go-tests, ts-tests]
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
     env:
       NEEDS_JSON: ${{ toJSON(needs) }}
     steps:
