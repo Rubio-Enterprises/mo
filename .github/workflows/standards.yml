@@ -42,11 +42,11 @@ jobs:
     if: >-
       github.event_name == 'schedule' && github.event.schedule == '0 9 * * 1'
       || github.event_name == 'workflow_dispatch'
-    uses: Rubio-Enterprises/.github/.github/workflows/secret-scan.yml@7cfaa06a2c606dae6f3417c7374830f394e5dcb6 # v2
+    uses: Rubio-Enterprises/.github/.github/workflows/secret-scan.yml@f66ffb1e8e1f51d55f7ae56b418e66176aa88b1a # v2
     with: { mode: trufflehog }
 
   e2e:
-    uses: Rubio-Enterprises/.github/.github/workflows/e2e.yml@7cfaa06a2c606dae6f3417c7374830f394e5dcb6 # v2
+    uses: Rubio-Enterprises/.github/.github/workflows/e2e.yml@f66ffb1e8e1f51d55f7ae56b418e66176aa88b1a # v2
     if: github.event_name != 'pull_request' || github.event.action != 'edited'
 
   lint-hooks:
@@ -54,7 +54,7 @@ jobs:
     # diffs). Catches drift in hook-tool pins / PATH wiring that local commits
     # would otherwise hit first. PR-only; push/schedule paths skip.
     if: github.event_name == 'pull_request' && github.event.action != 'edited'
-    uses: Rubio-Enterprises/.github/.github/workflows/lint-hooks.yml@7cfaa06a2c606dae6f3417c7374830f394e5dcb6 # v2
+    uses: Rubio-Enterprises/.github/.github/workflows/lint-hooks.yml@f66ffb1e8e1f51d55f7ae56b418e66176aa88b1a # v2
     # secrets: inherit — the reusable workflow's private-Go-module mint step
     # (consumers setting GO_PRIVATE_MODULE_REPOS) reads the org secrets
     # STANDARDS_READER_APP_ID / STANDARDS_READER_APP_PRIVATE_KEY; a called
@@ -62,3 +62,25 @@ jobs:
     # gha-outrunner, the first GO_PRIVATE_MODULE_REPOS consumer, on .github
     # release 90eb7c68).
     secrets: inherit
+
+  cache-seed:
+    # Warms this repo's pnpm store + turbo task caches on the default branch,
+    # for the injected `typecheck-ts (gate)` to read on every later PR.
+    #
+    # It has to run from here, and it has to run on push. GitHub scopes a cache
+    # written on a PR ref to that PR alone, so the gate cannot warm anything for
+    # its successors — and being an injected Required Governance Workflow, it
+    # only ever fires on `pull_request` and can never reach a push event by
+    # itself. What a PR run CAN always read is the default branch's caches. So
+    # the default branch writes and every PR reads.
+    #
+    # This calls the gate's OWN workflow file with `seed-caches: true` rather
+    # than a purpose-built seeder, so the cache keys have exactly one
+    # definition. A seeder that drifted from the gate's key format would keep
+    # passing while quietly writing caches nothing ever reads.
+    #
+    # Rendered wherever `gate_typescript` is (has_typescript and
+    # enforce_typecheck), so the seeder exists precisely where the gate does.
+    if: github.event_name == 'push'
+    uses: Rubio-Enterprises/.github/.github/workflows/typecheck-ts.yml@f66ffb1e8e1f51d55f7ae56b418e66176aa88b1a # v2
+    with: { seed-caches: true }
