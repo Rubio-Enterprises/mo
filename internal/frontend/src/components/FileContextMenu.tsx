@@ -1,4 +1,6 @@
+import { useLayoutEffect, useState } from "react";
 import type { FileEntry, Group } from "../hooks/useApi";
+import { shouldDropUp } from "../utils/menuPlacement";
 import { RemoveIcon } from "./RemoveIcon";
 
 const MENU_ITEM_CLASS =
@@ -29,6 +31,29 @@ export function FileContextMenu({
   onRemove,
   menuRef,
 }: FileContextMenuProps) {
+  const [dropUp, setDropUp] = useState(false);
+
+  // Measured only on open, while the menu is still at its default `top-full`
+  // position: re-running this after `dropUp` flips would make it oscillate.
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setDropUp(false);
+      return;
+    }
+    const menu = menuRef.current;
+    const anchor = menu?.parentElement;
+    if (!menu || !anchor) return;
+    const anchorRect = anchor.getBoundingClientRect();
+    setDropUp(
+      shouldDropUp({
+        anchorTop: anchorRect.top,
+        anchorBottom: anchorRect.bottom,
+        menuHeight: menu.offsetHeight,
+        viewportHeight: window.innerHeight,
+      }),
+    );
+  }, [isOpen, menuRef]);
+
   return (
     <>
       <button
@@ -46,7 +71,7 @@ export function FileContextMenu({
       {isOpen && (
         <div
           ref={menuRef}
-          className="absolute right-0 top-full z-10 bg-gh-bg border border-gh-border rounded-md shadow-lg py-1 min-w-[160px]"
+          className={`absolute right-0 ${dropUp ? "bottom-full" : "top-full"} z-10 bg-gh-bg border border-gh-border rounded-md shadow-lg py-1 min-w-[160px]`}
         >
           <button className={MENU_ITEM_CLASS} onClick={() => onOpenInNewTab(file.id)}>
             <svg className="size-4" viewBox="0 0 16 16" fill="currentColor">
