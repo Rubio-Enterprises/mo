@@ -976,7 +976,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ================================================================
 
 react
-https://github.com/facebook/react.git
+https://github.com/react/react.git
 ----------------------------------------------------------------
 MIT License
 
@@ -1032,7 +1032,7 @@ SOFTWARE.
 ================================================================
 
 react-dom
-https://github.com/facebook/react.git
+https://github.com/react/react.git
 ----------------------------------------------------------------
 MIT License
 
