@@ -2,7 +2,7 @@ package version
 
 const (
 	Name    = "mo"
-	Version = "1.6.7" //nostyle:repetition
+	Version = "0.27.0" //nostyle:repetition
 )
 
 var Revision = "HEAD"

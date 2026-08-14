@@ -35,6 +35,8 @@ export interface RelativeOpenRequest {
   from: string;
   // Relative path to resolve against the source file, as written in the link.
   open: string;
+  // Optional heading fragment to restore after the server resolves the file.
+  hash: string;
 }
 
 // A relative Markdown link has no file ID until the server resolves it, so a new
@@ -44,8 +46,10 @@ export function buildRelativeOpenUrl(
   groupName: string,
   sourceFileId: string,
   relativePath: string,
+  hash = "",
 ): string {
   const params = new URLSearchParams({ from: sourceFileId, open: relativePath });
+  if (hash) params.set("hash", hash);
   return `${groupToPath(groupName)}?${params.toString()}`;
 }
 
@@ -54,5 +58,5 @@ export function parseRelativeOpenFromSearch(search: string): RelativeOpenRequest
   const from = params.get("from");
   const open = params.get("open");
   if (!from || !open) return null;
-  return { from, open };
+  return { from, open, hash: params.get("hash") ?? "" };
 }

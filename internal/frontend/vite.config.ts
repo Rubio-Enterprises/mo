@@ -1,11 +1,39 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import license from "rollup-plugin-license";
 import path from "node:path";
+import fs from "node:fs";
+import { createRequire } from "node:module";
+
+// Resolve the pdfjs-dist worker file through pnpm's strict linking.
+function pdfjsWorkerPlugin(): Plugin {
+  const require = createRequire(import.meta.url);
+  const pdfjsDir = path.dirname(require.resolve("pdfjs-dist/package.json"));
+  const workerSrc = path.join(pdfjsDir, "build", "pdf.worker.min.mjs");
+  const workerFileName = "pdf.worker.min.mjs";
+
+  return {
+    name: "pdfjs-worker",
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: workerFileName,
+        source: fs.readFileSync(workerSrc),
+      });
+    },
+    configureServer(server) {
+      server.middlewares.use(`/${workerFileName}`, (_req, res) => {
+        res.setHeader("Content-Type", "application/javascript");
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        fs.createReadStream(workerSrc).pipe(res);
+      });
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), pdfjsWorkerPlugin()],
   build: {
     outDir: "../static/dist",
     emptyOutDir: true,
@@ -45,9 +73,12 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     environment: "jsdom",
     setupFiles: ["src/test-setup.ts"],
+    // Auto-restore globals stubbed via vi.stubGlobal so tests can't bleed
+    // mocked fetch/window state into each other.
+    unstubGlobals: true,
     coverage: {
       provider: "v8",
-      include: ["src/utils/**", "src/hooks/**", "src/components/**"],
+      include: ["src/utils/**", "src/hooks/**", "src/components/**", "src/renderers/**"],
       reporter: ["text", "lcov"],
       reportsDirectory: "coverage",
     },

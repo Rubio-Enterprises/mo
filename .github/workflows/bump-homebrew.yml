@@ -1,0 +1,142 @@
+name: Bump Homebrew Formula
+
+on:
+  workflow_run:
+    workflows: ["release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. strubio-v0.25.5)"
+        required: true
+
+# Least privilege: GITHUB_TOKEN only reads this repo's release assets; the tap
+# push runs on the per-run rubio-tap-push App token minted below.
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch'
+        || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push') }}
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.event.workflow_run.head_branch }}"
+          fi
+          if [ -z "$TAG" ]; then
+            echo "No tag resolved" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Compute sha256 for release archives
+        id: sha
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          mkdir -p dl
+          for asset in \
+            "mo_${TAG}_darwin_arm64.zip" \
+            "mo_${TAG}_darwin_amd64.zip" \
+            "mo_${TAG}_linux_arm64.tar.gz" \
+            "mo_${TAG}_linux_amd64.tar.gz"
+          do
+            gh release download "$TAG" --repo "${{ github.repository }}" --pattern "$asset" --dir dl
+          done
+          {
+            echo "darwin_arm64=$(sha256sum dl/mo_${TAG}_darwin_arm64.zip      | cut -d' ' -f1)"
+            echo "darwin_amd64=$(sha256sum dl/mo_${TAG}_darwin_amd64.zip      | cut -d' ' -f1)"
+            echo "linux_arm64=$(sha256sum  dl/mo_${TAG}_linux_arm64.tar.gz   | cut -d' ' -f1)"
+            echo "linux_amd64=$(sha256sum  dl/mo_${TAG}_linux_amd64.tar.gz   | cut -d' ' -f1)"
+          } >> "$GITHUB_OUTPUT"
+
+      # Per-run push credential: contents:write on the tap only, expires with
+      # the job. Replaces the retired HOMEBREW_TAP_TOKEN PAT.
+      - name: Mint tap-push App token
+        id: tap-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ secrets.TAP_PUSH_APP_ID }}
+          private-key: ${{ secrets.TAP_PUSH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+          permission-contents: write
+
+      - name: Checkout tap
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Rubio-Enterprises/homebrew-tap
+          token: ${{ steps.tap-app.outputs.token }}
+          path: tap
+
+      - name: Update formula
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          SHA_DARWIN_ARM64: ${{ steps.sha.outputs.darwin_arm64 }}
+          SHA_DARWIN_AMD64: ${{ steps.sha.outputs.darwin_amd64 }}
+          SHA_LINUX_ARM64: ${{ steps.sha.outputs.linux_arm64 }}
+          SHA_LINUX_AMD64: ${{ steps.sha.outputs.linux_amd64 }}
+        run: |
+          set -euo pipefail
+          cd tap
+          python3 - <<'PY'
+          import os, re, pathlib
+          path = pathlib.Path("Formula/mo.rb")
+          src = path.read_text()
+          tag = os.environ["TAG"]
+          # tag is like "strubio-v0.25.5"; formula version is "0.25.5"
+          m = re.match(r"^strubio-v(?P<v>.+)$", tag)
+          if not m:
+              raise SystemExit(f"unexpected tag shape: {tag!r}")
+          new_version = m.group("v")
+          src = re.sub(r'^(\s*version\s+")[^"]+(")',
+                       lambda m: f'{m.group(1)}{new_version}{m.group(2)}',
+                       src, count=1, flags=re.M)
+          # URL lines: rewrite the tag segment in the path AND in the asset filename
+          src = re.sub(
+              r'(/releases/download/)strubio-v[^/]+/mo_strubio-v[^_]+(_[^"]+\.(?:tar\.gz|zip))',
+              lambda m: f'{m.group(1)}{tag}/mo_{tag}{m.group(2)}',
+              src,
+          )
+          def replace_sha(arch_suffix, ext, new_sha):
+              global src
+              pattern = re.compile(
+                  r'(url\s+"[^"]*'
+                  + re.escape(arch_suffix)
+                  + r'\.'
+                  + re.escape(ext)
+                  + r'"\s*\n\s*sha256\s+")[a-f0-9]{64}(")',
+                  re.M,
+              )
+              src = pattern.sub(lambda m: f'{m.group(1)}{new_sha}{m.group(2)}', src)
+          replace_sha("darwin_arm64", "zip",    os.environ["SHA_DARWIN_ARM64"])
+          replace_sha("darwin_amd64", "zip",    os.environ["SHA_DARWIN_AMD64"])
+          replace_sha("linux_arm64",  "tar.gz", os.environ["SHA_LINUX_ARM64"])
+          replace_sha("linux_amd64",  "tar.gz", os.environ["SHA_LINUX_AMD64"])
+          path.write_text(src)
+          PY
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          cd tap
+          if git diff --quiet Formula/mo.rb; then
+            echo "No changes to formula; skipping commit."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/mo.rb
+          git commit -m "feat: bump mo to ${{ steps.tag.outputs.tag }}"
+          git push

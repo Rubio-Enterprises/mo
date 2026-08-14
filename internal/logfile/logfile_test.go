@@ -194,3 +194,111 @@ func TestCleanOldLogsNonexistentDir(t *testing.T) {
 	// Should not panic on nonexistent directory
 	cleanOldLogs("/nonexistent/path/that/does/not/exist", time.Hour)
 }
+
+func TestDirUsesXDGStateHome(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", root)
+
+	got, err := Dir()
+	if err != nil {
+		t.Fatalf("Dir: %v", err)
+	}
+	want := filepath.Join(root, "mo", "log")
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestNewRotatingWriterOpenError(t *testing.T) {
+	// Opening a path under a non-writable parent fails.
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses permission errors")
+	}
+	parent := t.TempDir()
+	ro := filepath.Join(parent, "ro")
+	if err := os.Mkdir(ro, 0o500); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	target := filepath.Join(ro, "log.log")
+
+	if _, err := newRotatingWriter(target, 1024, 3); err == nil {
+		t.Fatal("expected newRotatingWriter to fail when parent is read-only")
+	}
+}
+
+func TestSetupFailsWhenDirCannotBeCreated(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses permission errors")
+	}
+	parent := t.TempDir()
+	ro := filepath.Join(parent, "ro")
+	if err := os.Mkdir(ro, 0o500); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Setenv("XDG_STATE_HOME", ro)
+
+	if _, err := Setup(12345); err == nil {
+		t.Fatal("expected Setup to fail with read-only parent")
+	}
+}
+
+func TestCleanOldLogsSkipsDirectories(t *testing.T) {
+	dir := t.TempDir()
+
+	// A subdirectory whose name happens to match the log prefix should be skipped.
+	subdir := filepath.Join(dir, "mo-subdir.log")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	old := time.Now().Add(-10 * 24 * time.Hour)
+	if err := os.Chtimes(subdir, old, old); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	cleanOldLogs(dir, 7*24*time.Hour)
+
+	if _, err := os.Stat(subdir); err != nil {
+		t.Fatalf("subdirectory should not be removed: %v", err)
+	}
+}
+
+func TestRecoverOpenReopensFile(t *testing.T) {
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "test.log")
+
+	w, err := newRotatingWriter(filename, 1024, 3)
+	if err != nil {
+		t.Fatalf("newRotatingWriter: %v", err)
+	}
+	defer w.Close()
+
+	cause := os.ErrPermission
+	// recoverOpen should restore w.file and return the original error.
+	if err := w.recoverOpen(cause); err == nil {
+		t.Fatal("recoverOpen should return the original cause")
+	}
+	// Confirm we can still write after recovery.
+	if _, err := w.Write([]byte("after-recover\n")); err != nil {
+		t.Fatalf("write after recover failed: %v", err)
+	}
+}
+
+func TestRotateAfterWriteCloseDoesNotPanic(t *testing.T) {
+	dir := t.TempDir()
+	filename := filepath.Join(dir, "test.log")
+	w, err := newRotatingWriter(filename, 10, 2)
+	if err != nil {
+		t.Fatalf("newRotatingWriter: %v", err)
+	}
+	// Writing 20 bytes with maxSize=10 must trigger rotation — the rotated
+	// backup is written as <filename>.1 (see rotatingWriter.backupName).
+	if _, err := w.Write([]byte("12345678901234567890")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if _, err := os.Stat(filename + ".1"); err != nil {
+		t.Fatalf("expected rotated backup %q to exist: %v", filename+".1", err)
+	}
+}

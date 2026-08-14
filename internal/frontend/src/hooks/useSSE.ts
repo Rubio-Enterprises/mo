@@ -3,6 +3,12 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 interface SSECallbacks {
   onUpdate: () => void;
   onFileChanged?: (fileId: string) => void;
+  onCheckboxChanged?: (
+    fileId: string,
+    sources: Record<string, boolean>,
+    overrides: Record<string, boolean>,
+    orderedKeys: string[],
+  ) => void;
 }
 
 export function useSSE(callbacks: SSECallbacks) {
@@ -45,6 +51,20 @@ export function useSSE(callbacks: SSECallbacks) {
         try {
           const data = JSON.parse(e.data);
           callbacksRef.current.onFileChanged?.(data.id);
+        } catch {
+          // ignore malformed data
+        }
+      });
+
+      es.addEventListener("checkbox-changed", (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          callbacksRef.current.onCheckboxChanged?.(
+            data.fileId,
+            data.sources,
+            data.overrides,
+            data.orderedKeys ?? [],
+          );
         } catch {
           // ignore malformed data
         }

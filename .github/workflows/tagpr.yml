@@ -1,72 +1,161 @@
-name: tagpr
+name: release
 
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:
+    tags:
+      - "strubio-v*"
 
 jobs:
-  tagpr:
-    runs-on: ubuntu-latest
-    outputs:
-      tagpr-tag: ${{ steps.run-tagpr.outputs.tag }}
-    permissions:
-      contents: write
-      pull-requests: write
-      packages: write
-      issues: read
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  build:
+    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+            ext: zip
+          - goos: darwin
+            goarch: amd64
+            ext: zip
+          - goos: linux
+            goarch: arm64
+            ext: tar.gz
+          - goos: linux
+            goarch: amd64
+            ext: tar.gz
     steps:
       - name: Check out source code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          package_json_file: internal/frontend/package.json
-
-      - id: run-tagpr
-        name: Run tagpr
-        uses: Songmu/tagpr@d1b8138b7a31075141b6cd64103de9485ced7ac9 # v1.20.1
-
-  assets:
-    needs: tagpr
-    if: needs.tagpr.outputs.tagpr-tag != ''
-    runs-on: macos-latest
-    permissions:
-      contents: write
-      packages: write
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: Check out source code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           package_json_file: internal/frontend/package.json
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+      - name: Generate frontend assets
+        run: go generate ./internal/static/
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          COMMIT=$(git rev-parse --short HEAD)
+          go build -ldflags "-s -w -X github.com/k1LoW/mo/version.Revision=$COMMIT" \
+            -trimpath -o mo .
+
+      - name: Package
+        run: |
+          ARCHIVE="mo_${GITHUB_REF_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          if [ "${{ matrix.ext }}" = "zip" ]; then
+            zip "${ARCHIVE}.zip" mo LICENSE
+          else
+            tar czf "${ARCHIVE}.tar.gz" mo LICENSE
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          distribution: goreleaser
-          version: latest
-          args: --clean
+          name: mo_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: mo_*.${{ matrix.ext }}
+
+  release:
+    needs: build
+    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" *.zip *.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
+
+      # Per-run push credential: contents:write on the tap only, expires with
+      # the job. Replaces the retired HOMEBREW_TAP_TOKEN PAT.
+      - name: Mint tap-push App token
+        id: tap-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ secrets.TAP_PUSH_APP_ID }}
+          private-key: ${{ secrets.TAP_PUSH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+          permission-contents: write
+
+      - name: Update Homebrew formula
+        env:
+          GH_TOKEN: ${{ steps.tap-app.outputs.token }}
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          VERSION="${TAG#strubio-v}"
+          BASE_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+
+          SHA_DARWIN_ARM64=$(sha256sum mo_${TAG}_darwin_arm64.zip | cut -d' ' -f1)
+          SHA_DARWIN_AMD64=$(sha256sum mo_${TAG}_darwin_amd64.zip | cut -d' ' -f1)
+          SHA_LINUX_ARM64=$(sha256sum mo_${TAG}_linux_arm64.tar.gz | cut -d' ' -f1)
+          SHA_LINUX_AMD64=$(sha256sum mo_${TAG}_linux_amd64.tar.gz | cut -d' ' -f1)
+
+          cat > /tmp/mo.rb << FORMULA
+          class Mo < Formula
+            desc "Markdown viewer that opens .md files in a browser"
+            homepage "https://github.com/Rubio-Enterprises/mo"
+            version "$VERSION"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "$BASE_URL/mo_${TAG}_darwin_arm64.zip"
+                sha256 "$SHA_DARWIN_ARM64"
+              end
+              if Hardware::CPU.intel?
+                url "$BASE_URL/mo_${TAG}_darwin_amd64.zip"
+                sha256 "$SHA_DARWIN_AMD64"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
+                url "$BASE_URL/mo_${TAG}_linux_arm64.tar.gz"
+                sha256 "$SHA_LINUX_ARM64"
+              end
+              if Hardware::CPU.intel?
+                url "$BASE_URL/mo_${TAG}_linux_amd64.tar.gz"
+                sha256 "$SHA_LINUX_AMD64"
+              end
+            end
+
+            def install
+              bin.install "mo"
+              generate_completions_from_executable(bin/"mo", "completion")
+            end
+
+            test do
+              assert_match "mo version", shell_output("#{bin}/mo --version")
+            end
+          end
+          FORMULA
+
+          # Remove heredoc indentation
+          sed -i 's/^          //' /tmp/mo.rb
+
+          gh api repos/Rubio-Enterprises/homebrew-tap/contents/Formula/mo.rb \
+            --method PUT \
+            --field message="feat: bump mo to $TAG" \
+            --field content="$(base64 -w0 /tmp/mo.rb)" \
+            --field sha="$(gh api repos/Rubio-Enterprises/homebrew-tap/contents/Formula/mo.rb --jq '.sha')"

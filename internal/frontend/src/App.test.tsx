@@ -12,8 +12,8 @@ import {
 } from "./App";
 
 // Mocks are hoisted by vi.mock so heavy render dependencies never load in jsdom.
-vi.mock("./components/MarkdownViewer", () => ({
-  MarkdownViewer: ({ fileId }: { fileId: string }) => <div data-testid="viewer">{fileId}</div>,
+vi.mock("./components/FileViewer", () => ({
+  FileViewer: ({ fileId }: { fileId: string }) => <div data-testid="viewer">{fileId}</div>,
 }));
 
 vi.mock("./hooks/useSSE", () => ({ useSSE: () => {} }));
@@ -114,13 +114,13 @@ describe("App URL sync", () => {
     {
       name: "default",
       files: [
-        { id: "aaa11111", name: "README.md", path: "/README.md" },
-        { id: "bbb22222", name: "GUIDE.md", path: "/GUIDE.md" },
+        { id: "aaa11111", name: "README.md", path: "/README.md", type: "markdown" },
+        { id: "bbb22222", name: "GUIDE.md", path: "/GUIDE.md", type: "markdown" },
       ],
     },
     {
       name: "design",
-      files: [{ id: "ccc33333", name: "spec.md", path: "/design/spec.md" }],
+      files: [{ id: "ccc33333", name: "spec.md", path: "/design/spec.md", type: "markdown" }],
     },
   ];
 

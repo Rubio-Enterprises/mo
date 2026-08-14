@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sidebar } from "./components/Sidebar";
-import { MarkdownViewer } from "./components/MarkdownViewer";
+import { FileViewer } from "./components/FileViewer";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { FontSizeToggle, type FontSize } from "./components/FontSizeToggle";
 import { WidthToggle } from "./components/WidthToggle";
@@ -8,6 +8,7 @@ import { GroupDropdown } from "./components/GroupDropdown";
 import { ViewModeToggle, type ViewMode } from "./components/ViewModeToggle";
 import { SearchToggle } from "./components/SearchToggle";
 import { TitleToggle } from "./components/TitleToggle";
+import { NavigationButtons } from "./components/NavigationButtons";
 import { RestartButton } from "./components/RestartButton";
 import { DropOverlay } from "./components/DropOverlay";
 import { ZoomModal } from "./components/ZoomModal";
@@ -27,6 +28,8 @@ import {
   removeFile,
   reorderFiles,
 } from "./hooks/useApi";
+import { useNavigationHistory } from "./hooks/useNavigationHistory";
+import type { NavEntry } from "./hooks/useNavigationHistory";
 import {
   allFileIds,
   parseGroupFromPath,
@@ -242,7 +245,7 @@ export function App() {
       .then((entry) => {
         relativeOpen.current = null;
         setInitialFileId(entry.id);
-        window.history.replaceState(null, "", buildFileUrl(group, entry.id));
+        window.history.replaceState(null, "", `${buildFileUrl(group, entry.id)}${rel.hash}`);
         loadGroups();
       })
       .catch(() => {
@@ -270,6 +273,7 @@ export function App() {
     const handlePopState = () => {
       setActiveGroup(parseGroupFromPath(window.location.pathname));
       setActiveFileId(parseFileIdFromSearch(window.location.search));
+      setPendingSearchHeading(null);
     };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
@@ -344,6 +348,13 @@ export function App() {
         return current;
       });
     },
+    onCheckboxChanged: (fileId, sources, overrides, orderedKeys) => {
+      window.dispatchEvent(
+        new CustomEvent("mo-checkbox-changed", {
+          detail: { fileId, sources, overrides, orderedKeys },
+        }),
+      );
+    },
   });
 
   const { isDragging } = useFileDrop(activeGroup);
@@ -406,33 +417,8 @@ export function App() {
     window.history.pushState(null, "", groupToPath(name));
     setActiveGroup(name);
     setActiveFileId(null);
+    setPendingSearchHeading(null);
   }, []);
-
-  const handleFileSelect = useCallback(
-    (fileId: string) => {
-      window.history.pushState(null, "", buildFileUrl(activeGroup, fileId));
-      setActiveFileId(fileId);
-    },
-    [activeGroup],
-  );
-
-  const handleFileOpened = useCallback(
-    (fileId: string) => {
-      window.history.pushState(null, "", buildFileUrl(activeGroup, fileId));
-      setActiveFileId(fileId);
-      setPendingSearchHeading(null);
-    },
-    [activeGroup],
-  );
-
-  const handleSearchResultSelect = useCallback(
-    (fileId: string, heading?: string) => {
-      window.history.pushState(null, "", buildFileUrl(activeGroup, fileId));
-      setActiveFileId(fileId);
-      setPendingSearchHeading(heading || null);
-    },
-    [activeGroup],
-  );
 
   const handleRemoveFile = useCallback(() => {
     if (activeFileId != null) {
@@ -464,6 +450,91 @@ export function App() {
     activeHeadingId,
     activeFileId,
   );
+
+  const nav = useNavigationHistory();
+  const pendingRestoreRef = useRef<NavEntry | null>(null);
+
+  const getCurrentNavEntry = useCallback((): NavEntry | null => {
+    if (!scrollContainer || !activeFileId) return null;
+    const headingEl = activeHeadingId ? document.getElementById(activeHeadingId) : null;
+    return {
+      fileId: activeFileId,
+      scrollTop: scrollContainer.scrollTop,
+      headingId: activeHeadingId,
+      headingOffset: headingEl
+        ? headingEl.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top
+        : 0,
+    };
+  }, [scrollContainer, activeFileId, activeHeadingId]);
+
+  const navigateToFile = useCallback(
+    (fileId: string, hash = "", searchHeading: string | null = null) => {
+      const current = getCurrentNavEntry();
+      if (current && current.fileId !== fileId) {
+        nav.navigate(current);
+      }
+      window.history.pushState(null, "", `${buildFileUrl(activeGroup, fileId)}${hash}`);
+      setActiveFileId(fileId);
+      setPendingSearchHeading(searchHeading);
+    },
+    [activeGroup, getCurrentNavEntry, nav],
+  );
+
+  const handleFileOpened = useCallback(
+    (fileId: string, hash = "") => {
+      navigateToFile(fileId, hash);
+    },
+    [navigateToFile],
+  );
+
+  const handleSearchResultSelect = useCallback(
+    (fileId: string, heading?: string) => {
+      navigateToFile(fileId, "", heading || null);
+    },
+    [navigateToFile],
+  );
+
+  const handleBack = useCallback(() => {
+    const current = getCurrentNavEntry();
+    if (!current) return;
+    const entry = nav.goBack(current);
+    if (entry) {
+      pendingRestoreRef.current = entry;
+      window.history.pushState(null, "", buildFileUrl(activeGroup, entry.fileId));
+      setActiveFileId(entry.fileId);
+      setPendingSearchHeading(null);
+    }
+  }, [activeGroup, getCurrentNavEntry, nav]);
+
+  const handleForward = useCallback(() => {
+    const current = getCurrentNavEntry();
+    if (!current) return;
+    const entry = nav.goForward(current);
+    if (entry) {
+      pendingRestoreRef.current = entry;
+      window.history.pushState(null, "", buildFileUrl(activeGroup, entry.fileId));
+      setActiveFileId(entry.fileId);
+      setPendingSearchHeading(null);
+    }
+  }, [activeGroup, getCurrentNavEntry, nav]);
+
+  const wrappedOnContentRendered = useCallback(() => {
+    onContentRendered();
+    const entry = pendingRestoreRef.current;
+    if (entry && scrollContainer) {
+      pendingRestoreRef.current = null;
+      if (entry.headingId) {
+        const headingEl = document.getElementById(entry.headingId);
+        if (headingEl) {
+          const currentOffset =
+            headingEl.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top;
+          scrollContainer.scrollTop += currentOffset - entry.headingOffset;
+          return;
+        }
+      }
+      scrollContainer.scrollTop = entry.scrollTop;
+    }
+  }, [onContentRendered, scrollContainer]);
 
   const handleHeadingClick = useCallback((id: string) => {
     const el = document.getElementById(id);
@@ -506,6 +577,12 @@ export function App() {
             )}
           </svg>
         </button>
+        <NavigationButtons
+          canGoBack={nav.canGoBack}
+          canGoForward={nav.canGoForward}
+          onBack={handleBack}
+          onForward={handleForward}
+        />
         <GroupDropdown
           groups={groups}
           activeGroup={activeGroup}
@@ -526,7 +603,7 @@ export function App() {
             groups={groups}
             activeGroup={activeGroup}
             activeFileId={activeFileId}
-            onFileSelect={handleFileSelect}
+            onFileSelect={navigateToFile}
             onFilesReorder={handleFilesReorder}
             viewMode={currentViewMode}
             showTitle={currentShowTitle}
@@ -542,18 +619,19 @@ export function App() {
             ref={setScrollContainer}
             className="flex-1 overflow-y-auto overscroll-contain p-8 bg-gh-bg"
           >
-            {activeFileId != null ? (
-              <MarkdownViewer
+            {activeFileId != null && activeFile != null ? (
+              <FileViewer
+                activeGroup={activeGroup}
                 fileId={activeFileId}
                 fileName={activeFileName}
-                title={activeFile?.title}
-                filePath={activeFile?.path}
+                fileType={activeFile.type}
+                title={activeFile.title}
+                filePath={activeFile.path}
                 scrollContainer={scrollContainer}
-                activeGroup={activeGroup}
                 revision={contentRevision}
                 onFileOpened={handleFileOpened}
                 onHeadingsChange={setHeadings}
-                onContentRendered={onContentRendered}
+                onContentRendered={wrappedOnContentRendered}
                 isTocOpen={tocOpen}
                 onTocToggle={() => setTocOpen(!tocOpen)}
                 onRemoveFile={handleRemoveFile}

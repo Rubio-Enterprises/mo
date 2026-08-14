@@ -1,0 +1,102 @@
+name: test-gate
+# Canonical repository-local Test Gate (standards ADR-0020). It publishes the
+# single required `test-gate` status context and may contain ONLY test-execution
+# jobs plus the aggregate.
+#
+# This repo is polyglot, so the canonical non-E2E surface — `mise run test`,
+# which fans out to `test-go` and `test-ts` — is split into one execution job
+# per stack, both aggregated below. Nothing else belongs here: the frontend
+# oxlint/oxfmt + golangci-lint/gostyle checks and the octocov coverage report
+# stay in test.yml, and the Playwright e2e job stays in standards.yml.
+#
+# Runner: the gate deliberately runs the single primary Linux route rather than
+# test.yml's ubuntu/macos matrix — the contract forbids a matrix on a mandatory
+# execution job, and test.yml keeps the cross-OS run as an advisory workflow.
+#
+# `on:` is quoted to satisfy `yaml[truthy]` — same convention as standards.yml.
+"on":
+  pull_request:
+  merge_group:
+permissions:
+  contents: read
+concurrency:
+  # Superseded pushes to the same PR/merge-queue entry cancel the in-flight run.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+jobs:
+  go-tests:
+    name: go tests
+    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
+    outputs:
+      tests_ran: ${{ steps.test.outputs.tests_ran }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - id: test
+        name: Run canonical Go unit tests
+        env:
+          RUBIO_TEST_GATE_COUNT_OUTPUT: ${{ runner.temp }}/test-gate-count
+        # [tasks.test-go] wraps this same `./...` run in gotestsum for its JUnit
+        # report, but the gate contract's recognized-test-command allowlist only
+        # accepts a bare `go test`, so the gate invokes it directly and takes the
+        # executed-test count from the `=== RUN` lines `-v` emits.
+        run: |
+          set -euo pipefail
+          rm -f "$RUBIO_TEST_GATE_COUNT_OUTPUT"
+          go test -count=1 -v ./... | tee "$RUNNER_TEMP/go-test.log"
+          grep -c '=== RUN' "$RUNNER_TEMP/go-test.log" > "$RUBIO_TEST_GATE_COUNT_OUTPUT"
+          test -s "$RUBIO_TEST_GATE_COUNT_OUTPUT"
+          test "$(cat "$RUBIO_TEST_GATE_COUNT_OUTPUT")" -gt 0
+          echo "tests_ran=true" >> "$GITHUB_OUTPUT"
+
+  ts-tests:
+    name: frontend tests (vitest)
+    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
+    outputs:
+      tests_ran: ${{ steps.test.outputs.tests_ran }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .nvmrc
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          package_json_file: internal/frontend/package.json
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+        working-directory: internal/frontend
+      - id: test
+        name: Run canonical frontend unit tests
+        env:
+          RUBIO_TEST_GATE_COUNT_OUTPUT: ${{ runner.temp }}/test-gate-count
+        working-directory: internal/frontend
+        # [tasks.test-ts] is `pnpm --dir internal/frontend run test`; running it
+        # from that working directory is the same invocation, driven through
+        # `pnpm exec vitest` so the JUnit reporter flags reach vitest itself.
+        # `default` runs alongside `junit` so a failing suite still prints to the
+        # CI log — junit alone writes only the XML and leaves the log empty.
+        # `outputFile` as a plain string is consumed by the junit reporter;
+        # `default` writes to stdout and ignores it.
+        run: |
+          set -euo pipefail
+          rm -f "$RUBIO_TEST_GATE_COUNT_OUTPUT"
+          pnpm exec vitest run --reporter=default --reporter=junit --outputFile="$RUNNER_TEMP/vitest.xml"
+          grep -o '<testcase ' "$RUNNER_TEMP/vitest.xml" | wc -l | tr -d ' ' > "$RUBIO_TEST_GATE_COUNT_OUTPUT"
+          test -s "$RUBIO_TEST_GATE_COUNT_OUTPUT"
+          test "$(cat "$RUBIO_TEST_GATE_COUNT_OUTPUT")" -gt 0
+          echo "tests_ran=true" >> "$GITHUB_OUTPUT"
+
+  aggregate:
+    name: test-gate
+    if: ${{ always() }}
+    needs: [go-tests, ts-tests]
+    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
+    env:
+      NEEDS_JSON: ${{ toJSON(needs) }}
+    steps:
+      - name: Require successful non-empty test execution
+        run: >-
+          jq -e 'length > 0 and all(.[]; .result == "success" and
+          .outputs.tests_ran == "true")' <<<"$NEEDS_JSON"
