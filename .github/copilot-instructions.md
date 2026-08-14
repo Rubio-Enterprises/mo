@@ -66,7 +66,7 @@ make ci
 - `internal/server/server.go` — HTTP server, state management (mutex-guarded), SSE for live-reload, file watcher (fsnotify). All API routes use `/_/` prefix to avoid collision with SPA route paths (group names).
 - `internal/static/static.go` — `go:generate` runs the frontend build, then `go:embed` embeds the output from `internal/static/dist/`.
 - `internal/frontend/` — Vite + React 19 + TypeScript + Tailwind CSS v4 SPA. Build output goes to `internal/static/dist/` (configured in `vite.config.ts`).
-- `version/version.go` — Version info, updated by tagpr on release. Build embeds revision via ldflags.
+- `version/version.go` — the fork's version string (`Version`), bumped by the release commit; `Revision` is injected via ldflags. Upstream's tagpr does not run here.
 - `testdata/` — Sample Markdown files (GFM, mermaid, math, alerts, etc.) and fixture projects for tests and dev. Reuse these for new test cases.
 
 ## API Conventions
@@ -114,6 +114,6 @@ Key endpoints:
 ## CI/CD
 
 - **CI**: golangci-lint (via reviewdog), gostyle, `make ci` (test + coverage), octocov
-- **Release**: tagpr for automated tagging, goreleaser for cross-platform builds. The `go generate` step (frontend build) runs in goreleaser's `before.hooks`.
+- **Release**: tags matching `v*-strubio.*` (e.g. `v1.6.7-strubio.1`) trigger `.github/workflows/tagpr.yml`, which cross-compiles a matrix, publishes a GitHub release, and rewrites the Homebrew formula in `Rubio-Enterprises/homebrew-tap`. The `go generate` step (frontend build) runs before the Go build. No tagpr, no goreleaser — see AGENTS.md "Release Tags".
 - **License check**: Trivy scans for license issues
 - CI requires pnpm setup (`pnpm/action-setup`) before any Go build step because `go generate` triggers the frontend build.

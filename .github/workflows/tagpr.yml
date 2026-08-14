@@ -1,12 +1,51 @@
+# Fork release pipeline. Tags matching `v<X.Y.Z>-strubio.<N>` build the matrix,
+# publish a GitHub release, and rewrite `Formula/mo.rb` in Rubio-Enterprises/
+# homebrew-tap. `<X.Y.Z>` mirrors the upstream k1LoW/mo version this fork
+# carries; `<N>` counts fork rebuilds on that same upstream version.
+#
+# The filename is a deliberate squat, NOT an oversight: upstream owns
+# `.github/workflows/tagpr.yml`, and holding the path keeps upstream's
+# tagpr + goreleaser pipeline from silently reappearing through an upstream
+# sync merge. Nothing here runs tagpr. Renaming this file to `release.yml`
+# would free the path for upstream's version to land as a plain addition on
+# the next sync, where it would run on every push to main.
+#
+# The glob MUST stay `v*-strubio.*`. A bare `v*` would match the 44 upstream
+# tags already on origin (`v0.1.0` … `v0.20.1`), each firing a full matrix
+# build and a garbage tap write.
 name: release
 
 on:
   push:
     tags:
-      - "strubio-v*"
+      - "v*-strubio.*"
 
 jobs:
+  verify:
+    # The tag triggers the release, but `version/version.go` is the version
+    # source of truth (upstream's shape, bumped by the release commit). Nothing
+    # else makes the two agree, and a mismatch would ship a binary whose
+    # `--version` contradicts its own tag and the Homebrew formula. Fail here,
+    # before four matrix builds and a tap write.
+    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
+    steps:
+      - name: Check out source code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Tag must match version/version.go
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          EXPECTED="${TAG#v}"
+          DECLARED=$(sed -n 's/.*Version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' version/version.go)
+          if [ "$DECLARED" != "$EXPECTED" ]; then
+            echo "tag/version mismatch: tag $TAG implies $EXPECTED, but version/version.go declares $DECLARED" >&2
+            echo "  fix: set Version to \"$EXPECTED\" in version/version.go, commit, delete the tag, re-tag" >&2
+            exit 1
+          fi
+          echo "version/version.go declares $DECLARED, matching $TAG"
+
   build:
+    needs: verify
     runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
     strategy:
       matrix:
@@ -103,7 +142,10 @@ jobs:
           GH_TOKEN: ${{ steps.tap-app.outputs.token }}
         run: |
           TAG="$GITHUB_REF_NAME"
-          VERSION="${TAG#strubio-v}"
+          # Homebrew wants the version without the leading `v`, suffix intact:
+          # `v1.6.7-strubio.1` -> `1.6.7-strubio.1`. Same shape as the tap's
+          # existing marvin-cli formula.
+          VERSION="${TAG#v}"
           BASE_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
 
           SHA_DARWIN_ARM64=$(sha256sum mo_${TAG}_darwin_arm64.zip | cut -d' ' -f1)

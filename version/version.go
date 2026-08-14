@@ -2,7 +2,7 @@ package version
 
 const (
 	Name    = "mo"
-	Version = "0.27.0" //nostyle:repetition
+	Version = "1.6.7-strubio.1" //nostyle:repetition
 )
 
 var Revision = "HEAD"
