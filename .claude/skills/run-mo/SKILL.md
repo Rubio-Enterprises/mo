@@ -35,7 +35,7 @@ downloads the pinned Node and ~450 npm packages, ~1–2 min) then `go build`,
 producing `./mo`. Verify:
 
 ```bash
-./mo --version    # → mo version 0.25.5
+./mo --version    # → mo version 1.6.7-strubio.1  (v<upstream>-strubio.<fork rebuild>)
 ```
 
 ## Run (agent path)

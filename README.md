@@ -47,8 +47,10 @@ Highlights:
 **homebrew tap:**
 
 ```console
-brew install k1LoW/tap/mo
+brew install rubio-enterprises/tap/mo
 ```
+
+(Upstream's own build is `brew install k1LoW/tap/mo`; this repo's releases are published to `Rubio-Enterprises/homebrew-tap` and version as `<upstream>-strubio.<N>`.)
 
 **go install:**
 

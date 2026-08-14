@@ -107,7 +107,7 @@ The tiers below are the complete set of ways to build, run, and test mo. Every
 - `internal/backup/` — State persistence for open files/groups using atomic JSON writes to `$XDG_STATE_HOME/mo/backup/`. Enables session restoration across server restarts.
 - `internal/logfile/` — Rotating JSON logging to `$XDG_STATE_HOME/mo/log/` (max 10MB, 3 backups, 7-day retention).
 - `internal/xdg/` — XDG Base Directory helper. `StateHome()` returns `$XDG_STATE_HOME` or default `~/.local/state`.
-- `version/version.go` — Version info, updated by tagpr on release. Build embeds revision via ldflags.
+- `version/version.go` — the fork's version string (`Version`), bumped by the release commit; the release workflow refuses to publish a tag that disagrees with it. `Revision` is injected via ldflags at build time. Upstream's tagpr does **not** run in this fork.
 
 ## Frontend
 
@@ -163,16 +163,32 @@ Frontend: ESLint via `pnpm run lint` in `internal/frontend/`. Formatting via `pn
 ## CI/CD
 
 - **CI**: golangci-lint (via reviewdog), gostyle, `make ci` (test + coverage), octocov
-- **Release**: Tags trigger the release workflow. The `go generate` step (frontend build) runs before cross-platform Go builds. Binaries are uploaded as a GitHub release, and the Homebrew formula is auto-updated.
+- **Release**: tags matching `v*-strubio.*` trigger `.github/workflows/tagpr.yml`. The `go generate` step (frontend build) runs before cross-platform Go builds; binaries are uploaded as a GitHub release and `Formula/mo.rb` in `Rubio-Enterprises/homebrew-tap` is rewritten in the same job. There is no tagpr and no goreleaser in this fork.
 - **License check**: `.github/workflows/license-scan.yml` runs Trivy's license scanner on PRs and pushes to `main`. It replaces the manually disabled upstream `trivy.yml` path so GitHub registers the preserved check as an active workflow.
 - CI requires pnpm setup (`pnpm/action-setup`) before any Go build step because `go generate` triggers the frontend build.
 
 ### Release Tags
 
-This fork uses **`strubio-v*`** tags (e.g., `strubio-v0.21.0`) to trigger the release workflow in `.github/workflows/tagpr.yml`. The workflow strips the `strubio-v` prefix to derive the semver version.
+This fork tags releases **`v<X.Y.Z>-strubio.<N>`** (e.g. `v1.6.7-strubio.1`), where:
+
+- `X.Y.Z` mirrors the **upstream `k1LoW/mo` version this fork carries** — read it off the top of `CHANGELOG.md`.
+- `N` counts fork rebuilds against that same upstream version, starting at `1`.
+
+So `v1.6.7-strubio.2` means "the second fork build of upstream 1.6.7". `mo --version` prints the whole string, which is the point: the old scheme's `0.27.0` was a fork-private counter that told you nothing about which upstream mo you were running.
+
+The tag is a valid semver prerelease, so it needs no prefix-strip configuration anywhere; the Homebrew formula version is just the tag minus its leading `v`. This matches `Formula/marvin-cli.rb` in the same tap.
 
 To release:
 
-1. Update `version/version.go` with the new version
+1. Set `Version` in `version/version.go` to the tag without its leading `v` (e.g. `1.6.7-strubio.1`)
 2. Commit and push
-3. Create and push a tag: `git tag strubio-v<VERSION> && git push origin strubio-v<VERSION>`
+3. Tag and push: `git tag v<X.Y.Z>-strubio.<N> && git push origin v<X.Y.Z>-strubio.<N>`
+
+The workflow's `verify` job fails the release if step 1 was skipped, before any build runs or the tap is touched.
+
+Two constraints worth not rediscovering the hard way:
+
+- **The trigger glob must stay `v*-strubio.*`.** Origin already carries 44 upstream tags (`v0.1.0` … `v0.20.1`), and the local clone holds more up to `v1.6.7`; a bare `v*` glob would fire a full matrix build and a garbage tap write for every one of them.
+- **`.github/workflows/tagpr.yml` keeps its misleading filename on purpose.** Upstream owns that path, so holding it stops upstream's tagpr + goreleaser pipeline from reappearing through a sync merge. Renaming it to `release.yml` would let upstream's version land as a plain file addition and run on every push to `main`.
+
+Tags from the retired `strubio-v*` scheme (`strubio-v0.1.0` … `strubio-v0.27.0`) stay on origin as tombstones — no history rewrite. Homebrew upgrades cleanly across the cutover because `1.6.7-strubio.1` outranks `0.27.0` on the first version token.
