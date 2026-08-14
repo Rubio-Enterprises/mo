@@ -1,5 +1,13 @@
 # Changelog
 
+## [v1.6.7](https://github.com/k1LoW/mo/compare/v1.6.6...v1.6.7) - 2026-08-03
+
+### Fix bug 🐛
+- fix(frontend): flip file context menu upward when it would overflow the viewport bottom by @matsuyoshi30 in https://github.com/k1LoW/mo/pull/262
+### Dependency Updates ⬆️
+- chore(deps): bump actions/checkout from 7.0.0 to 7.0.1 in the dependencies group by @dependabot[bot] in https://github.com/k1LoW/mo/pull/258
+- chore(deps): bump the dependencies group across 1 directory with 9 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/261
+
 ## [v1.6.6](https://github.com/k1LoW/mo/compare/v1.6.5...v1.6.6) - 2026-07-22
 
 ### Fix bug 🐛
