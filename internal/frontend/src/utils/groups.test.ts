@@ -20,8 +20,8 @@ describe("allFileIds", () => {
       {
         name: "default",
         files: [
-          { id: "abc12345", name: "a.md", path: "/a.md" },
-          { id: "def67890", name: "b.md", path: "/b.md" },
+          { id: "abc12345", name: "a.md", path: "/a.md", type: "markdown" },
+          { id: "def67890", name: "b.md", path: "/b.md", type: "markdown" },
         ],
       },
     ];
@@ -32,13 +32,13 @@ describe("allFileIds", () => {
     const groups: Group[] = [
       {
         name: "default",
-        files: [{ id: "abc12345", name: "a.md", path: "/a.md" }],
+        files: [{ id: "abc12345", name: "a.md", path: "/a.md", type: "markdown" }],
       },
       {
         name: "docs",
         files: [
-          { id: "def67890", name: "b.md", path: "/b.md" },
-          { id: "ghi11111", name: "c.md", path: "/c.md" },
+          { id: "def67890", name: "b.md", path: "/b.md", type: "markdown" },
+          { id: "ghi11111", name: "c.md", path: "/c.md", type: "markdown" },
         ],
       },
     ];
@@ -50,7 +50,7 @@ describe("allFileIds", () => {
       { name: "empty", files: [] },
       {
         name: "notempty",
-        files: [{ id: "eee55555", name: "e.md", path: "/e.md" }],
+        files: [{ id: "eee55555", name: "e.md", path: "/e.md", type: "markdown" }],
       },
     ];
     expect(allFileIds(groups)).toEqual(new Set(["eee55555"]));
@@ -138,6 +138,11 @@ describe("buildRelativeOpenUrl", () => {
     const url = buildRelativeOpenUrl("default", "abc12345", "a b.md");
     expect(parseRelativeOpenFromSearch(url.slice(url.indexOf("?")))?.open).toBe("a b.md");
   });
+
+  it("preserves a heading fragment for new-tab navigation", () => {
+    const url = buildRelativeOpenUrl("default", "abc12345", "next.md", "#details");
+    expect(parseRelativeOpenFromSearch(url.slice(url.indexOf("?")))?.hash).toBe("#details");
+  });
 });
 
 describe("parseRelativeOpenFromSearch", () => {
@@ -149,6 +154,7 @@ describe("parseRelativeOpenFromSearch", () => {
     expect(parseRelativeOpenFromSearch("?from=abc12345&open=docs%2Fguide.mdx")).toEqual({
       from: "abc12345",
       open: "docs/guide.mdx",
+      hash: "",
     });
   });
 

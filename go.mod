@@ -1,6 +1,6 @@
 module github.com/k1LoW/mo
 
-go 1.26.0
+go 1.26.5
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
@@ -10,6 +10,7 @@ require (
 	github.com/muesli/termenv v0.16.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/spf13/cobra v1.10.2
+	github.com/yuin/goldmark v1.8.5
 	golang.org/x/text v0.40.0
 )
 
