@@ -19,6 +19,21 @@ on:
   push:
     tags:
       - "v*-strubio.*"
+  # Operator re-drive for an ALREADY PUBLISHED tag. The tap bump is the one step
+  # that can fail for reasons unrelated to this repo (the tap's rulesets, a
+  # GitHub incident, a mid-flight IaC apply), and when it does the release itself
+  # is already published — so a plain re-run is not available: `gh release
+  # create` would abort on the existing release before reaching the bump.
+  # Dispatching with an existing tag skips verify/build/release entirely and
+  # re-drives ONLY `bump-tap`, recomputing checksums from the published assets.
+  # This is what recovered v1.6.7-strubio.1 after its tap write lost a 71-second
+  # race with the rulesets/tap-push-App bypass apply (.github-private#192).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published release tag to re-bump the tap formula for, e.g. v1.6.7-strubio.1"
+        required: true
+        type: string
 
 jobs:
   verify:
@@ -27,6 +42,11 @@ jobs:
     # else makes the two agree, and a mismatch would ship a binary whose
     # `--version` contradicts its own tag and the Homebrew formula. Fail here,
     # before four matrix builds and a tap write.
+    #
+    # Tag-push only: on a dispatch re-drive the release already exists, so its
+    # published assets — not this checkout — are the source of truth, and `main`
+    # may legitimately have moved on to the next version by then.
+    if: github.event_name == 'push'
     runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
     steps:
       - name: Check out source code
@@ -46,6 +66,7 @@ jobs:
 
   build:
     needs: verify
+    if: github.event_name == 'push'
     runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
     strategy:
       matrix:
@@ -107,6 +128,7 @@ jobs:
 
   release:
     needs: build
+    if: github.event_name == 'push'
     runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
     permissions:
       contents: write
@@ -116,17 +138,79 @@ jobs:
         with:
           merge-multiple: true
 
-      - name: Create GitHub release
+      # Idempotent on purpose: a re-run of this job must not abort on the release
+      # it published on its own previous attempt. Bare `gh release create` errors
+      # when the release exists, which is precisely what made the
+      # v1.6.7-strubio.1 tap failure unrecoverable by re-run.
+      - name: Create or update GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" *.zip *.tar.gz \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $TAG already exists — re-uploading assets"
+            gh release upload "$TAG" ./*.zip ./*.tar.gz \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$TAG" ./*.zip ./*.tar.gz \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" \
+              --generate-notes
+          fi
 
-      # Per-run push credential: contents:write on the tap only, expires with
-      # the job. Replaces the retired HOMEBREW_TAP_TOKEN PAT.
+  # A separate job on purpose. The tap write crosses a repository boundary and
+  # can fail for reasons that have nothing to do with this build — the tap's
+  # rulesets, a GitHub incident, an in-flight Terraform apply. Isolating it means
+  # such a failure costs one job re-run (or a dispatch) instead of a burnt
+  # version number, and deriving the checksums from the PUBLISHED assets rather
+  # than the build workspace makes it correct standalone for any released tag.
+  bump-tap:
+    needs: release
+    # After a successful release on a tag push, and on a dispatch re-drive where
+    # verify/build/release are all skipped.
+    if: ${{ !cancelled() && (needs.release.result == 'success' || needs.release.result == 'skipped') }}
+    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
+    permissions:
+      contents: read
+    steps:
+      - name: Resolve tag and fetch published assets
+        id: assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          case "$TAG" in
+            v*-strubio.*) ;;
+            *) echo "::error::refusing to bump the tap for '$TAG' — expected v<X.Y.Z>-strubio.<N>"; exit 1 ;;
+          esac
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::no published release for $TAG — nothing for the tap to point at"
+            exit 1
+          fi
+          mkdir -p dist
+          cd dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'mo_*' --clobber
+          missing=0
+          for f in \
+            "mo_${TAG}_darwin_arm64.zip" \
+            "mo_${TAG}_darwin_amd64.zip" \
+            "mo_${TAG}_linux_arm64.tar.gz" \
+            "mo_${TAG}_linux_amd64.tar.gz"; do
+            test -f "$f" || { echo "::error::release $TAG is missing asset $f"; missing=1; }
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "resolved $TAG with all four assets"
+
+      # Per-run push credential: contents:write on the tap only, expires with the
+      # job. Replaces the retired HOMEBREW_TAP_TOKEN PAT. This App holds an
+      # `always` bypass on the tap's rulesets (declared in .github-private's
+      # terraform), which is what lets the bump push straight to its default
+      # branch instead of opening a PR.
       - name: Mint tap-push App token
         id: tap-app
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
@@ -140,18 +224,19 @@ jobs:
       - name: Update Homebrew formula
         env:
           GH_TOKEN: ${{ steps.tap-app.outputs.token }}
+          TAG: ${{ steps.assets.outputs.tag }}
         run: |
-          TAG="$GITHUB_REF_NAME"
+          set -euo pipefail
+          cd dist
           # Homebrew wants the version without the leading `v`, suffix intact:
-          # `v1.6.7-strubio.1` -> `1.6.7-strubio.1`. Same shape as the tap's
-          # existing marvin-cli formula.
+          # `v1.6.7-strubio.1` -> `1.6.7-strubio.1`.
           VERSION="${TAG#v}"
           BASE_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
 
-          SHA_DARWIN_ARM64=$(sha256sum mo_${TAG}_darwin_arm64.zip | cut -d' ' -f1)
-          SHA_DARWIN_AMD64=$(sha256sum mo_${TAG}_darwin_amd64.zip | cut -d' ' -f1)
-          SHA_LINUX_ARM64=$(sha256sum mo_${TAG}_linux_arm64.tar.gz | cut -d' ' -f1)
-          SHA_LINUX_AMD64=$(sha256sum mo_${TAG}_linux_amd64.tar.gz | cut -d' ' -f1)
+          SHA_DARWIN_ARM64=$(sha256sum "mo_${TAG}_darwin_arm64.zip" | cut -d' ' -f1)
+          SHA_DARWIN_AMD64=$(sha256sum "mo_${TAG}_darwin_amd64.zip" | cut -d' ' -f1)
+          SHA_LINUX_ARM64=$(sha256sum "mo_${TAG}_linux_arm64.tar.gz" | cut -d' ' -f1)
+          SHA_LINUX_AMD64=$(sha256sum "mo_${TAG}_linux_amd64.tar.gz" | cut -d' ' -f1)
 
           cat > /tmp/mo.rb << FORMULA
           class Mo < Formula

@@ -176,7 +176,7 @@ This fork tags releases **`v<X.Y.Z>-strubio.<N>`** (e.g. `v1.6.7-strubio.1`), wh
 
 So `v1.6.7-strubio.2` means "the second fork build of upstream 1.6.7". `mo --version` prints the whole string, which is the point: the old scheme's `0.27.0` was a fork-private counter that told you nothing about which upstream mo you were running.
 
-The tag is a valid semver prerelease, so it needs no prefix-strip configuration anywhere; the Homebrew formula version is just the tag minus its leading `v`. This matches `Formula/marvin-cli.rb` in the same tap.
+The tag is a valid semver prerelease, so it needs no prefix-strip configuration anywhere; the Homebrew formula version is just the tag minus its leading `v` (`1.6.7-strubio.1`).
 
 To release:
 
@@ -185,6 +185,18 @@ To release:
 3. Tag and push: `git tag v<X.Y.Z>-strubio.<N> && git push origin v<X.Y.Z>-strubio.<N>`
 
 The workflow's `verify` job fails the release if step 1 was skipped, before any build runs or the tap is touched.
+
+The workflow runs four jobs — `verify` → `build` (4-arch matrix) → `release` → `bump-tap`. The split is deliberate: `bump-tap` writes to another repository (`Rubio-Enterprises/homebrew-tap`) and can therefore fail for reasons that have nothing to do with this build, so it must be recoverable without burning a version number.
+
+**If the tap bump fails but the release published**, re-drive just the bump — do not cut a new tag:
+
+```bash
+gh workflow run tagpr.yml -f tag=v<X.Y.Z>-strubio.<N>
+```
+
+On `workflow_dispatch`, `verify`/`build`/`release` are skipped and `bump-tap` recomputes the four checksums from the **published release assets**, so it is correct standalone for any released tag. `release` is also idempotent (`gh release view` → `upload --clobber`, else `create`), so re-running that job is safe too.
+
+This path exists because it was needed: `v1.6.7-strubio.1`'s tap write lost a 71-second race with the rulesets apply that granted the `rubio-tap-push` App its bypass (`.github-private#192`), and the original single-job design left no way to retry — `gh release create` aborted on the release it had already published.
 
 Two constraints worth not rediscovering the hard way:
 
