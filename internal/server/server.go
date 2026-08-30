@@ -185,21 +185,22 @@ func (gp *GlobPattern) IsRecursive() bool {
 }
 
 type State struct {
-	mu          sync.RWMutex
-	groups      map[string]*Group
-	subscribers map[chan sseEvent]struct{}
-	subMu       sync.RWMutex
-	watcher     *fswatcher.Watcher
-	restartCh   chan string
-	shutdownCh  chan struct{}
-	patterns    []*GlobPattern
-	watchedDirs map[string]int // directory → reference count
+	mu           sync.RWMutex
+	groups       map[string]*Group
+	subscribers  map[chan sseEvent]struct{}
+	subMu        sync.RWMutex
+	watcher      *fswatcher.Watcher
+	restartCh    chan string
+	shutdownCh   chan struct{}
+	patterns     []*GlobPattern
+	watchedDirs  map[string]int // directory → reference count
+	watchTargets map[string]int
 	// pathAliases maps a canonical (symlink-resolved) path back to the
-	// original path we stored. The fswatcher watcher canonicalizes paths,
+	// original paths we stored. The fswatcher watcher canonicalizes paths,
 	// so events arrive with the resolved form (e.g. /private/var/...) while
 	// our state keeps the user-facing form (/var/...). This mapping lets
 	// the watch loop translate event paths back to their stored keys.
-	pathAliases map[string]string
+	pathAliases map[string]map[string]struct{}
 	// aliasReverse maps the original path to its canonical form, so an
 	// entry can be removed without re-running EvalSymlinks (which would
 	// fail once the underlying file or directory is gone).
@@ -228,7 +229,8 @@ func NewState(ctx context.Context) *State {
 		restartCh:          make(chan string, 1),
 		shutdownCh:         make(chan struct{}, 1),
 		watchedDirs:        make(map[string]int),
-		pathAliases:        make(map[string]string),
+		watchTargets:       make(map[string]int),
+		pathAliases:        make(map[string]map[string]struct{}),
 		aliasReverse:       make(map[string]string),
 		fileChangeDebounce: defaultFileChangeDebounce,
 		fileChangeTimers:   make(map[string]*time.Timer),
@@ -324,7 +326,11 @@ func (s *State) AddFile(absPath, groupName string) (*FileEntry, error) {
 
 	if s.watcher != nil {
 		if err := s.watcher.Add(absPath, watchOps); err != nil {
-			slog.Warn("failed to watch file", "path", absPath, "error", err)
+			if errors.Is(err, fswatcher.ErrAlreadyAdded) {
+				s.registerPathAlias(absPath, canonical)
+			} else {
+				slog.Warn("failed to watch file", "path", absPath, "error", err)
+			}
 		} else {
 			s.registerPathAlias(absPath, canonical)
 		}
@@ -700,7 +706,31 @@ func (s *State) AddPattern(absPattern, groupName string) ([]*FileEntry, error) {
 	}
 
 	// Initial expansion
-	matches, err := doublestar.Glob(os.DirFS(base), relPat, doublestar.WithFilesOnly())
+	var matches []string
+	if gp.IsRecursive() {
+		var matchErr error
+		err = walkSymlinkTree(base, nil, func(path string) {
+			if matchErr != nil {
+				return
+			}
+			matched, err := doublestar.Match(dsPattern, filepath.ToSlash(path))
+			if err != nil {
+				matchErr = err
+				return
+			}
+			if matched {
+				rel, err := filepath.Rel(base, path)
+				if err == nil {
+					matches = append(matches, rel)
+				}
+			}
+		})
+		if err == nil {
+			err = matchErr
+		}
+	} else {
+		matches, err = doublestar.Glob(os.DirFS(base), relPat, doublestar.WithFilesOnly())
+	}
 	if err != nil {
 		return nil, fmt.Errorf("glob expansion failed: %w", err)
 	}
@@ -927,19 +957,18 @@ func (s *State) walkDirsForPattern(gp *GlobPattern, fn func(string)) {
 		return
 	}
 
-	if err := filepath.WalkDir(gp.BaseDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			// Best-effort: still process this path so unwatch can decrement refcounts.
-			fn(path)
-			return fs.SkipDir
+	visitedBase := false
+	err := walkSymlinkTree(gp.BaseDir, func(path string) {
+		if path == gp.BaseDir {
+			visitedBase = true
 		}
-		if d.IsDir() {
-			fn(path)
-		}
-		return nil
-	}); err != nil {
+		fn(path)
+	}, nil)
+	if err != nil {
 		// BaseDir may have been deleted; still clean up the base directory entry.
-		fn(gp.BaseDir)
+		if !visitedBase {
+			fn(gp.BaseDir)
+		}
 		slog.Warn("failed to walk directories for pattern", "pattern", gp.Pattern, "base", gp.BaseDir, "error", err)
 	}
 }
@@ -947,18 +976,31 @@ func (s *State) walkDirsForPattern(gp *GlobPattern, fn func(string)) {
 func (s *State) removeDirWatch(dir string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if count, ok := s.watchedDirs[dir]; ok {
-		count--
-		if count <= 0 {
-			delete(s.watchedDirs, dir)
-			if s.watcher != nil {
-				if err := s.watcher.Remove(dir); err != nil {
-					slog.Warn("failed to remove directory watch", "dir", dir, "error", err)
-				}
-			}
-			s.unregisterPathAlias(dir)
-		} else {
-			s.watchedDirs[dir] = count
+	count, ok := s.watchedDirs[dir]
+	if !ok {
+		return
+	}
+	if count > 1 {
+		s.watchedDirs[dir] = count - 1
+		return
+	}
+
+	delete(s.watchedDirs, dir)
+	target := dir
+	if canonical, ok := s.aliasReverse[dir]; ok {
+		target = canonical
+	}
+	s.unregisterPathAlias(dir)
+
+	targetCount := s.watchTargets[target]
+	if targetCount > 1 {
+		s.watchTargets[target] = targetCount - 1
+		return
+	}
+	delete(s.watchTargets, target)
+	if s.watcher != nil {
+		if err := s.watcher.Remove(target); err != nil {
+			slog.Warn("failed to remove directory watch", "dir", dir, "error", err)
 		}
 	}
 }
@@ -970,71 +1012,47 @@ func (s *State) watchLoop() {
 			if !ok {
 				return
 			}
-			eventPath := s.translateEventPath(event.Name)
-			// State entries may be stored under either the original or the
-			// canonical form (e.g. when the user mixes /var/... and
-			// /private/var/... explicitly), so look up refs for both paths
-			// when they differ. Track each set separately so file-change
-			// scheduling only runs for the form(s) that actually matched,
-			// while delete handling still operates on the union.
-			refsTranslated := s.findRefsByPath(eventPath)
-			var refsRaw []fileRef
-			if eventPath != event.Name {
-				refsRaw = s.findRefsByPath(event.Name)
-			}
-			if len(refsTranslated)+len(refsRaw) > 0 {
-				if event.Op.Has(fswatcher.Write) || event.Op.Has(fswatcher.Create) {
-					slog.Info("file changed", "path", eventPath)
-					if len(refsTranslated) > 0 {
+			for _, eventPath := range s.translateEventPaths(event.Name) {
+				refs := s.findRefsByPath(eventPath)
+				if len(refs) > 0 {
+					if event.Op.Has(fswatcher.Write) || event.Op.Has(fswatcher.Create) {
+						slog.Info("file changed", "path", eventPath)
 						s.scheduleFileChanged(eventPath)
 					}
-					if len(refsRaw) > 0 {
-						s.scheduleFileChanged(event.Name)
+					// Editors using atomic save (write-to-temp + rename) cause
+					// the original inode to disappear, which removes the watch on
+					// some backends. Stat the path to decide whether the file is
+					// actually gone, then re-add the watch if it still exists.
+					// FSEvents on macOS coalesces historical flags, so a plain
+					// Write after a previous atomic save arrives as Write|Rename;
+					// trusting Add's error to mean "file gone" wrongly drops the
+					// entry (ErrAlreadyAdded for a still-live watch).
+					if event.Op.Has(fswatcher.Remove) || event.Op.Has(fswatcher.Rename) {
+						time.AfterFunc(100*time.Millisecond, func() {
+							if _, statErr := os.Stat(eventPath); errors.Is(statErr, os.ErrNotExist) {
+								slog.Info("file deleted, removing from list", "path", eventPath)
+								for _, ref := range refs {
+									s.RemoveFile(ref.ID, ref.Group)
+								}
+								return
+							}
+							if err := s.watcher.Add(eventPath, watchOps); err != nil && !errors.Is(err, fswatcher.ErrAlreadyAdded) {
+								slog.Warn("failed to re-watch file", "path", eventPath, "error", err)
+								return
+							}
+							slog.Info("re-watching file", "path", eventPath)
+							s.scheduleFileChanged(eventPath)
+						})
 					}
 				}
-				// Editors using atomic save (write-to-temp + rename) cause
-				// the original inode to disappear, which removes the watch on
-				// some backends. Stat the path to decide whether the file is
-				// actually gone, then re-add the watch if it still exists.
-				// FSEvents on macOS coalesces historical flags, so a plain
-				// Write after a previous atomic save arrives as Write|Rename;
-				// trusting Add's error to mean "file gone" wrongly drops the
-				// entry (ErrAlreadyAdded for a still-live watch).
-				if event.Op.Has(fswatcher.Remove) || event.Op.Has(fswatcher.Rename) {
-					time.AfterFunc(100*time.Millisecond, func() {
-						if _, statErr := os.Stat(eventPath); errors.Is(statErr, os.ErrNotExist) {
-							slog.Info("file deleted, removing from list", "path", eventPath)
-							for _, ref := range refsTranslated {
-								s.RemoveFile(ref.ID, ref.Group)
-							}
-							for _, ref := range refsRaw {
-								s.RemoveFile(ref.ID, ref.Group)
-							}
-							return
-						}
-						if err := s.watcher.Add(eventPath, watchOps); err != nil && !errors.Is(err, fswatcher.ErrAlreadyAdded) {
-							slog.Warn("failed to re-watch file", "path", eventPath, "error", err)
-							return
-						}
-						slog.Info("re-watching file", "path", eventPath)
-						if len(refsTranslated) > 0 {
-							s.scheduleFileChanged(eventPath)
-						}
-						if len(refsRaw) > 0 {
-							s.scheduleFileChanged(event.Name)
-						}
-					})
+				if event.Op.Has(fswatcher.Rename) || event.Op.Has(fswatcher.Remove) {
+					if s.isWatchedDir(eventPath) {
+						s.handleDirMove(eventPath)
+					}
 				}
-			}
-			if event.Op.Has(fswatcher.Rename) || event.Op.Has(fswatcher.Remove) {
-				if s.isWatchedDir(eventPath) {
-					s.handleDirMove(eventPath)
-				} else if eventPath != event.Name && s.isWatchedDir(event.Name) {
-					s.handleDirMove(event.Name)
+				if event.Op.Has(fswatcher.Create) {
+					s.handleCreateForGlobs(eventPath)
 				}
-			}
-			if event.Op.Has(fswatcher.Create) {
-				s.handleCreateForGlobs(eventPath)
 			}
 		case err, ok := <-s.watcher.Errors:
 			if !ok {
@@ -1142,7 +1160,16 @@ func (s *State) registerPathAlias(orig, canonical string) {
 	if canonical == "" {
 		return
 	}
-	s.pathAliases[canonical] = orig
+	if s.pathAliases == nil {
+		s.pathAliases = make(map[string]map[string]struct{})
+	}
+	if s.aliasReverse == nil {
+		s.aliasReverse = make(map[string]string)
+	}
+	if s.pathAliases[canonical] == nil {
+		s.pathAliases[canonical] = make(map[string]struct{})
+	}
+	s.pathAliases[canonical][orig] = struct{}{}
 	s.aliasReverse[orig] = canonical
 }
 
@@ -1153,36 +1180,38 @@ func (s *State) unregisterPathAlias(orig string) {
 	if !ok {
 		return
 	}
-	delete(s.pathAliases, canonical)
+	delete(s.pathAliases[canonical], orig)
+	if len(s.pathAliases[canonical]) == 0 {
+		delete(s.pathAliases, canonical)
+	}
 	delete(s.aliasReverse, orig)
 }
 
-// translateEventPath returns the stored form of an event path when the
-// watcher reported a canonicalized variant; otherwise it returns p as-is.
-func (s *State) translateEventPath(p string) string {
+// translateEventPaths returns every stored form of an event path alongside
+// the canonical path reported by the watcher.
+func (s *State) translateEventPaths(p string) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if orig, ok := s.pathAliases[p]; ok {
-		return orig
-	}
-	// Files created inside a watched (symlinked) directory arrive with the
-	// canonical path of that directory as a prefix, but only the directory
-	// itself has an alias entry. Walk up parents to find the closest alias
-	// and rebuild the path with the original prefix.
+
+	paths := []string{p}
+	seen := map[string]struct{}{p: {}}
 	dir := p
 	for {
+		for orig := range s.pathAliases[dir] {
+			rel, err := filepath.Rel(dir, p)
+			if err == nil {
+				translated := filepath.Join(orig, rel)
+				if _, ok := seen[translated]; !ok {
+					seen[translated] = struct{}{}
+					paths = append(paths, translated)
+				}
+			}
+		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return p
+			return paths
 		}
 		dir = parent
-		if orig, ok := s.pathAliases[dir]; ok {
-			rel, err := filepath.Rel(dir, p)
-			if err != nil {
-				return p
-			}
-			return filepath.Join(orig, rel)
-		}
 	}
 }
 
@@ -1253,32 +1282,39 @@ func (s *State) watchDirsForPattern(gp *GlobPattern) {
 }
 
 func (s *State) addDirWatch(dir string) {
-	s.mu.Lock()
-	s.watchedDirs[dir]++
-	added := false
-	if s.watchedDirs[dir] == 1 && s.watcher != nil {
-		if err := s.watcher.Add(dir, watchOps); err != nil {
-			delete(s.watchedDirs, dir)
-			slog.Warn("failed to watch directory", "path", dir, "error", err)
-		} else {
-			added = true
-		}
-	}
-	s.mu.Unlock()
-
-	if !added {
-		return
-	}
-
 	canonical := resolvePathAlias(dir)
+	target := dir
+	if canonical != "" {
+		target = canonical
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Register the alias only if the directory is still being watched: a
-	// concurrent removeDirWatch may have dropped it during the unlock window.
-	if _, stillWatched := s.watchedDirs[dir]; stillWatched {
-		s.registerPathAlias(dir, canonical)
+	if s.watchedDirs == nil {
+		s.watchedDirs = make(map[string]int)
 	}
+	if s.watchTargets == nil {
+		s.watchTargets = make(map[string]int)
+	}
+	s.watchedDirs[dir]++
+	if s.watchedDirs[dir] > 1 {
+		return
+	}
+
+	s.watchTargets[target]++
+	if s.watchTargets[target] > 1 {
+		s.registerPathAlias(dir, canonical)
+		return
+	}
+	if s.watcher != nil {
+		if err := s.watcher.Add(target, watchOps); err != nil && !errors.Is(err, fswatcher.ErrAlreadyAdded) {
+			delete(s.watchedDirs, dir)
+			delete(s.watchTargets, target)
+			slog.Warn("failed to watch directory", "path", dir, "error", err)
+			return
+		}
+	}
+	s.registerPathAlias(dir, canonical)
 }
 
 func (s *State) handleCreateForGlobs(path string) {
@@ -1297,31 +1333,79 @@ func (s *State) handleCreateForGlobs(path string) {
 	}
 
 	if info.IsDir() {
-		watched := false
+		watchCount := 0
 		for _, gp := range patterns {
-			if !gp.IsRecursive() {
-				continue
+			if gp.IsRecursive() && pathWithinBase(path, gp.BaseDir) {
+				watchCount++
 			}
-			if !strings.HasPrefix(path, gp.BaseDir) {
-				continue
+		}
+		if watchCount == 0 {
+			return
+		}
+		if err := walkSymlinkTree(path, func(dir string) {
+			for range watchCount {
+				s.addDirWatch(dir)
 			}
-			if !watched {
-				s.addDirWatch(path)
-				// Scan directory contents for matching files
-				filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error { //nolint:errcheck
-					if err != nil || d.IsDir() {
-						return nil
-					}
-					s.matchAndAddFile(p, patterns)
-					return nil
-				})
-				watched = true
-			}
+		}, func(file string) {
+			s.matchAndAddFile(file, patterns)
+		}); err != nil {
+			slog.Warn("failed to scan created directory", "path", path, "error", err)
 		}
 		return
 	}
 
 	s.matchAndAddFile(path, patterns)
+}
+
+func pathWithinBase(path, base string) bool {
+	rel, err := filepath.Rel(base, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func walkSymlinkTree(root string, visitDir, visitFile func(string)) error {
+	var walk func(string, map[string]struct{}) error
+	walk = func(path string, ancestors map[string]struct{}) error {
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			if visitFile != nil {
+				visitFile(path)
+			}
+			return nil
+		}
+
+		canonical, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return err
+		}
+		if _, ok := ancestors[canonical]; ok {
+			return nil
+		}
+		nextAncestors := make(map[string]struct{}, len(ancestors)+1)
+		for ancestor := range ancestors {
+			nextAncestors[ancestor] = struct{}{}
+		}
+		nextAncestors[canonical] = struct{}{}
+
+		if visitDir != nil {
+			visitDir(path)
+		}
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			child := filepath.Join(path, entry.Name())
+			if err := walk(child, nextAncestors); err != nil {
+				slog.Warn("failed to walk path", "path", child, "error", err)
+			}
+		}
+		return nil
+	}
+
+	return walk(root, nil)
 }
 
 func (s *State) matchAndAddFile(path string, patterns []*GlobPattern) {
