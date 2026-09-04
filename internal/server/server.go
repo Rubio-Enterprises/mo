@@ -1983,8 +1983,7 @@ func handleUploadFile(state *State) http.HandlerFunc {
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestSize)
 		var req uploadFileRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
+			if maxBytesErr, ok := errors.AsType[*http.MaxBytesError](err); ok && maxBytesErr != nil {
 				http.Error(w, "file too large (max 10MB)", http.StatusRequestEntityTooLarge)
 				return
 			}
