@@ -219,6 +219,12 @@ type State struct {
 	// entry can be removed without re-running EvalSymlinks (which would
 	// fail once the underlying file or directory is gone).
 	aliasReverse map[string]string
+	// watchedFiles and fileWatchTargets mirror watchedDirs and watchTargets on
+	// the file side. One physical file reachable through several symlink
+	// aliases has one entry per alias path but only one watch, so the logical
+	// paths and the physical watch target have to be counted separately.
+	watchedFiles     map[string]int
+	fileWatchTargets map[string]int
 
 	fileChangeDebounce time.Duration
 	fileChangeTimers   map[string]*time.Timer
@@ -246,6 +252,8 @@ func NewState(ctx context.Context) *State {
 		watchTargets:       make(map[string]int),
 		pathAliases:        make(map[string]map[string]struct{}),
 		aliasReverse:       make(map[string]string),
+		watchedFiles:       make(map[string]int),
+		fileWatchTargets:   make(map[string]int),
 		fileChangeDebounce: defaultFileChangeDebounce,
 		fileChangeTimers:   make(map[string]*time.Timer),
 	}
@@ -339,15 +347,7 @@ func (s *State) AddFile(absPath, groupName string) (*FileEntry, error) {
 	g.Files = append(g.Files, entry)
 
 	if s.watcher != nil {
-		if err := s.watcher.Add(absPath, watchOps); err != nil {
-			if errors.Is(err, fswatcher.ErrAlreadyAdded) {
-				s.registerPathAlias(absPath, canonical)
-			} else {
-				slog.Warn("failed to watch file", "path", absPath, "error", err)
-			}
-		} else {
-			s.registerPathAlias(absPath, canonical)
-		}
+		s.addFileWatch(absPath, canonical)
 	}
 
 	slog.Info("file added", "path", absPath, "group", groupName, "id", entry.ID) //nolint:gosec // G706: structured logging fields, no injection risk
@@ -540,12 +540,12 @@ func (s *State) RemoveFilesByPath(absPath string) bool {
 	}
 
 	s.mu.Lock()
-	removed := false
+	removedCount := 0
 	for name, g := range s.groups {
 		filtered := g.Files[:0]
 		for _, f := range g.Files {
 			if f.Path == absPath {
-				removed = true
+				removedCount++
 				slog.Info("file removed", "path", f.Path, "id", f.ID, "group", name) //nolint:gosec // G706: structured logging fields, no injection risk
 				continue
 			}
@@ -561,14 +561,14 @@ func (s *State) RemoveFilesByPath(absPath string) bool {
 			delete(s.groups, name)
 		}
 	}
-	if removed && s.watcher != nil {
-		if err := s.watcher.Remove(absPath); err != nil {
-			slog.Warn("failed to unwatch file", "path", absPath, "error", err)
+	if s.watcher != nil {
+		for range removedCount {
+			s.removeFileWatch(absPath)
 		}
-		s.unregisterPathAlias(absPath)
 	}
 	s.mu.Unlock()
 
+	removed := removedCount > 0
 	if removed {
 		s.sendEvent(sseEvent{Name: eventUpdate, Data: "{}"})
 	}
@@ -600,26 +600,8 @@ func (s *State) RemoveFile(id, groupName string) bool {
 
 	slog.Info("file removed", "path", removedPath, "id", id) //nolint:gosec // G706: removedPath is from internal state, not direct user input
 
-	// Remove watcher only if no other file references the same path
 	if s.watcher != nil && removedPath != "" {
-		stillReferenced := false
-		for _, g := range s.groups {
-			for _, f := range g.Files {
-				if f.Path == removedPath {
-					stillReferenced = true
-					break
-				}
-			}
-			if stillReferenced {
-				break
-			}
-		}
-		if !stillReferenced {
-			if err := s.watcher.Remove(removedPath); err != nil {
-				slog.Warn("failed to unwatch file", "path", removedPath, "error", err)
-			}
-			s.unregisterPathAlias(removedPath)
-		}
+		s.removeFileWatch(removedPath)
 	}
 
 	s.sendEvent(sseEvent{Name: eventUpdate, Data: "{}"})
@@ -694,12 +676,12 @@ func (s *State) AddPattern(absPattern, groupName string) ([]*FileEntry, error) {
 		return nil, fmt.Errorf("base path %q is not a directory", base)
 	}
 
-	gp, added := func() (*GlobPattern, bool) {
+	gp, createdGroup, added := func() (*GlobPattern, bool, bool) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		for _, p := range s.patterns {
 			if p.Pattern == absPattern && p.Group == groupName {
-				return nil, false
+				return nil, false, false
 			}
 		}
 		gp := &GlobPattern{
@@ -710,10 +692,12 @@ func (s *State) AddPattern(absPattern, groupName string) ([]*FileEntry, error) {
 		}
 		s.patterns = append(s.patterns, gp)
 		// Ensure the group exists even if no files match yet.
+		createdGroup := false
 		if _, ok := s.groups[groupName]; !ok {
 			s.groups[groupName] = &Group{Name: groupName}
+			createdGroup = true
 		}
-		return gp, true
+		return gp, createdGroup, true
 	}()
 	if !added {
 		return nil, nil
@@ -723,7 +707,7 @@ func (s *State) AddPattern(absPattern, groupName string) ([]*FileEntry, error) {
 	var matches []string
 	if gp.IsRecursive() {
 		var matchErr error
-		err = walkSymlinkTree(base, nil, func(path string) {
+		_, err = walkSymlinkTree(base, nil, func(path string) {
 			if matchErr != nil {
 				return
 			}
@@ -733,6 +717,11 @@ func (s *State) AddPattern(absPattern, groupName string) ([]*FileEntry, error) {
 				return
 			}
 			if matched {
+				// Alias paths are kept as distinct matches rather than collapsed
+				// onto their canonical form. FileID is derived from the path, so
+				// collapsing would make the surviving ID depend on ReadDir order
+				// and break deep links and session restore, and preferring the
+				// canonical form would move an entry outside the watched tree.
 				rel, err := filepath.Rel(base, path)
 				if err == nil {
 					matches = append(matches, rel)
@@ -746,6 +735,7 @@ func (s *State) AddPattern(absPattern, groupName string) ([]*FileEntry, error) {
 		matches, err = doublestar.Glob(os.DirFS(base), relPat, doublestar.WithFilesOnly())
 	}
 	if err != nil {
+		s.rollbackPattern(gp, createdGroup)
 		return nil, fmt.Errorf("glob expansion failed: %w", err)
 	}
 	collate.New(language.Und, collate.Numeric).SortStrings(matches)
@@ -971,19 +961,55 @@ func (s *State) walkDirsForPattern(gp *GlobPattern, fn func(string)) {
 		return
 	}
 
-	visitedBase := false
-	err := walkSymlinkTree(gp.BaseDir, func(path string) {
-		if path == gp.BaseDir {
-			visitedBase = true
+	unresolved, err := walkSymlinkTree(gp.BaseDir, fn, nil)
+	// Entries that could not be classified never reached fn, so hand over the
+	// ones already tracked as watched directories. Without this, unwatch cannot
+	// decrement the refcount of a directory that stopped resolving after its
+	// watch was set up, and the watch on its canonical target is never released.
+	// The rest are skipped because unresolved also covers non-directory entries
+	// such as dangling file symlinks, which have no refcount to release and
+	// would only produce a failed watch and a misleading warning on the add
+	// path.
+	for _, path := range unresolved {
+		if s.isWatchedDir(path) {
+			fn(path)
 		}
-		fn(path)
-	}, nil)
+	}
 	if err != nil {
-		// BaseDir may have been deleted; still clean up the base directory entry.
-		if !visitedBase {
-			fn(gp.BaseDir)
-		}
 		slog.Warn("failed to walk directories for pattern", "pattern", gp.Pattern, "base", gp.BaseDir, "error", err)
+	}
+}
+
+// removeFileWatch releases one logical reference to a file path and drops the
+// physical watch only once no alias of the same target remains.
+// Caller must hold s.mu for write.
+func (s *State) removeFileWatch(absPath string) {
+	count, ok := s.watchedFiles[absPath]
+	if !ok {
+		return
+	}
+	if count > 1 {
+		s.watchedFiles[absPath] = count - 1
+		return
+	}
+
+	delete(s.watchedFiles, absPath)
+	target := absPath
+	if canonical, ok := s.aliasReverse[absPath]; ok {
+		target = canonical
+	}
+	s.unregisterPathAlias(absPath)
+
+	targetCount := s.fileWatchTargets[target]
+	if targetCount > 1 {
+		s.fileWatchTargets[target] = targetCount - 1
+		return
+	}
+	delete(s.fileWatchTargets, target)
+	if s.watcher != nil {
+		if err := s.watcher.Remove(target); err != nil {
+			slog.Warn("failed to unwatch file", "path", absPath, "target", target, "error", err)
+		}
 	}
 }
 
@@ -1014,7 +1040,7 @@ func (s *State) removeDirWatch(dir string) {
 	delete(s.watchTargets, target)
 	if s.watcher != nil {
 		if err := s.watcher.Remove(target); err != nil {
-			slog.Warn("failed to remove directory watch", "dir", dir, "error", err)
+			slog.Warn("failed to remove directory watch", "dir", dir, "target", target, "error", err)
 		}
 	}
 }
@@ -1295,6 +1321,65 @@ func (s *State) watchDirsForPattern(gp *GlobPattern) {
 	s.walkDirsForPattern(gp, s.addDirWatch)
 }
 
+// rollbackPattern undoes what AddPattern registers before its initial
+// expansion. Without it a failed expansion leaves a pattern that nothing
+// watches: it is reported by the status API and persisted to the backup, and a
+// later RemovePattern walks the tree decrementing refcounts it never
+// incremented, which can release a watch another pattern still needs.
+func (s *State) rollbackPattern(gp *GlobPattern, createdGroup bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, p := range s.patterns {
+		if p == gp {
+			s.patterns = append(s.patterns[:i], s.patterns[i+1:]...)
+			break
+		}
+	}
+	if !createdGroup {
+		return
+	}
+	if g, ok := s.groups[gp.Group]; ok && len(g.Files) == 0 && !s.groupHasPatterns(gp.Group) {
+		delete(s.groups, gp.Group)
+	}
+}
+
+// addFileWatch registers a watch for a file path. Logical paths and the
+// physical watch target are counted separately so that several symlink
+// aliases of one file share a single watch, and removing one alias does not
+// tear down the watch the remaining aliases still rely on.
+// Caller must hold s.mu for write.
+func (s *State) addFileWatch(absPath, canonical string) {
+	target := absPath
+	if canonical != "" {
+		target = canonical
+	}
+	if s.watchedFiles == nil {
+		s.watchedFiles = make(map[string]int)
+	}
+	if s.fileWatchTargets == nil {
+		s.fileWatchTargets = make(map[string]int)
+	}
+	s.watchedFiles[absPath]++
+	if s.watchedFiles[absPath] > 1 {
+		return
+	}
+
+	s.fileWatchTargets[target]++
+	if s.fileWatchTargets[target] > 1 {
+		s.registerPathAlias(absPath, canonical)
+		return
+	}
+	if s.watcher != nil {
+		if err := s.watcher.Add(target, watchOps); err != nil && !errors.Is(err, fswatcher.ErrAlreadyAdded) {
+			delete(s.watchedFiles, absPath)
+			delete(s.fileWatchTargets, target)
+			slog.Warn("failed to watch file", "path", absPath, "target", target, "error", err)
+			return
+		}
+	}
+	s.registerPathAlias(absPath, canonical)
+}
+
 func (s *State) addDirWatch(dir string) {
 	canonical := resolvePathAlias(dir)
 	target := dir
@@ -1324,7 +1409,7 @@ func (s *State) addDirWatch(dir string) {
 		if err := s.watcher.Add(target, watchOps); err != nil && !errors.Is(err, fswatcher.ErrAlreadyAdded) {
 			delete(s.watchedDirs, dir)
 			delete(s.watchTargets, target)
-			slog.Warn("failed to watch directory", "path", dir, "error", err)
+			slog.Warn("failed to watch directory", "path", dir, "target", target, "error", err)
 			return
 		}
 	}
@@ -1356,7 +1441,7 @@ func (s *State) handleCreateForGlobs(path string) {
 		if watchCount == 0 {
 			return
 		}
-		if err := walkSymlinkTree(path, func(dir string) {
+		if _, err := walkSymlinkTree(path, func(dir string) {
 			for range watchCount {
 				s.addDirWatch(dir)
 			}
@@ -1376,11 +1461,18 @@ func pathWithinBase(path, base string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func walkSymlinkTree(root string, visitDir, visitFile func(string)) error {
+// walkSymlinkTree walks root, descending through directory symlinks, handing
+// every directory to visitDir and every other entry to visitFile. Paths that
+// could not be classified are returned separately instead of being dropped,
+// because a caller keeping per-directory state still has to reach a directory
+// that vanished between watch setup and teardown.
+func walkSymlinkTree(root string, visitDir, visitFile func(string)) ([]string, error) {
+	var unresolved []string
 	var walk func(string, map[string]struct{}) error
 	walk = func(path string, ancestors map[string]struct{}) error {
 		info, err := os.Stat(path)
 		if err != nil {
+			unresolved = append(unresolved, path)
 			return err
 		}
 		if !info.IsDir() {
@@ -1392,6 +1484,7 @@ func walkSymlinkTree(root string, visitDir, visitFile func(string)) error {
 
 		canonical, err := filepath.EvalSymlinks(path)
 		if err != nil {
+			unresolved = append(unresolved, path)
 			return err
 		}
 		if _, ok := ancestors[canonical]; ok {
@@ -1408,6 +1501,8 @@ func walkSymlinkTree(root string, visitDir, visitFile func(string)) error {
 		}
 		entries, err := os.ReadDir(path)
 		if err != nil {
+			// path already went to visitDir, so it must not also be reported as
+			// unresolved; teardown would otherwise decrement it twice.
 			return err
 		}
 		for _, entry := range entries {
@@ -1419,7 +1514,8 @@ func walkSymlinkTree(root string, visitDir, visitFile func(string)) error {
 		return nil
 	}
 
-	return walk(root, nil)
+	err := walk(root, nil)
+	return unresolved, err
 }
 
 func (s *State) matchAndAddFile(path string, patterns []*GlobPattern) {
