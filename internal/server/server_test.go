@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -40,6 +42,8 @@ func newTestState(t *testing.T) *State {
 		watchTargets:       make(map[string]int),
 		pathAliases:        make(map[string]map[string]struct{}),
 		aliasReverse:       make(map[string]string),
+		watchedFiles:       make(map[string]int),
+		fileWatchTargets:   make(map[string]int),
 		fileChangeDebounce: defaultFileChangeDebounce,
 		fileChangeTimers:   make(map[string]*time.Timer),
 	}
@@ -2686,5 +2690,283 @@ func TestAddFile_PathStaysOSNative(t *testing.T) {
 	}
 	if dup.ID != entry.ID {
 		t.Errorf("duplicate add returned different entry ID %q, want %q", dup.ID, entry.ID)
+	}
+}
+
+// walkSymlinkTree must report entries it could not classify instead of
+// dropping them, so that watch teardown can still reach them.
+func TestWalkSymlinkTree_ReportsUnresolvedEntries(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "note.md"), []byte("# Note"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dangling := filepath.Join(dir, "dangling")
+	if err := os.Symlink(filepath.Join(dir, "missing"), dangling); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	var dirs, files []string
+	unresolved, err := walkSymlinkTree(dir, func(p string) {
+		dirs = append(dirs, p)
+	}, func(p string) {
+		files = append(files, p)
+	})
+	if err != nil {
+		t.Fatalf("walkSymlinkTree returned error: %v", err)
+	}
+	if !slices.Contains(unresolved, dangling) {
+		t.Errorf("unresolved = %q, want it to contain %q", unresolved, dangling)
+	}
+	if slices.Contains(dirs, dangling) || slices.Contains(files, dangling) {
+		t.Errorf("dangling symlink must not be visited: dirs=%q files=%q", dirs, files)
+	}
+	if !slices.Contains(files, filepath.Join(dir, "note.md")) {
+		t.Errorf("files = %q, want it to contain note.md", files)
+	}
+}
+
+// A directory that stops resolving after the watch was set up must still have
+// its reference count released when the pattern is removed.
+func TestRemovePattern_ReleasesWatchForUnresolvedDir(t *testing.T) {
+	ctx, cancel := donegroup.WithCancel(context.Background())
+	defer cancel()
+
+	s := NewState(ctx)
+
+	dir := t.TempDir()
+	realDir := filepath.Join(dir, "real")
+	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkDir := filepath.Join(dir, "link")
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	pattern := filepath.Join(dir, "**", "*.md")
+	if _, err := s.AddPattern(pattern, DefaultGroup); err != nil {
+		t.Fatalf("AddPattern returned error: %v", err)
+	}
+
+	s.mu.RLock()
+	_, watched := s.watchedDirs[linkDir]
+	s.mu.RUnlock()
+	if !watched {
+		t.Fatalf("watchedDirs does not contain %q after AddPattern", linkDir)
+	}
+
+	// The symlink now dangles, so the walk can no longer classify it.
+	if err := os.RemoveAll(realDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if !s.RemovePattern(pattern, DefaultGroup) {
+		t.Fatal("RemovePattern returned false")
+	}
+
+	s.mu.RLock()
+	count, stillWatched := s.watchedDirs[linkDir]
+	s.mu.RUnlock()
+	if stillWatched {
+		t.Errorf("watchedDirs[%q] = %d after RemovePattern, want the entry to be gone", linkDir, count)
+	}
+}
+
+// A failed initial expansion must not leave the pattern registered, because
+// nothing would be watching it.
+func TestAddPattern_RollsBackWhenExpansionFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory read permissions are not enforced the same way on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses directory read permissions")
+	}
+
+	ctx, cancel := donegroup.WithCancel(context.Background())
+	defer cancel()
+
+	s := NewState(ctx)
+
+	base := filepath.Join(t.TempDir(), "unreadable")
+	if err := os.Mkdir(base, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Searchable but not readable, so os.Stat succeeds while os.ReadDir fails.
+	if err := os.Chmod(base, 0o300); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		os.Chmod(base, 0o755) //nolint:errcheck,gosec // best-effort so TempDir cleanup can proceed
+	})
+
+	pattern := filepath.Join(base, "**", "*.md")
+	if _, err := s.AddPattern(pattern, "scratch"); err == nil {
+		t.Fatal("AddPattern returned no error for an unreadable base directory")
+	}
+
+	if got := s.Patterns(); len(got) != 0 {
+		t.Errorf("Patterns() = %d entries, want 0", len(got))
+	}
+	for _, g := range s.Groups() {
+		if g.Name == "scratch" {
+			t.Error(`group "scratch" was left behind by the failed AddPattern`)
+		}
+	}
+}
+
+func TestFileWatchRefCount(t *testing.T) {
+	t.Run("aliases of one target share a single watch", func(t *testing.T) {
+		s := newTestState(t)
+		canonical := filepath.FromSlash("/canonical/note.md")
+		aliasA := filepath.FromSlash("/alias-a/note.md")
+		aliasB := filepath.FromSlash("/alias-b/note.md")
+
+		s.mu.Lock()
+		s.addFileWatch(aliasA, canonical)
+		s.addFileWatch(aliasB, canonical)
+		got := s.fileWatchTargets[canonical]
+		aliases := len(s.pathAliases[canonical])
+		s.mu.Unlock()
+
+		if got != 2 {
+			t.Errorf("fileWatchTargets[%q] = %d, want 2", canonical, got)
+		}
+		if aliases != 2 {
+			t.Errorf("pathAliases[%q] has %d aliases, want 2", canonical, aliases)
+		}
+
+		// Dropping one alias must keep the target watched for the other.
+		s.mu.Lock()
+		s.removeFileWatch(aliasA)
+		got = s.fileWatchTargets[canonical]
+		_, aliasBStillMapped := s.aliasReverse[aliasB]
+		s.mu.Unlock()
+
+		if got != 1 {
+			t.Errorf("fileWatchTargets[%q] = %d after removing one alias, want 1", canonical, got)
+		}
+		if !aliasBStillMapped {
+			t.Errorf("aliasReverse lost %q while it was still watched", aliasB)
+		}
+
+		s.mu.Lock()
+		s.removeFileWatch(aliasB)
+		_, targetExists := s.fileWatchTargets[canonical]
+		_, canonicalExists := s.pathAliases[canonical]
+		s.mu.Unlock()
+
+		if targetExists {
+			t.Errorf("fileWatchTargets[%q] should be gone once every alias was removed", canonical)
+		}
+		if canonicalExists {
+			t.Errorf("pathAliases[%q] should be gone once every alias was removed", canonical)
+		}
+	})
+
+	t.Run("one path held by several groups is released once", func(t *testing.T) {
+		s := newTestState(t)
+		path := filepath.FromSlash("/plain/note.md")
+
+		s.mu.Lock()
+		s.addFileWatch(path, "")
+		s.addFileWatch(path, "")
+		s.removeFileWatch(path)
+		count := s.watchedFiles[path]
+		s.mu.Unlock()
+
+		if count != 1 {
+			t.Fatalf("watchedFiles[%q] = %d, want 1", path, count)
+		}
+
+		s.mu.Lock()
+		s.removeFileWatch(path)
+		_, exists := s.watchedFiles[path]
+		s.mu.Unlock()
+
+		if exists {
+			t.Errorf("watchedFiles[%q] should be gone at zero", path)
+		}
+	})
+
+	t.Run("no-op for unknown path", func(t *testing.T) {
+		s := newTestState(t)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.removeFileWatch(filepath.FromSlash("/unknown/note.md"))
+	})
+}
+
+func TestRemoveDirWatch_SharedTarget(t *testing.T) {
+	s := newTestState(t)
+	canonical := filepath.FromSlash("/canonical/dir")
+	aliasA := filepath.FromSlash("/alias-a/dir")
+	aliasB := filepath.FromSlash("/alias-b/dir")
+
+	s.mu.Lock()
+	s.watchedDirs[aliasA] = 1
+	s.watchedDirs[aliasB] = 1
+	s.watchTargets[canonical] = 2
+	s.registerPathAlias(aliasA, canonical)
+	s.registerPathAlias(aliasB, canonical)
+	s.mu.Unlock()
+
+	s.removeDirWatch(aliasA)
+
+	s.mu.RLock()
+	got := s.watchTargets[canonical]
+	_, aliasBStillMapped := s.aliasReverse[aliasB]
+	s.mu.RUnlock()
+
+	if got != 1 {
+		t.Errorf("watchTargets[%q] = %d after removing one alias, want 1", canonical, got)
+	}
+	if !aliasBStillMapped {
+		t.Errorf("aliasReverse lost %q while it was still watched", aliasB)
+	}
+
+	s.removeDirWatch(aliasB)
+
+	s.mu.RLock()
+	_, targetExists := s.watchTargets[canonical]
+	_, canonicalExists := s.pathAliases[canonical]
+	s.mu.RUnlock()
+
+	if targetExists {
+		t.Errorf("watchTargets[%q] should be gone once every alias was removed", canonical)
+	}
+	if canonicalExists {
+		t.Errorf("pathAliases[%q] should be gone once every alias was removed", canonical)
+	}
+}
+
+// unregisterPathAlias must keep the canonical entry while other aliases of the
+// same target remain registered.
+func TestUnregisterPathAlias_KeepsCanonicalWhileAliasesRemain(t *testing.T) {
+	s := newTestState(t)
+	canonical := filepath.FromSlash("/canonical/dir")
+	aliasA := filepath.FromSlash("/alias-a/dir")
+	aliasB := filepath.FromSlash("/alias-b/dir")
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.registerPathAlias(aliasA, canonical)
+	s.registerPathAlias(aliasB, canonical)
+
+	s.unregisterPathAlias(aliasA)
+
+	if _, ok := s.pathAliases[canonical][aliasB]; !ok {
+		t.Errorf("pathAliases[%q] lost %q", canonical, aliasB)
+	}
+	if _, ok := s.pathAliases[canonical][aliasA]; ok {
+		t.Errorf("pathAliases[%q] still contains %q", canonical, aliasA)
+	}
+	if _, ok := s.aliasReverse[aliasA]; ok {
+		t.Errorf("aliasReverse still contains %q", aliasA)
+	}
+
+	s.unregisterPathAlias(aliasB)
+
+	if _, ok := s.pathAliases[canonical]; ok {
+		t.Errorf("pathAliases[%q] should be gone once every alias was removed", canonical)
 	}
 }
