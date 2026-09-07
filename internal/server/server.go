@@ -962,12 +962,18 @@ func (s *State) walkDirsForPattern(gp *GlobPattern, fn func(string)) {
 	}
 
 	unresolved, err := walkSymlinkTree(gp.BaseDir, fn, nil)
-	// Directories that could not be classified never reached fn, so hand them
-	// over here. Without this, unwatch cannot decrement the refcount of a
-	// directory that was deleted after the watch was set up, and the watch on
-	// its canonical target is never released.
+	// Entries that could not be classified never reached fn, so hand over the
+	// ones already tracked as watched directories. Without this, unwatch cannot
+	// decrement the refcount of a directory that stopped resolving after its
+	// watch was set up, and the watch on its canonical target is never released.
+	// The rest are skipped because unresolved also covers non-directory entries
+	// such as dangling file symlinks, which have no refcount to release and
+	// would only produce a failed watch and a misleading warning on the add
+	// path.
 	for _, path := range unresolved {
-		fn(path)
+		if s.isWatchedDir(path) {
+			fn(path)
+		}
 	}
 	if err != nil {
 		slog.Warn("failed to walk directories for pattern", "pattern", gp.Pattern, "base", gp.BaseDir, "error", err)

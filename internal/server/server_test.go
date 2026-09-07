@@ -2970,3 +2970,46 @@ func TestUnregisterPathAlias_KeepsCanonicalWhileAliasesRemain(t *testing.T) {
 		t.Errorf("pathAliases[%q] should be gone once every alias was removed", canonical)
 	}
 }
+
+// Only unresolvable entries that are already tracked as watched directories
+// may reach the directory-watch bookkeeping. A dangling file symlink is
+// unresolvable but was never a watched directory, so it must be skipped.
+func TestWalkDirsForPattern_SkipsUnresolvableNonDirEntries(t *testing.T) {
+	ctx, cancel := donegroup.WithCancel(context.Background())
+	defer cancel()
+
+	s := NewState(ctx)
+
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dangling := filepath.Join(dir, "dangling.md")
+	if err := os.Symlink(filepath.Join(dir, "missing.md"), dangling); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	pattern := filepath.Join(dir, "**", "*.md")
+	if _, err := s.AddPattern(pattern, DefaultGroup); err != nil {
+		t.Fatalf("AddPattern returned error: %v", err)
+	}
+	patterns := s.Patterns()
+	if len(patterns) != 1 {
+		t.Fatalf("Patterns() = %d entries, want 1", len(patterns))
+	}
+
+	var visited []string
+	s.walkDirsForPattern(patterns[0], func(p string) {
+		visited = append(visited, p)
+	})
+
+	if slices.Contains(visited, dangling) {
+		t.Errorf("walkDirsForPattern handed over %q, which is not a watched directory", dangling)
+	}
+	for _, want := range []string{dir, sub} {
+		if !slices.Contains(visited, want) {
+			t.Errorf("walkDirsForPattern did not hand over %q; visited=%q", want, visited)
+		}
+	}
+}
