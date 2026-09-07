@@ -2614,3 +2614,77 @@ func TestGroupsReturnsDeepCopies(t *testing.T) {
 		t.Fatalf("got file ID %q, want %q", final[0].Files[0].ID, entry.ID)
 	}
 }
+
+// TestFileEntry_MarshalJSON_NormalizesPathSeparator verifies that JSON
+// serialization converts OS-native path separators to forward slashes so the
+// frontend's buildTree.ts can split paths consistently on all platforms.
+func TestFileEntry_MarshalJSON_NormalizesPathSeparator(t *testing.T) {
+	dir := t.TempDir()
+	nested := filepath.Join(dir, "sub", "dir", "file.md")
+	os.MkdirAll(filepath.Dir(nested), 0o755) //nolint:errcheck
+	os.WriteFile(nested, []byte("# Test"), 0o600) //nolint:errcheck
+
+	s := newTestState(t)
+	entry, err := s.AddFile(nested, DefaultGroup)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Internal Path must retain the OS-native separator.
+	if entry.Path != nested {
+		t.Fatalf("internal Path = %q, want %q (OS-native)", entry.Path, nested)
+	}
+
+	// JSON output must use forward slashes regardless of platform.
+	data, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var decoded struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if strings.Contains(decoded.Path, "\\") {
+		t.Errorf("JSON path contains backslash: %q (want forward slashes only)", decoded.Path)
+	}
+	if !strings.Contains(decoded.Path, "/sub/dir/file.md") {
+		t.Errorf("JSON path = %q, want it to end with /sub/dir/file.md", decoded.Path)
+	}
+}
+
+// TestAddFile_PathStaysOSNative guards against regressing to the original fix
+// that called filepath.ToSlash at storage time, which broke server-side path
+// comparisons (duplicate detection, watcher updates, removals) on Windows.
+func TestAddFile_PathStaysOSNative(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "nested", "doc.md")
+	os.MkdirAll(filepath.Dir(file), 0o755) //nolint:errcheck
+	os.WriteFile(file, []byte("# Doc"), 0o600) //nolint:errcheck
+
+	s := newTestState(t)
+	entry, err := s.AddFile(file, DefaultGroup)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Path must match the OS-native absPath passed to AddFile.
+	if entry.Path != file {
+		t.Errorf("Path = %q, want %q (must stay OS-native, not ToSlash'd)", entry.Path, file)
+	}
+
+	// Adding the same file again must be detected as a duplicate (returns
+	// the existing entry, not a new one). This would fail on Windows if
+	// Path were stored with ToSlash because the comparison f.Path == absPath
+	// would compare forward-slash vs OS-native.
+	dup, err := s.AddFile(file, DefaultGroup)
+	if err != nil {
+		t.Fatalf("unexpected error on duplicate add: %v", err)
+	}
+	if dup.ID != entry.ID {
+		t.Errorf("duplicate add returned different entry ID %q, want %q", dup.ID, entry.ID)
+	}
+}
