@@ -1008,7 +1008,7 @@ func (s *State) removeFileWatch(absPath string) {
 	delete(s.fileWatchTargets, target)
 	if s.watcher != nil {
 		if err := s.watcher.Remove(target); err != nil {
-			slog.Warn("failed to unwatch file", "path", absPath, "error", err)
+			slog.Warn("failed to unwatch file", "path", absPath, "target", target, "error", err)
 		}
 	}
 }
@@ -1040,7 +1040,7 @@ func (s *State) removeDirWatch(dir string) {
 	delete(s.watchTargets, target)
 	if s.watcher != nil {
 		if err := s.watcher.Remove(target); err != nil {
-			slog.Warn("failed to remove directory watch", "dir", dir, "error", err)
+			slog.Warn("failed to remove directory watch", "dir", dir, "target", target, "error", err)
 		}
 	}
 }
@@ -1373,7 +1373,7 @@ func (s *State) addFileWatch(absPath, canonical string) {
 		if err := s.watcher.Add(target, watchOps); err != nil && !errors.Is(err, fswatcher.ErrAlreadyAdded) {
 			delete(s.watchedFiles, absPath)
 			delete(s.fileWatchTargets, target)
-			slog.Warn("failed to watch file", "path", absPath, "error", err)
+			slog.Warn("failed to watch file", "path", absPath, "target", target, "error", err)
 			return
 		}
 	}
@@ -1409,7 +1409,7 @@ func (s *State) addDirWatch(dir string) {
 		if err := s.watcher.Add(target, watchOps); err != nil && !errors.Is(err, fswatcher.ErrAlreadyAdded) {
 			delete(s.watchedDirs, dir)
 			delete(s.watchTargets, target)
-			slog.Warn("failed to watch directory", "path", dir, "error", err)
+			slog.Warn("failed to watch directory", "path", dir, "target", target, "error", err)
 			return
 		}
 	}
