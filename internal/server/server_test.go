@@ -37,6 +37,9 @@ func newTestState(t *testing.T) *State {
 		restartCh:          make(chan string, 1),
 		shutdownCh:         make(chan struct{}, 1),
 		watchedDirs:        make(map[string]int),
+		watchTargets:       make(map[string]int),
+		pathAliases:        make(map[string]map[string]struct{}),
+		aliasReverse:       make(map[string]string),
 		fileChangeDebounce: defaultFileChangeDebounce,
 		fileChangeTimers:   make(map[string]*time.Timer),
 	}
@@ -528,6 +531,125 @@ func TestAddPattern_InitialExpansionNaturalOrder(t *testing.T) {
 		if files[i].Name != name {
 			t.Errorf("group files[%d].Name = %q, want %q", i, files[i].Name, name)
 		}
+	}
+}
+
+func TestAddPattern_RecursiveSymlinkDirectory(t *testing.T) {
+	ctx, cancel := donegroup.WithCancel(context.Background())
+	defer cancel()
+
+	s := NewState(ctx)
+
+	dir := t.TempDir()
+	targetDir := filepath.Join(dir, "outbound", "task")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "existing.md"), []byte("# Existing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linkDir := filepath.Join(dir, "pending", "task")
+	if err := os.MkdirAll(filepath.Dir(linkDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetDir, linkDir); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	secondLinkDir := filepath.Join(dir, "pending", "task-copy")
+	if err := os.Symlink(targetDir, secondLinkDir); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	pattern := filepath.Join(dir, "**", "*.md")
+	if _, err := s.AddPattern(pattern, DefaultGroup); err != nil {
+		t.Fatalf("AddPattern returned error: %v", err)
+	}
+	waitForFilePath(t, s, filepath.Join(linkDir, "existing.md"))
+	waitForFilePath(t, s, filepath.Join(secondLinkDir, "existing.md"))
+
+	path := filepath.Join(targetDir, "created.md")
+	if err := os.WriteFile(path, []byte("# Created"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitForFilePath(t, s, filepath.Join(linkDir, "created.md"))
+	waitForFilePath(t, s, filepath.Join(secondLinkDir, "created.md"))
+}
+
+func TestAddPattern_RecursiveSymlinkDirectoryCreatedWhileWatching(t *testing.T) {
+	ctx, cancel := donegroup.WithCancel(context.Background())
+	defer cancel()
+
+	s := NewState(ctx)
+
+	dir := t.TempDir()
+	targetDir := filepath.Join(dir, "outbound", "task")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existingPath := filepath.Join(targetDir, "existing.md")
+	if err := os.WriteFile(existingPath, []byte("# Existing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	pattern := filepath.Join(dir, "**", "*.md")
+	if _, err := s.AddPattern(pattern, DefaultGroup); err != nil {
+		t.Fatalf("AddPattern returned error: %v", err)
+	}
+
+	linkDir := filepath.Join(dir, "pending", "task")
+	if err := os.MkdirAll(filepath.Dir(linkDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(targetDir, linkDir); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	waitForFilePath(t, s, filepath.Join(linkDir, "existing.md"))
+
+	createdPath := filepath.Join(targetDir, "created.md")
+	if err := os.WriteFile(createdPath, []byte("# Created"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitForFilePath(t, s, filepath.Join(linkDir, "created.md"))
+}
+
+func TestAddPattern_RecursiveSymlinkCycle(t *testing.T) {
+	ctx, cancel := donegroup.WithCancel(context.Background())
+	defer cancel()
+
+	s := NewState(ctx)
+	dir := t.TempDir()
+	nested := filepath.Join(dir, "nested")
+	if err := os.Mkdir(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(nested, "note.md")
+	if err := os.WriteFile(path, []byte("# Note"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(dir, filepath.Join(nested, "back")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	pattern := filepath.Join(dir, "**", "*.md")
+	if _, err := s.AddPattern(pattern, DefaultGroup); err != nil {
+		t.Fatalf("AddPattern returned error: %v", err)
+	}
+	waitForFilePath(t, s, path)
+}
+
+func waitForFilePath(t *testing.T, s *State, path string) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		if s.FindFile(FileID(path), DefaultGroup) != nil {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for file %q; groups=%+v", path, s.Groups())
+		default:
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -1786,27 +1908,38 @@ func TestWatchedFile_RetainedAfterAtomicSaveRewrite(t *testing.T) {
 	}
 }
 
-func TestTranslateEventPath(t *testing.T) {
+func TestTranslateEventPaths(t *testing.T) {
 	canonicalDir := filepath.FromSlash("/private/var/foo/docs")
 	originalDir := filepath.FromSlash("/var/foo/docs")
-	s := &State{pathAliases: map[string]string{
-		canonicalDir: originalDir,
+	secondDir := filepath.FromSlash("/tmp/foo/docs")
+	s := &State{pathAliases: map[string]map[string]struct{}{
+		canonicalDir: {originalDir: {}, secondDir: {}},
 	}}
 
 	tests := []struct {
 		name string
 		in   string
-		want string
+		want []string
 	}{
-		{"exact match", canonicalDir, originalDir},
-		{"prefix match for file under aliased dir", filepath.Join(canonicalDir, "new.md"), filepath.Join(originalDir, "new.md")},
-		{"prefix match for nested file", filepath.Join(canonicalDir, "sub", "note.md"), filepath.Join(originalDir, "sub", "note.md")},
-		{"no alias passes through", filepath.FromSlash("/other/path/file.md"), filepath.FromSlash("/other/path/file.md")},
+		{"exact match", canonicalDir, []string{canonicalDir, originalDir, secondDir}},
+		{"prefix match for file under aliased dir", filepath.Join(canonicalDir, "new.md"), []string{filepath.Join(canonicalDir, "new.md"), filepath.Join(originalDir, "new.md"), filepath.Join(secondDir, "new.md")}},
+		{"prefix match for nested file", filepath.Join(canonicalDir, "sub", "note.md"), []string{filepath.Join(canonicalDir, "sub", "note.md"), filepath.Join(originalDir, "sub", "note.md"), filepath.Join(secondDir, "sub", "note.md")}},
+		{"no alias passes through", filepath.FromSlash("/other/path/file.md"), []string{filepath.FromSlash("/other/path/file.md")}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := s.translateEventPath(tt.in); got != tt.want {
-				t.Errorf("translateEventPath(%q) = %q, want %q", tt.in, got, tt.want)
+			got := s.translateEventPaths(tt.in)
+			gotSet := make(map[string]bool, len(got))
+			for _, path := range got {
+				gotSet[path] = true
+			}
+			for _, path := range tt.want {
+				if !gotSet[path] {
+					t.Errorf("translateEventPaths(%q) = %q, missing %q", tt.in, got, path)
+				}
+			}
+			if len(got) != len(tt.want) {
+				t.Errorf("translateEventPaths(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}
@@ -1825,16 +1958,15 @@ func TestFindRefsByPath_CoversBothPathFormsViaUnion(t *testing.T) {
 				{ID: "canon", Path: canonicalFile},
 			}},
 		},
-		pathAliases: map[string]string{canonicalDir: originalDir},
+		pathAliases: map[string]map[string]struct{}{canonicalDir: {originalDir: {}}},
 	}
 
-	// Simulate the event delivered for canonicalFile and the watchLoop's
-	// union of findRefsByPath(translated) ∪ findRefsByPath(raw).
+	// Simulate the event delivered for canonicalFile and the watchLoop's lookup
+	// across every translated form.
 	eventName := canonicalFile
-	eventPath := s.translateEventPath(eventName)
-	refs := s.findRefsByPath(eventPath)
-	if eventPath != eventName {
-		refs = append(refs, s.findRefsByPath(eventName)...)
+	var refs []fileRef
+	for _, eventPath := range s.translateEventPaths(eventName) {
+		refs = append(refs, s.findRefsByPath(eventPath)...)
 	}
 
 	got := map[string]bool{}
@@ -1848,7 +1980,7 @@ func TestFindRefsByPath_CoversBothPathFormsViaUnion(t *testing.T) {
 
 func TestPathAliasRegisterAndUnregister(t *testing.T) {
 	s := &State{
-		pathAliases:  map[string]string{},
+		pathAliases:  map[string]map[string]struct{}{},
 		aliasReverse: map[string]string{},
 	}
 
@@ -1861,8 +1993,8 @@ func TestPathAliasRegisterAndUnregister(t *testing.T) {
 	}
 
 	s.registerPathAlias(dir, canonical)
-	if got := s.pathAliases[canonical]; got != dir {
-		t.Errorf("pathAliases[%q] = %q, want %q", canonical, got, dir)
+	if _, ok := s.pathAliases[canonical][dir]; !ok {
+		t.Errorf("pathAliases[%q] does not contain %q", canonical, dir)
 	}
 	if got := s.aliasReverse[dir]; got != canonical {
 		t.Errorf("aliasReverse[%q] = %q, want %q", dir, got, canonical)
