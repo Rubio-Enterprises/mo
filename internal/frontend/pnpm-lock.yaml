@@ -27,7 +27,7 @@ importers:
         specifier: ^0.18.5
         version: 0.18.7
       mermaid:
-        specifier: ^11.16.1
+        specifier: ^11.17.2
         version: 11.17.2
       react:
         specifier: ^19.2.8
