@@ -52,6 +52,10 @@ jobs:
     with: { mode: trufflehog }
 
   e2e:
+    # The reusable publishes a JUnit Check; permissions cannot be elevated there.
+    permissions:
+      contents: read
+      checks: write
     uses: Rubio-Enterprises/.github/.github/workflows/e2e.yml@083a18b5fd4ae40bd54a67296c016fbf998ab7e5 # v3
     if: github.event_name != 'pull_request' || github.event.action != 'edited'
 
