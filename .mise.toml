@@ -86,12 +86,10 @@ uv = "0.12.15"
 # python/go pins (ASDF-format toolchains with no backend prefix) and renders
 # only when one of those stacks is present.
 node = "22.23.1"
-# Biome 2.x — JS/TS language facets (has_javascript or has_typescript,
-# including ts-web-angular). This pin is
-# LOAD-BEARING: both the lefthook `biome` pre-commit hook and the lint-format
-# CI gate invoke `mise exec -- biome`, resolving this exact version. (The hook
-# previously used bare `npx biome`, which silently resolved the abandoned npm
-# registry package named `biome` whenever no consumer devDep was installed.)
+# Biome 2.x is pinned for the rendered JS/TS tooling and the lefthook `biome`
+# pre-commit hook. This repo's `linter_floor: repo` delegates CI lint/format
+# to the repo-owned lint-format gate instead of the managed Biome check.
+# The pin avoids resolving the unrelated abandoned npm `biome` package.
 # Also pinned for any non-TS archetype when has_embedded_web=true
 # so the embedded web surface (JS/JSX/TS/CSS) gets the same Biome floor as a
 # standalone ts-* repo (e.g. vibetunnel Swift + Node, todoist-classify Python +
