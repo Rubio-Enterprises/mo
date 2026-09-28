@@ -35,16 +35,16 @@ fmt-check:
 	cd internal/frontend && pnpm install && pnpm run fmt:check
 
 depsdev:
-	go install github.com/Songmu/gocredits/cmd/gocredits@latest
 	go install github.com/k1LoW/gostyle@latest
 
-credits: depsdev generate
-	go mod download
-	gocredits -w .
+credits: generate
+	go install github.com/Songmu/gocredits/cmd/gocredits@v1.0.0
+	gocredits . > CREDITS
 	printf "\n================================================================\n\n" >> CREDITS
 	cat internal/frontend/CREDITS_FRONTEND >> CREDITS
 
-prerelease_for_tagpr: credits
+prerelease_for_tagpr:
+	$(MAKE) credits
 	git add CHANGELOG.md CREDITS go.mod go.sum
 
 .PHONY: default ci generate test build dev screenshot lint fmt fmt-check depsdev credits prerelease_for_tagpr
