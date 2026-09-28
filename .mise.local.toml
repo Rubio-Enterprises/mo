@@ -49,3 +49,7 @@ run = [
   "pnpm --dir internal/frontend install --frozen-lockfile",
   "pnpm --dir internal/frontend run build",
 ]
+
+[tasks.e2e]
+description = "Build the embedded frontend and Go binary, then run browser E2E tests"
+run = ["make e2e"]

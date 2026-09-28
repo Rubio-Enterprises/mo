@@ -23,7 +23,9 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 2 : undefined,
-  reporter: process.env.CI ? [["dot"], ["list"]] : "list",
+  reporter: process.env.CI
+    ? [["dot"], ["junit", { outputFile: resolve(REPO_ROOT, "reports/e2e/junit.xml") }]]
+    : "list",
 
   globalSetup: "./global-setup.ts",
 
