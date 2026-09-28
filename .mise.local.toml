@@ -7,7 +7,7 @@
 # typecheck gate (typecheck-ts.yml) provisions tools via mise only — its
 # pnpm/action-setup step keys off a ROOT pnpm-lock.yaml, and this repo's
 # lockfile lives in internal/frontend/.
-"npm:pnpm" = "11.9.0"
+"npm:pnpm" = "11.22.0"
 
 # The template's ts-facet tasks delegate to a root package.json this repo
 # does not have (upstream keeps the frontend in internal/frontend/). Each
@@ -23,11 +23,17 @@ run = [
 ]
 
 [tasks.lint-ts]
-description = "frontend oxlint + oxfmt check (linter_floor: oxc, upstream's floor)"
+description = "Frontend Oxlint (changed applicable files in CI; full src/ locally)"
 run = [
   "pnpm --dir internal/frontend install --frozen-lockfile",
-  "pnpm --dir internal/frontend run lint",
-  "pnpm --dir internal/frontend run fmt:check",
+  "bash scripts/check-frontend.sh lint",
+]
+
+[tasks.format]
+description = "Frontend Oxfmt check (changed applicable files in CI; full src/ locally)"
+run = [
+  "pnpm --dir internal/frontend install --frozen-lockfile",
+  "bash scripts/check-frontend.sh format",
 ]
 
 [tasks.test-ts]
