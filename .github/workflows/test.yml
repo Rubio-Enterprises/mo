@@ -66,6 +66,7 @@ jobs:
         uses: k1LoW/gostyle-action@e1b847d37b3041c5fdb8b911bcf00b350779ca61 # v1.5.1
         with:
           config-file: .gostyle.yml
+          version: v0.26.0
 
       - name: Run tests
         run: make ci
