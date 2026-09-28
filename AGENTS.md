@@ -62,6 +62,8 @@ The tiers below are the complete set of ways to build, run, and test mo. Every
 ### Test — end-to-end (Playwright, `e2e/`)
 
 - `make e2e` — build binary, install the browser, run all specs (API + SPA + CLI)
+- `mise run e2e` — repo-owned entrypoint for the shared E2E gate; delegates to
+  `make e2e` and writes `reports/e2e/junit.xml` when `CI=1`.
 - `cd e2e && npm test` — specs only (requires `./mo` already built)
 - `cd e2e && npm run test:headed` · `test:ui` · `report` — require a display; not runnable in a headless container
 
