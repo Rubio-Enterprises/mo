@@ -1,6 +1,6 @@
 module github.com/k1LoW/mo
 
-go 1.26.6
+go 1.27.1
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
