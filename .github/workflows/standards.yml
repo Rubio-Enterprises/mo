@@ -40,7 +40,7 @@ jobs:
     if: >-
       github.event_name == 'schedule' && github.event.schedule == '0 9 * * 1'
       || github.event_name == 'workflow_dispatch'
-    uses: Rubio-Enterprises/.github/.github/workflows/secret-scan.yml@1eacdb6cd157fa224eeadaa710651c27e52d3063 # v4
+    uses: Rubio-Enterprises/.github/.github/workflows/secret-scan.yml@c6265cba051e7ea4f6e23127841ad72147a72431 # v4
     with: { mode: trufflehog }
 
   e2e:
@@ -48,11 +48,11 @@ jobs:
     permissions:
       contents: read
       checks: write
-    uses: Rubio-Enterprises/.github/.github/workflows/e2e.yml@1eacdb6cd157fa224eeadaa710651c27e52d3063 # v4
+    uses: Rubio-Enterprises/.github/.github/workflows/e2e.yml@c6265cba051e7ea4f6e23127841ad72147a72431 # v4
 
   lint-hooks:
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
-    uses: Rubio-Enterprises/.github/.github/workflows/lint-hooks.yml@1eacdb6cd157fa224eeadaa710651c27e52d3063 # v4
+    uses: Rubio-Enterprises/.github/.github/workflows/lint-hooks.yml@c6265cba051e7ea4f6e23127841ad72147a72431 # v4
     # secrets: inherit — the reusable workflow's private-Go-module mint step
     # (consumers setting GO_PRIVATE_MODULE_REPOS) reads the org secrets
     # STANDARDS_READER_APP_ID / STANDARDS_READER_APP_PRIVATE_KEY; a called
@@ -80,5 +80,5 @@ jobs:
     # Rendered wherever `gate_typescript` is (has_typescript and
     # enforce_typecheck), so the seeder exists precisely where the gate does.
     if: github.event_name == 'push'
-    uses: Rubio-Enterprises/.github/.github/workflows/typecheck-ts.yml@1eacdb6cd157fa224eeadaa710651c27e52d3063 # v4
+    uses: Rubio-Enterprises/.github/.github/workflows/typecheck-ts.yml@c6265cba051e7ea4f6e23127841ad72147a72431 # v4
     with: { seed-caches: true }
