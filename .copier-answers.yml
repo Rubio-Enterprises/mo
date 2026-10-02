@@ -1,6 +1,6 @@
 # Changes here will be overwritten by Copier; NEVER edit this file manually.
-_commit: template/v1.55.109
-_rubio_template_version: template/v1.55.109
+_commit: template/v1.55.111
+_rubio_template_version: template/v1.55.111
 _src_path: https://github.com/Rubio-Enterprises/standards.git
 container_registry: ghcr.io/Rubio-Enterprises
 default_branch: main
@@ -9,7 +9,6 @@ enforce_e2e: true
 enforce_lint_format: true
 enforce_lint_hooks: true
 enforce_tests: true
-enforce_tests_reason: ''
 enforce_typecheck: true
 enforcement_tier: experimental
 has_ansible: false
@@ -32,7 +31,6 @@ is_monorepo: true
 is_public: true
 lint_hooks_workload_class: glue
 linter_floor: repo
-node_version: 22.23.1
 project_name: mo
 repo_type: extended_fork
 ts_dom_surface: true
