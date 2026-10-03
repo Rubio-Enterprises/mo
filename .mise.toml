@@ -97,7 +97,7 @@ node = "24.21.0"
 # want Biome alongside ESLint (e.g. super-productivity's `scripts.lint: "biome
 # check ."`). Consumers who don't want Biome can delete biome.jsonc; `_skip_if_exists`
 # keeps it from coming back on `copier update`.
-"npm:@biomejs/biome"       = "2.5.12"
+"npm:@biomejs/biome"       = "2.5.14"
 # golangci-lint + gotestsum back the [tasks.lint] and [tasks.test] invocations
 # below AND the lefthook `gofmt`/`golangci-lint` pre-commit hooks. The hooks
 # use `mise exec --` so they resolve via the mise-managed PATH, but the tasks
