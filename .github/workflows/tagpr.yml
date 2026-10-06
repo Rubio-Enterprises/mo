@@ -47,7 +47,7 @@ jobs:
     # published assets — not this checkout — are the source of truth, and `main`
     # may legitimately have moved on to the next version by then.
     if: github.event_name == 'push'
-    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').light || fromJSON('["ubuntu-latest"]') }}
     steps:
       - name: Check out source code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,7 +67,7 @@ jobs:
   build:
     needs: verify
     if: github.event_name == 'push'
-    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').light || fromJSON('["ubuntu-latest"]') }}
     strategy:
       matrix:
         include:
@@ -129,7 +129,7 @@ jobs:
   release:
     needs: build
     if: github.event_name == 'push'
-    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').light || fromJSON('["ubuntu-latest"]') }}
     permissions:
       contents: write
     steps:
@@ -171,7 +171,7 @@ jobs:
     # After a successful release on a tag push, and on a dispatch re-drive where
     # verify/build/release are all skipped.
     if: ${{ !cancelled() && (needs.release.result == 'success' || needs.release.result == 'skipped') }}
-    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').light || fromJSON('["ubuntu-latest"]') }}
     permissions:
       contents: read
     steps:
