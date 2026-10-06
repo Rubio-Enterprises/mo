@@ -7,7 +7,7 @@ permissions:
 jobs:
   lint-format:
     name: lint-format
-    runs-on: ${{ fromJSON(vars.RUNNER_GLUE || '["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').light || fromJSON('["ubuntu-latest"]') }}
     env:
       RUBIO_CHANGED_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
     steps:
