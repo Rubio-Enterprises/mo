@@ -1,0 +1,9 @@
+# Upstream formats only the nested frontend's src/, never its config files.
+[formatter.repo-oxfmt]
+command = "mise"
+options = ["exec", "--", "pnpm", "--dir", "internal/frontend", "exec", "sh", "-c", 'cd ../..; exec oxfmt -c internal/frontend/.oxfmtrc.json --write "$@"', "--"]
+includes = ["internal/frontend/src/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts,css,scss,json,md,mdx,html,yaml,yml}"]
+
+# Oxfmt owns JSON inside src/; Biome owns JSON everywhere else.
+[formatter.biome]
+excludes = ["internal/frontend/src/*.json"]
