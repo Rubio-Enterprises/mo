@@ -1,21 +1,9 @@
-# Phase 1 has no standard treefmt command yet. Run only our declared JS/TS
-# Fixer here; remove this bridge after the real standard dispatcher ships.
+# Fixers dispatch through the standard treefmt hook; forks never stage rewrites.
 pre-commit:
   parallel: false
   commands:
-    repo-js-fixers:
-      glob: "internal/frontend/src/*"
-      run: mise exec -- treefmt --no-cache --formatters repo-oxfmt {staged_files}
-      stage_fixed: false
+    treefmt: { stage_fixed: false }
     repo-oxlint:
       glob: "internal/frontend/src/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"
       root: internal/frontend/
       run: mise exec -- pnpm exec oxlint -c .oxlintrc.json --disable-nested-config {staged_files}
-    gofmt:
-      stage_fixed: false
-    golangci-lint:
-      stage_fixed: false
-    yaml-prettier:
-      stage_fixed: false
-    shfmt:
-      stage_fixed: false
