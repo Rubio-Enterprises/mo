@@ -27,6 +27,7 @@ jobs:
   go-tests:
     name: go tests
     runs-on: ${{ fromJSON(vars.RUNNERS || '{}').light || fromJSON('["ubuntu-latest"]') }}
+    timeout-minutes: 15
     outputs:
       tests_ran: ${{ steps.test.outputs.tests_ran }}
     steps:
@@ -54,6 +55,7 @@ jobs:
   ts-tests:
     name: frontend tests (vitest)
     runs-on: ${{ fromJSON(vars.RUNNERS || '{}').light || fromJSON('["ubuntu-latest"]') }}
+    timeout-minutes: 15
     outputs:
       tests_ran: ${{ steps.test.outputs.tests_ran }}
     steps:
@@ -93,6 +95,7 @@ jobs:
     if: ${{ always() }}
     needs: [go-tests, ts-tests]
     runs-on: ${{ fromJSON(vars.RUNNERS || '{}').light || fromJSON('["ubuntu-latest"]') }}
+    timeout-minutes: 15
     env:
       NEEDS_JSON: ${{ toJSON(needs) }}
     steps:
