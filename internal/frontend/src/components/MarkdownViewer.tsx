@@ -912,7 +912,7 @@ export function MarkdownViewer({
           ref={articleRef}
           className={`markdown-body relative overflow-visible${isWide ? " markdown-body--wide" : ""}${fontSize !== "medium" ? ` markdown-body--${fontSize}` : ""}`}
         >
-          <div className="pointer-events-none absolute inset-0 z-10 overflow-visible">
+          <div className="pointer-events-none absolute inset-0 z-10 overflow-visible [overflow-anchor:none]">
             {searchHitMarkers.map((marker, index) => (
               <div
                 key={`${marker.top}:${marker.height}:${index}`}
