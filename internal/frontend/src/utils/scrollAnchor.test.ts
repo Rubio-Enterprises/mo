@@ -206,6 +206,47 @@ describe("visibleTop", () => {
     expect(visibleTop(sc)).toEqual({ el: visible, offset: 50 });
   });
 
+  it("descends into a block that starts above the view", () => {
+    const { sc, article } = scroller();
+    const list = block(article, -500, 900);
+    block(list, -500, -100);
+    const visible = block(list, -100, 300);
+
+    expect(visibleTop(sc)).toEqual({ el: visible, offset: -200 });
+  });
+
+  it("keeps the visible item in place when an earlier item in the same list grows", () => {
+    const sc = document.createElement("div");
+    const article = document.createElement("article");
+    const list = document.createElement("ul");
+    const earlier = document.createElement("li");
+    const visible = document.createElement("li");
+    list.append(earlier, visible);
+    article.appendChild(list);
+    sc.appendChild(article);
+    document.body.appendChild(sc);
+    // Positions within the content, so their place on screen follows scrollTop.
+    // The earlier item ends above the view; the visible one straddles its top.
+    const layout = { split: 1200 };
+    sc.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+    list.getBoundingClientRect = () =>
+      ({ top: 1000 - sc.scrollTop, bottom: layout.split + 600 - sc.scrollTop }) as DOMRect;
+    earlier.getBoundingClientRect = () =>
+      ({ top: 1000 - sc.scrollTop, bottom: layout.split - sc.scrollTop }) as DOMRect;
+    visible.getBoundingClientRect = () =>
+      ({ top: layout.split - sc.scrollTop, bottom: layout.split + 600 - sc.scrollTop }) as DOMRect;
+    sc.scrollTop = 1300;
+
+    const top = visibleTop(sc)!;
+    expect(top.el).toBe(visible);
+    anchorScroll(sc, top.el, top.offset);
+    // An image in the earlier item finishes loading.
+    layout.split += 190;
+    resize();
+
+    expect(visible.getBoundingClientRect().top).toBe(-100);
+  });
+
   it("returns null without an article", () => {
     const sc = document.createElement("div");
     document.body.appendChild(sc);

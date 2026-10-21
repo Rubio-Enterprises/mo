@@ -66,18 +66,28 @@ export function anchorScroll(sc: HTMLElement, el: HTMLElement, offset = 0): () =
   return release;
 }
 
-// The first block of the article that reaches into view, which is what native
-// scroll anchoring would hold. Absolutely positioned children (the search hit
-// overlay) do not move with the content, so they are skipped.
+function firstVisible(parent: Element, scTop: number): HTMLElement | null {
+  for (const child of parent.children) {
+    if (!(child instanceof HTMLElement)) continue;
+    if (getComputedStyle(child).position === "absolute") continue;
+    const rect = child.getBoundingClientRect();
+    if (rect.bottom <= scTop) continue;
+    // A block that starts above the view keeps its top when something inside it
+    // above the visible part grows, so the visible part is found further down.
+    if (rect.top < scTop) return firstVisible(child, scTop) ?? child;
+    return child;
+  }
+  return null;
+}
+
+// The first element of the article in view, descending into blocks that start
+// above it, which is what native scroll anchoring would hold. Absolutely
+// positioned elements (the search hit overlay) do not move with the content, so
+// they are skipped.
 export function visibleTop(sc: HTMLElement): { el: HTMLElement; offset: number } | null {
   const article = sc.querySelector("article");
   if (!article) return null;
   const scTop = sc.getBoundingClientRect().top;
-  for (const child of article.children) {
-    if (!(child instanceof HTMLElement)) continue;
-    if (getComputedStyle(child).position === "absolute") continue;
-    const rect = child.getBoundingClientRect();
-    if (rect.bottom > scTop) return { el: child, offset: rect.top - scTop };
-  }
-  return null;
+  const el = firstVisible(article, scTop);
+  return el ? { el, offset: el.getBoundingClientRect().top - scTop } : null;
 }
