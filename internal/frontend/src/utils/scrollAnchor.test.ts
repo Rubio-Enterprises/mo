@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { anchorScroll } from "./scrollAnchor";
+import { anchorScroll, visibleTop } from "./scrollAnchor";
 
 let resizeCallbacks: Array<() => void> = [];
 
@@ -17,7 +17,7 @@ class FakeResizeObserver {
 }
 
 function resize() {
-  for (const cb of [...resizeCallbacks]) cb();
+  for (const cb of resizeCallbacks) cb();
 }
 
 // A scroller whose heading sits `headingTop` pixels into the content, so its
@@ -33,16 +33,30 @@ function setup(initialHeadingTop: number) {
   sc.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
   heading.getBoundingClientRect = () => ({ top: layout.headingTop - sc.scrollTop }) as DOMRect;
   const offset = () => heading.getBoundingClientRect().top - sc.getBoundingClientRect().top;
+  // jsdom has no layout, so the end of the document is modelled as a cap.
+  let maxScroll = Infinity;
+  let scrollTop = 0;
+  Object.defineProperty(sc, "scrollTop", {
+    get: () => scrollTop,
+    set: (v: number) => {
+      scrollTop = Math.min(v, maxScroll);
+    },
+  });
+  const limitScroll = (max: number) => {
+    maxScroll = max;
+  };
   const scrollBy = (delta: number) => {
     sc.scrollTop += delta;
     sc.dispatchEvent(new Event("scroll"));
   };
-  return { sc, heading, layout, offset, scrollBy };
+  return { sc, heading, layout, offset, scrollBy, limitScroll };
 }
 
 beforeEach(() => {
   resizeCallbacks = [];
   vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+  // WebKit, which has no scroll anchoring, unless a test says otherwise.
+  vi.stubGlobal("CSS", { supports: () => false });
 });
 
 afterEach(() => {
@@ -94,17 +108,18 @@ describe("anchorScroll", () => {
     expect(offset()).toBe(310);
   });
 
-  it("keeps holding after native scroll anchoring moved the container", () => {
-    const { sc, heading, layout, offset, scrollBy } = setup(500);
-    anchorScroll(sc, heading);
+  it("only places the element where the browser anchors scrolling itself", () => {
+    vi.stubGlobal("CSS", { supports: () => true });
+    const { sc, heading, layout, offset } = setup(500);
 
-    // The browser compensates a growth of 190 above the element on its own.
+    anchorScroll(sc, heading);
+    expect(offset()).toBe(0);
+
     layout.headingTop += 190;
-    scrollBy(190);
-    layout.headingTop += 100;
     resize();
 
-    expect(offset()).toBe(0);
+    expect(resizeCallbacks).toHaveLength(0);
+    expect(offset()).toBe(190);
   });
 
   it("releases the previous element when a new one is anchored", () => {
@@ -131,6 +146,20 @@ describe("anchorScroll", () => {
     expect(sc.scrollTop).toBe(500);
   });
 
+  it("holds a clamped landing where it ended up rather than chasing the offset", () => {
+    const { sc, heading, offset, limitScroll } = setup(800);
+    // The document end stops the scroll 300px short of the requested position.
+    limitScroll(500);
+    anchorScroll(sc, heading);
+    expect(offset()).toBe(300);
+
+    // Content below the heading grows, which lifts the limit without moving it.
+    limitScroll(Infinity);
+    resize();
+
+    expect(offset()).toBe(300);
+  });
+
   it("stops holding when released by its caller", () => {
     const { sc, heading, layout, offset } = setup(500);
     const release = anchorScroll(sc, heading);
@@ -140,5 +169,47 @@ describe("anchorScroll", () => {
     resize();
 
     expect(offset()).toBe(190);
+  });
+});
+
+describe("visibleTop", () => {
+  function block(article: HTMLElement, top: number, bottom: number, absolute = false) {
+    const el = document.createElement("div");
+    if (absolute) el.style.position = "absolute";
+    el.getBoundingClientRect = () => ({ top, bottom }) as DOMRect;
+    article.appendChild(el);
+    return el;
+  }
+
+  function scroller() {
+    const sc = document.createElement("div");
+    const article = document.createElement("article");
+    sc.appendChild(article);
+    document.body.appendChild(sc);
+    sc.getBoundingClientRect = () => ({ top: 100 }) as DOMRect;
+    return { sc, article };
+  }
+
+  it("returns the first block that reaches into view with its offset", () => {
+    const { sc, article } = scroller();
+    block(article, -400, 40);
+    const visible = block(article, 40, 300);
+
+    expect(visibleTop(sc)).toEqual({ el: visible, offset: -60 });
+  });
+
+  it("skips absolutely positioned overlays", () => {
+    const { sc, article } = scroller();
+    block(article, -2000, 3000, true);
+    const visible = block(article, 150, 300);
+
+    expect(visibleTop(sc)).toEqual({ el: visible, offset: 50 });
+  });
+
+  it("returns null without an article", () => {
+    const sc = document.createElement("div");
+    document.body.appendChild(sc);
+
+    expect(visibleTop(sc)).toBeNull();
   });
 });

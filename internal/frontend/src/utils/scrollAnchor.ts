@@ -3,10 +3,19 @@
 // replace an older one rather than fight it.
 let releaseActive: (() => void) | null = null;
 
-// Places `el` at `offset` from the top of `sc` and keeps it there while content
-// above it changes height (Mermaid, images, KaTeX rendering late), until the
-// reader scrolls. Browsers with scroll anchoring already do this natively;
-// WebKit has none, so without this a late render pushes the heading away.
+function supportsNativeAnchoring(): boolean {
+  return (
+    typeof CSS !== "undefined" &&
+    typeof CSS.supports === "function" &&
+    CSS.supports("overflow-anchor", "auto")
+  );
+}
+
+// Places `el` at `offset` from the top of `sc`. Where the browser has no scroll
+// anchoring (WebKit), it also keeps the element there while content above it
+// changes height (Mermaid, images, KaTeX rendering late) until the reader
+// scrolls. Elsewhere the browser does that itself, and holding the element from
+// script as well would fight it whenever it anchors on a different node.
 export function anchorScroll(sc: HTMLElement, el: HTMLElement, offset = 0): () => void {
   releaseActive?.();
 
@@ -18,6 +27,13 @@ export function anchorScroll(sc: HTMLElement, el: HTMLElement, offset = 0): () =
     sc.scrollTop += delta;
     lastWritten = sc.scrollTop;
   };
+
+  apply();
+  if (supportsNativeAnchoring()) return () => {};
+  // Hold where the element actually landed. Near the end of the document the
+  // scroll position is clamped short of `offset`, and chasing it later would
+  // move the element when only content below it grows.
+  offset = position();
 
   const content = el.closest("article") ?? sc.firstElementChild;
   const observer =
@@ -35,17 +51,7 @@ export function anchorScroll(sc: HTMLElement, el: HTMLElement, offset = 0): () =
   // touch, keys, scrollbar drag, find in page), so it decides when the reader
   // has taken over, rather than a list of input events.
   const onScroll = () => {
-    if (!el.isConnected) {
-      release();
-      return;
-    }
-    if (sc.scrollTop === lastWritten) return;
-    // Native scroll anchoring moved the container and kept the element in place.
-    if (Math.abs(position() - offset) < 1) {
-      lastWritten = sc.scrollTop;
-      return;
-    }
-    release();
+    if (!el.isConnected || sc.scrollTop !== lastWritten) release();
   };
 
   function release() {
@@ -54,9 +60,24 @@ export function anchorScroll(sc: HTMLElement, el: HTMLElement, offset = 0): () =
     if (releaseActive === release) releaseActive = null;
   }
 
-  apply();
   if (content) observer?.observe(content);
   sc.addEventListener("scroll", onScroll, { passive: true });
   releaseActive = release;
   return release;
+}
+
+// The first block of the article that reaches into view, which is what native
+// scroll anchoring would hold. Absolutely positioned children (the search hit
+// overlay) do not move with the content, so they are skipped.
+export function visibleTop(sc: HTMLElement): { el: HTMLElement; offset: number } | null {
+  const article = sc.querySelector("article");
+  if (!article) return null;
+  const scTop = sc.getBoundingClientRect().top;
+  for (const child of article.children) {
+    if (!(child instanceof HTMLElement)) continue;
+    if (getComputedStyle(child).position === "absolute") continue;
+    const rect = child.getBoundingClientRect();
+    if (rect.bottom > scTop) return { el: child, offset: rect.top - scTop };
+  }
+  return null;
 }

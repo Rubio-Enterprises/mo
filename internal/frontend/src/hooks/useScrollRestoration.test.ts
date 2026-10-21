@@ -50,6 +50,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   document.body.innerHTML = "";
   sessionStorage.clear();
   window.history.replaceState(null, "", "/");
@@ -98,6 +99,59 @@ describe("useScrollRestoration", () => {
 
       // scrollTop should be adjusted: 0 + (150 - 120) = 30
       expect(container.scrollTop).toBe(30);
+    });
+
+    it("holds the block on screen rather than the saved heading above it", () => {
+      // WebKit: no native scroll anchoring, so the restore holds the position itself.
+      vi.stubGlobal("CSS", { supports: () => false });
+      let resize: (() => void) | null = null;
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(cb: () => void) {
+            resize = cb;
+          }
+          observe() {}
+          disconnect() {}
+        },
+      );
+      const sc = document.createElement("div");
+      const article = document.createElement("article");
+      sc.appendChild(article);
+      document.body.appendChild(sc);
+      sc.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+      // Positions within the content, so their place on screen follows scrollTop.
+      const layout = { heading: 1000, block: 1400 };
+      const heading = document.createElement("h2");
+      heading.id = "section-3";
+      heading.getBoundingClientRect = () =>
+        ({
+          top: layout.heading - sc.scrollTop,
+          bottom: layout.heading + 30 - sc.scrollTop,
+        }) as DOMRect;
+      const block = document.createElement("p");
+      block.getBoundingClientRect = () =>
+        ({
+          top: layout.block - sc.scrollTop,
+          bottom: layout.block + 400 - sc.scrollTop,
+        }) as DOMRect;
+      article.append(heading, block);
+      // The reader is deep in the section: its heading is 300px above the viewport.
+      sc.scrollTop = 1300;
+
+      const { result } = renderHook(() => useScrollRestoration(sc, "section-3", "abc"));
+      act(() => {
+        result.current.captureScrollPosition();
+      });
+      act(() => {
+        result.current.onContentRendered();
+      });
+
+      // An image between the heading and the visible block finishes loading.
+      layout.block += 190;
+      resize!();
+
+      expect(block.getBoundingClientRect().top).toBe(100);
     });
   });
 
