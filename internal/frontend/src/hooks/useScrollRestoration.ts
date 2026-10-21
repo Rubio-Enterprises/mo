@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { headingIdFromHash } from "../utils/jumpToHeading";
+import { anchorScroll, visibleTop } from "../utils/scrollAnchor";
 
 export const SCROLL_SESSION_KEY = "mo-scroll-context";
 
@@ -78,17 +79,18 @@ export function useScrollRestoration(
     const sc = latestRef.current.scrollContainer;
     if (!sc) return;
 
-    if (ctx.headingId) {
-      const headingEl = document.getElementById(ctx.headingId);
-      if (headingEl) {
-        const currentOffset =
-          headingEl.getBoundingClientRect().top - sc.getBoundingClientRect().top;
-        sc.scrollTop += currentOffset - ctx.relativeOffset;
-        return;
-      }
+    const headingEl = ctx.headingId ? document.getElementById(ctx.headingId) : null;
+    if (headingEl) {
+      sc.scrollTop +=
+        headingEl.getBoundingClientRect().top - sc.getBoundingClientRect().top - ctx.relativeOffset;
+    } else {
+      sc.scrollTop = ctx.rawScrollTop;
     }
 
-    sc.scrollTop = ctx.rawScrollTop;
+    // The saved heading is only the one the reader was in, and it is often above
+    // the viewport. Hold what is actually on screen instead.
+    const top = visibleTop(sc);
+    if (top) anchorScroll(sc, top.el, top.offset);
   }, []);
 
   const onContentRendered = useCallback(() => {
@@ -140,7 +142,7 @@ export function useScrollRestoration(
       const sc = latestRef.current.scrollContainer;
       const headingEl = document.getElementById(initialHash);
       if (sc && headingEl) {
-        sc.scrollTop += headingEl.getBoundingClientRect().top - sc.getBoundingClientRect().top;
+        anchorScroll(sc, headingEl);
       }
     }
   }, [restoreFromContext, initialHash]);
