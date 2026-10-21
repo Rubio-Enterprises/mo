@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MarkdownViewer } from "./MarkdownViewer";
 import { fetchFileContent, openRelativeFile } from "../hooks/useApi";
+import katexCss from "katex/dist/katex.min.css?raw";
 
 vi.mock("mermaid", () => ({
   default: {
@@ -142,6 +143,23 @@ describe("MarkdownViewer images", () => {
       "src",
       "/_/api/groups/default/files/aaa11111/raw/images/diagram.png",
     );
+  });
+});
+
+describe("MarkdownViewer math", () => {
+  it("renders \\ne with the overlay class the bundled KaTeX stylesheet positions", async () => {
+    vi.mocked(fetchFileContent).mockResolvedValue({
+      content: "$a \\ne b$",
+      baseDir: "/repo",
+    });
+    const { container } = renderViewer();
+    await waitFor(() => expect(container.querySelector(".katex .rlap")).not.toBeNull());
+    const childClasses = Array.from(container.querySelectorAll(".katex .rlap > *")).map(
+      (el) => el.classList[0],
+    );
+    expect(
+      childClasses.some((c) => katexCss.includes(`.katex .rlap>.${c}{position:absolute}`)),
+    ).toBe(true);
   });
 });
 
