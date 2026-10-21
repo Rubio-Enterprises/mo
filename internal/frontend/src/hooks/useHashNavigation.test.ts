@@ -16,10 +16,25 @@ function makeContainer() {
   return el;
 }
 
-// Browsers fire hashchange after a traversal has already updated the URL.
+// Browsers fire popstate and then hashchange after a traversal has already
+// updated the URL.
 function traverseTo(url: string) {
   window.history.replaceState(null, "", url);
+  window.dispatchEvent(new PopStateEvent("popstate"));
   window.dispatchEvent(new HashChangeEvent("hashchange"));
+}
+
+function placeAt(el: HTMLElement, top: number) {
+  el.getBoundingClientRect = () => ({ top }) as DOMRect;
+}
+
+// Mounts the hook as App does and reports the file's first content render.
+function renderForFile(container: HTMLElement, fileId: string) {
+  const hook = renderHook(({ id }) => useHashNavigation(container, "default", id), {
+    initialProps: { id: fileId },
+  });
+  hook.result.current.onContentRendered();
+  return hook;
 }
 
 beforeEach(() => {
@@ -34,7 +49,7 @@ afterEach(() => {
 describe("useHashNavigation", () => {
   it("scrolls to the heading named by the new hash", () => {
     const heading = addHeading("usage");
-    renderHook(() => useHashNavigation(makeContainer(), "default", "file1"));
+    renderForFile(makeContainer(), "file1");
 
     traverseTo("/?file=file1#usage");
 
@@ -43,7 +58,7 @@ describe("useHashNavigation", () => {
 
   it("decodes a percent-encoded hash before looking up the heading", () => {
     const heading = addHeading("使い方");
-    renderHook(() => useHashNavigation(makeContainer(), "default", "file1"));
+    renderForFile(makeContainer(), "file1");
 
     traverseTo(`/?file=file1#${encodeURIComponent("使い方")}`);
 
@@ -52,7 +67,7 @@ describe("useHashNavigation", () => {
 
   it("scrolls the container to the top when the hash is removed", () => {
     const container = makeContainer();
-    renderHook(() => useHashNavigation(container, "default", "file1"));
+    renderForFile(container, "file1");
 
     traverseTo("/?file=file1");
 
@@ -62,7 +77,7 @@ describe("useHashNavigation", () => {
   it("ignores a hash change that belongs to another file", () => {
     const heading = addHeading("usage");
     const container = makeContainer();
-    renderHook(() => useHashNavigation(container, "default", "file1"));
+    renderForFile(container, "file1");
 
     traverseTo("/?file=file2#usage");
 
@@ -70,22 +85,156 @@ describe("useHashNavigation", () => {
     expect(container.scrollTo).not.toHaveBeenCalled();
   });
 
-  it("ignores a hash change that belongs to another group", () => {
+  it("follows the hash into another group that shows the same file", () => {
     const heading = addHeading("usage");
-    renderHook(() => useHashNavigation(makeContainer(), "default", "file1"));
+    renderForFile(makeContainer(), "file1");
 
     traverseTo("/design?file=file1#usage");
 
-    expect(heading.scrollIntoView).not.toHaveBeenCalled();
+    expect(heading.scrollIntoView).toHaveBeenCalled();
   });
 
   it("stops listening after unmount", () => {
     const heading = addHeading("usage");
-    const { unmount } = renderHook(() => useHashNavigation(makeContainer(), "default", "file1"));
+    const { unmount } = renderForFile(makeContainer(), "file1");
     unmount();
 
     traverseTo("/?file=file1#usage");
 
     expect(heading.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("lands on the heading after a traversal to another file once it renders", () => {
+    const container = makeContainer();
+    placeAt(container, 50);
+    const { result, rerender } = renderForFile(container, "file1");
+
+    traverseTo("/?file=file2#usage");
+    rerender({ id: "file2" });
+    placeAt(addHeading("usage"), 350);
+    result.current.onContentRendered();
+
+    expect(container.scrollTop).toBe(300);
+  });
+
+  it("lands on the heading when the file switch re-rendered before the popstate listener ran", () => {
+    const container = makeContainer();
+    placeAt(container, 50);
+    const { result, rerender } = renderForFile(container, "file1");
+
+    window.history.replaceState(null, "", "/?file=file2#usage");
+    rerender({ id: "file2" });
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    placeAt(addHeading("usage"), 350);
+    result.current.onContentRendered();
+
+    expect(container.scrollTop).toBe(300);
+  });
+
+  it("does not apply the heading to the file being left", () => {
+    const container = makeContainer();
+    placeAt(container, 0);
+    const { result } = renderForFile(container, "file1");
+
+    traverseTo("/?file=file2#usage");
+    placeAt(addHeading("usage"), 300);
+    result.current.onContentRendered();
+
+    expect(container.scrollTop).toBe(0);
+  });
+
+  it("applies the heading only on the first render of the target file", () => {
+    const container = makeContainer();
+    placeAt(container, 0);
+    const heading = addHeading("usage");
+    const { result, rerender } = renderForFile(container, "file1");
+
+    traverseTo("/?file=file2#usage");
+    rerender({ id: "file2" });
+    placeAt(heading, 300);
+    result.current.onContentRendered();
+    placeAt(heading, 100);
+    result.current.onContentRendered();
+
+    expect(container.scrollTop).toBe(300);
+  });
+
+  it("leaves a file reached without a hash at its own starting position", () => {
+    const container = makeContainer();
+    placeAt(container, 0);
+    placeAt(addHeading("usage"), 300);
+    const { result, rerender } = renderForFile(container, "file1");
+
+    traverseTo("/?file=file2");
+    rerender({ id: "file2" });
+    result.current.onContentRendered();
+
+    expect(container.scrollTop).toBe(0);
+  });
+
+  it("drops the pending heading when a later traversal stays on the active file", () => {
+    const container = makeContainer();
+    placeAt(container, 0);
+    placeAt(addHeading("usage"), 300);
+    const { result, rerender } = renderForFile(container, "file1");
+
+    traverseTo("/?file=file2#usage");
+    traverseTo("/?file=file1#intro");
+    rerender({ id: "file2" });
+    result.current.onContentRendered();
+
+    expect(container.scrollTop).toBe(0);
+  });
+
+  it("lands on the heading after returning to a file whose content was replaced by a loading view", () => {
+    const container = makeContainer();
+    placeAt(container, 0);
+    const heading = addHeading("usage");
+    const { result, rerender } = renderForFile(container, "file1");
+
+    // Selecting file2 unmounts file1's headings before file2 has rendered.
+    window.history.pushState(null, "", "/?file=file2");
+    rerender({ id: "file2" });
+    heading.remove();
+    traverseTo("/?file=file1#usage");
+    rerender({ id: "file1" });
+    placeAt(addHeading("usage"), 300);
+    result.current.onContentRendered();
+
+    expect(container.scrollTop).toBe(300);
+  });
+
+  it("drops the pending heading when sidebar navigation leaves the traversal", () => {
+    const container = makeContainer();
+    placeAt(container, 0);
+    const { result, rerender } = renderForFile(container, "file1");
+
+    traverseTo("/?file=file2#usage");
+    window.history.pushState(null, "", "/?file=file3");
+    rerender({ id: "file3" });
+    result.current.onContentRendered();
+    window.history.pushState(null, "", "/?file=file2");
+    rerender({ id: "file2" });
+    placeAt(addHeading("usage"), 300);
+    result.current.onContentRendered();
+
+    expect(container.scrollTop).toBe(0);
+  });
+
+  it("follows hash changes after a group switch that kept the file and did not render again", () => {
+    const heading = addHeading("usage");
+    const container = makeContainer();
+    const { result, rerender } = renderHook(
+      ({ group }) => useHashNavigation(container, group, "file1"),
+      { initialProps: { group: "default" } },
+    );
+    result.current.onContentRendered();
+
+    window.history.pushState(null, "", "/design?file=file1#intro");
+    rerender({ group: "design" });
+    traverseTo("/design?file=file1#usage");
+
+    expect(heading.scrollIntoView).toHaveBeenCalled();
   });
 });
