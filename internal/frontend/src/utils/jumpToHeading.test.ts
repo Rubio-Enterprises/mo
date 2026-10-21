@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { jumpToHeading } from "./jumpToHeading";
+import { headingIdFromHash, jumpToHeading } from "./jumpToHeading";
 
 beforeEach(() => {
   document.body.innerHTML = "";
@@ -31,5 +31,20 @@ describe("jumpToHeading", () => {
 
     expect(result).toBe(false);
     expect(window.location.hash).toBe("");
+  });
+});
+
+describe("headingIdFromHash", () => {
+  it("strips the leading # and decodes the id", () => {
+    expect(headingIdFromHash(`#${encodeURIComponent("使い方")}`)).toBe("使い方");
+  });
+
+  it("returns null for an empty hash", () => {
+    expect(headingIdFromHash("")).toBeNull();
+    expect(headingIdFromHash("#")).toBeNull();
+  });
+
+  it("returns the raw id when it is not valid percent-encoding", () => {
+    expect(headingIdFromHash("#100%")).toBe("100%");
   });
 });
