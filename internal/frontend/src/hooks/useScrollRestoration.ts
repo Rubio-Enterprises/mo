@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { headingIdFromHash } from "../utils/jumpToHeading";
+import { anchorScroll } from "../utils/scrollAnchor";
 
 export const SCROLL_SESSION_KEY = "mo-scroll-context";
 
@@ -81,9 +82,7 @@ export function useScrollRestoration(
     if (ctx.headingId) {
       const headingEl = document.getElementById(ctx.headingId);
       if (headingEl) {
-        const currentOffset =
-          headingEl.getBoundingClientRect().top - sc.getBoundingClientRect().top;
-        sc.scrollTop += currentOffset - ctx.relativeOffset;
+        anchorScroll(sc, headingEl, ctx.relativeOffset);
         return;
       }
     }
@@ -140,7 +139,7 @@ export function useScrollRestoration(
       const sc = latestRef.current.scrollContainer;
       const headingEl = document.getElementById(initialHash);
       if (sc && headingEl) {
-        sc.scrollTop += headingEl.getBoundingClientRect().top - sc.getBoundingClientRect().top;
+        anchorScroll(sc, headingEl);
       }
     }
   }, [restoreFromContext, initialHash]);

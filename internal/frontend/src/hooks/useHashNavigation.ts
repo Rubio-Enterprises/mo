@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { headingIdFromHash, scrollToHeading } from "../utils/jumpToHeading";
+import { anchorScroll } from "../utils/scrollAnchor";
 import { parseFileIdFromSearch, parseGroupFromPath } from "../utils/groups";
 
 interface PendingHeading {
@@ -94,7 +95,7 @@ export function useHashNavigation(
     if (sc && headingEl) {
       // Jump rather than scrollIntoView so a smooth scroll does not animate from
       // the top of a document the reader never saw at that position.
-      sc.scrollTop += headingEl.getBoundingClientRect().top - sc.getBoundingClientRect().top;
+      anchorScroll(sc, headingEl);
     }
   }, []);
 
