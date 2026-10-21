@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FileEntry, Group } from "../hooks/useApi";
 import { shouldDropUp } from "../utils/menuPlacement";
 import { RemoveIcon } from "./RemoveIcon";
@@ -32,6 +32,20 @@ export function FileContextMenu({
   menuRef,
 }: FileContextMenuProps) {
   const [dropUp, setDropUp] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  // Focus goes back to the toggle because the focused menu item unmounts with the
+  // menu, which would drop a keyboard user to <body>.
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      onToggle(file.id);
+      buttonRef.current?.focus();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onToggle, file.id]);
 
   // Measured only on open, while the menu is still at its default `top-full`
   // position: re-running this after `dropUp` flips would make it oscillate.
@@ -57,6 +71,7 @@ export function FileContextMenu({
   return (
     <>
       <button
+        ref={buttonRef}
         className={`absolute right-1 top-1/2 -translate-y-1/2 ${isOpen ? "opacity-100" : "opacity-0"} group-hover/file:opacity-100 focus-visible:opacity-100 flex items-center justify-center bg-transparent border-none cursor-pointer text-gh-text-secondary hover:text-gh-text rounded p-0.5 transition-opacity duration-150`}
         onClick={(e) => {
           e.stopPropagation();
