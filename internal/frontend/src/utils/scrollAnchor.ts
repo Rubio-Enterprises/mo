@@ -77,15 +77,17 @@ export function anchorScroll(sc: HTMLElement, el: HTMLElement, offset = 0): () =
   return release;
 }
 
-function firstVisible(parent: Element, scTop: number): HTMLElement | null {
+function firstVisible(parent: Element, scTop: number, scBottom: number): HTMLElement | null {
   for (const child of parent.children) {
     if (!(child instanceof HTMLElement)) continue;
     if (getComputedStyle(child).position === "absolute") continue;
     const rect = child.getBoundingClientRect();
     if (rect.bottom <= scTop) continue;
+    // Content comes in document order, so nothing after this is in view either.
+    if (rect.top >= scBottom) return null;
     // A block that starts above the view keeps its top when something inside it
     // above the visible part grows, so the visible part is found further down.
-    if (rect.top < scTop) return firstVisible(child, scTop) ?? child;
+    if (rect.top < scTop) return firstVisible(child, scTop, scBottom) ?? child;
     return child;
   }
   return null;
@@ -98,7 +100,7 @@ function firstVisible(parent: Element, scTop: number): HTMLElement | null {
 export function visibleTop(sc: HTMLElement): { el: HTMLElement; offset: number } | null {
   const article = sc.querySelector("article");
   if (!article) return null;
-  const scTop = sc.getBoundingClientRect().top;
-  const el = firstVisible(article, scTop);
+  const { top: scTop, bottom: scBottom } = sc.getBoundingClientRect();
+  const el = firstVisible(article, scTop, scBottom);
   return el ? { el, offset: el.getBoundingClientRect().top - scTop } : null;
 }

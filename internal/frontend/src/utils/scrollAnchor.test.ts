@@ -203,7 +203,7 @@ describe("visibleTop", () => {
     const article = document.createElement("article");
     sc.appendChild(article);
     document.body.appendChild(sc);
-    sc.getBoundingClientRect = () => ({ top: 100 }) as DOMRect;
+    sc.getBoundingClientRect = () => ({ top: 100, bottom: 700 }) as DOMRect;
     return { sc, article };
   }
 
@@ -262,6 +262,15 @@ describe("visibleTop", () => {
     resize();
 
     expect(visible.getBoundingClientRect().top).toBe(-100);
+  });
+
+  it("keeps a straddling block when nothing inside it is in view", () => {
+    const { sc, article } = scroller();
+    const paragraph = block(article, -200, 2000);
+    // An inline link further down the same paragraph, below the view.
+    block(paragraph, 900, 920);
+
+    expect(visibleTop(sc)).toEqual({ el: paragraph, offset: -300 });
   });
 
   it("returns null without an article", () => {
