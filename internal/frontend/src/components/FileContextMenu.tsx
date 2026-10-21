@@ -57,12 +57,14 @@ export function FileContextMenu({
   return (
     <>
       <button
-        className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/file:opacity-100 focus-visible:opacity-100 flex items-center justify-center bg-transparent border-none cursor-pointer text-gh-text-secondary hover:text-gh-text rounded p-0.5 transition-opacity duration-150"
+        className={`absolute right-1 top-1/2 -translate-y-1/2 ${isOpen ? "opacity-100" : "opacity-0"} group-hover/file:opacity-100 focus-visible:opacity-100 flex items-center justify-center bg-transparent border-none cursor-pointer text-gh-text-secondary hover:text-gh-text rounded p-0.5 transition-opacity duration-150`}
         onClick={(e) => {
           e.stopPropagation();
           onToggle(file.id);
         }}
         title="More actions"
+        aria-label="More actions"
+        aria-expanded={isOpen}
       >
         <svg className="size-4" viewBox="0 0 16 16" fill="currentColor">
           <path d="M8 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM1.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm13 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
