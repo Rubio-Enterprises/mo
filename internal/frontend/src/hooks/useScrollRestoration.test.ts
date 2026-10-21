@@ -294,7 +294,7 @@ describe("useScrollRestoration", () => {
       expect(container.scrollTop).toBe(120);
     });
 
-    it("takes priority over a saved scroll position from reload", () => {
+    it("yields to a saved scroll position from a reload of the same file", () => {
       window.history.replaceState(null, "", "/#section-3");
       const container = makeContainer(0);
       addHeading("section-3", 90);
@@ -325,21 +325,22 @@ describe("useScrollRestoration", () => {
         result.current.onContentRendered();
       });
 
-      expect(container.scrollTop).toBe(90);
+      expect(container.scrollTop).toBe(750);
       expect(sessionStorage.getItem(SCROLL_SESSION_KEY)).toBeNull();
     });
 
-    it("only applies the hash once, then falls through to restore", () => {
-      window.history.replaceState(null, "", "/#missing-heading");
+    it("scrolls to the hash when the saved position belongs to another file", () => {
+      window.history.replaceState(null, "", "/#section-3");
       const container = makeContainer(0);
+      addHeading("section-3", 90);
 
       sessionStorage.setItem(
         SCROLL_SESSION_KEY,
         JSON.stringify({
           headingId: null,
           relativeOffset: 0,
-          rawScrollTop: 500,
-          fileId: "file1",
+          rawScrollTop: 750,
+          fileId: "other-file",
           url: "/",
         }),
       );
@@ -355,13 +356,40 @@ describe("useScrollRestoration", () => {
         },
       );
 
-      // Hash target is absent, so this render consumes the hash without scrolling
-      // and still restores the saved position.
       act(() => {
         result.current.onContentRendered();
       });
 
-      expect(container.scrollTop).toBe(500);
+      expect(container.scrollTop).toBe(90);
+    });
+
+    it("applies the hash only on the first render", () => {
+      window.history.replaceState(null, "", "/#section-3");
+      const container = makeContainer(0);
+      addHeading("section-3", 90);
+
+      const { result } = renderHook(
+        ({ sc, headingId, fileId }) => useScrollRestoration(sc, headingId, fileId),
+        {
+          initialProps: {
+            sc: container as HTMLElement | null,
+            headingId: null as string | null,
+            fileId: "file1" as string | null,
+          },
+        },
+      );
+
+      act(() => {
+        result.current.onContentRendered();
+      });
+      expect(container.scrollTop).toBe(90);
+
+      container.scrollTop = 400;
+      act(() => {
+        result.current.onContentRendered();
+      });
+
+      expect(container.scrollTop).toBe(400);
     });
   });
 

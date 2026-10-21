@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export const SCROLL_SESSION_KEY = "mo-scroll-context";
 
@@ -28,9 +28,9 @@ export function useScrollRestoration(
   const savedContextRef = useRef<ScrollContext | null>(null);
   const pendingRestoreRef = useRef(false);
   const sessionRestoredRef = useRef(false);
-  // A heading id from the initial URL hash (e.g. a shared table-of-contents deep
-  // link). Applied once, after the first content render, then cleared.
-  const hashScrollRef = useRef<string | null>(initialHashId());
+  // Captured at mount because the URL sync in App may rewrite the location (and
+  // drop the hash) before the first content render.
+  const [initialHash] = useState(initialHashId);
 
   // Single ref object for stable access in beforeunload and captureScrollPosition
   const latestRef = useRef({ scrollContainer, activeHeadingId, activeFileId });
@@ -94,29 +94,6 @@ export function useScrollRestoration(
   const onContentRendered = useCallback(() => {
     const fileId = latestRef.current.activeFileId;
 
-    // A URL hash points at a specific heading, so it wins over a restored scroll
-    // position on load. Consumed once so later renders fall through to restore.
-    const hashId = hashScrollRef.current;
-    if (hashId) {
-      hashScrollRef.current = null;
-      const sc = latestRef.current.scrollContainer;
-      const headingEl = document.getElementById(hashId);
-      if (sc && headingEl) {
-        const offset = headingEl.getBoundingClientRect().top - sc.getBoundingClientRect().top;
-        sc.scrollTop += offset;
-        // Drop any saved position so a later render does not undo the deep link.
-        savedContextRef.current = null;
-        pendingRestoreRef.current = false;
-        sessionRestoredRef.current = true;
-        try {
-          sessionStorage.removeItem(SCROLL_SESSION_KEY);
-        } catch {
-          // ignore
-        }
-        return;
-      }
-    }
-
     // Path A: React re-render (ref-based)
     if (pendingRestoreRef.current && savedContextRef.current) {
       const ctx = savedContextRef.current;
@@ -136,6 +113,7 @@ export function useScrollRestoration(
     // Path B: Full page reload (sessionStorage-based, one-shot)
     if (sessionRestoredRef.current) return;
     sessionRestoredRef.current = true;
+    let restored = false;
     try {
       const stored = sessionStorage.getItem(SCROLL_SESSION_KEY);
       if (stored) {
@@ -143,12 +121,25 @@ export function useScrollRestoration(
         sessionStorage.removeItem(SCROLL_SESSION_KEY);
         if (ctx.fileId === fileId && ctx.url === window.location.pathname) {
           restoreFromContext(ctx);
+          restored = true;
         }
       }
     } catch {
       // ignore
     }
-  }, [restoreFromContext]);
+
+    // The saved position wins over the URL hash. The hash stays in the URL after a
+    // table-of-contents click and goes stale as the reader scrolls, so preferring it
+    // would undo every reload. sessionStorage is per tab, so a deep link opened in a
+    // new tab has no saved position and still lands on its heading.
+    if (!restored && initialHash) {
+      const sc = latestRef.current.scrollContainer;
+      const headingEl = document.getElementById(initialHash);
+      if (sc && headingEl) {
+        sc.scrollTop += headingEl.getBoundingClientRect().top - sc.getBoundingClientRect().top;
+      }
+    }
+  }, [restoreFromContext, initialHash]);
 
   // Capture scroll position before any page unload
   useEffect(() => {
