@@ -51,7 +51,18 @@ export function anchorScroll(sc: HTMLElement, el: HTMLElement, offset = 0): () =
   // touch, keys, scrollbar drag, find in page), so it decides when the reader
   // has taken over, rather than a list of input events.
   const onScroll = () => {
-    if (!el.isConnected || sc.scrollTop !== lastWritten) release();
+    if (!el.isConnected) {
+      release();
+      return;
+    }
+    if (sc.scrollTop === lastWritten) return;
+    // The browser clamped the scroll position after content above the element
+    // shrank at the end of the document, and the element stayed where it is held.
+    if (Math.abs(position() - offset) < 1) {
+      lastWritten = sc.scrollTop;
+      return;
+    }
+    release();
   };
 
   function release() {

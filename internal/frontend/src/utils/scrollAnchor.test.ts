@@ -160,6 +160,23 @@ describe("anchorScroll", () => {
     expect(offset()).toBe(300);
   });
 
+  it("keeps holding when the browser clamps the scroll after content above shrinks", () => {
+    const { sc, heading, layout, offset, limitScroll } = setup(500);
+    anchorScroll(sc, heading);
+
+    // At the end of the document, content above shrinks by 100 and the scroll
+    // range with it, so the browser clamps scrollTop and the heading stays put.
+    layout.headingTop -= 100;
+    limitScroll(400);
+    sc.scrollTop = 500;
+    sc.dispatchEvent(new Event("scroll"));
+    limitScroll(Infinity);
+    layout.headingTop += 190;
+    resize();
+
+    expect(offset()).toBe(0);
+  });
+
   it("stops holding when released by its caller", () => {
     const { sc, heading, layout, offset } = setup(500);
     const release = anchorScroll(sc, heading);
