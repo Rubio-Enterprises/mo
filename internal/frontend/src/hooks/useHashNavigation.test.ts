@@ -85,13 +85,13 @@ describe("useHashNavigation", () => {
     expect(container.scrollTo).not.toHaveBeenCalled();
   });
 
-  it("ignores a hash change that belongs to another group", () => {
+  it("follows the hash into another group that shows the same file", () => {
     const heading = addHeading("usage");
     renderForFile(makeContainer(), "file1");
 
     traverseTo("/design?file=file1#usage");
 
-    expect(heading.scrollIntoView).not.toHaveBeenCalled();
+    expect(heading.scrollIntoView).toHaveBeenCalled();
   });
 
   it("stops listening after unmount", () => {
@@ -185,5 +185,56 @@ describe("useHashNavigation", () => {
     result.current.onContentRendered();
 
     expect(container.scrollTop).toBe(0);
+  });
+
+  it("lands on the heading after returning to a file whose content was replaced by a loading view", () => {
+    const container = makeContainer();
+    placeAt(container, 0);
+    const heading = addHeading("usage");
+    const { result, rerender } = renderForFile(container, "file1");
+
+    // Selecting file2 unmounts file1's headings before file2 has rendered.
+    window.history.pushState(null, "", "/?file=file2");
+    rerender({ id: "file2" });
+    heading.remove();
+    traverseTo("/?file=file1#usage");
+    rerender({ id: "file1" });
+    placeAt(addHeading("usage"), 300);
+    result.current.onContentRendered();
+
+    expect(container.scrollTop).toBe(300);
+  });
+
+  it("drops the pending heading when sidebar navigation leaves the traversal", () => {
+    const container = makeContainer();
+    placeAt(container, 0);
+    const { result, rerender } = renderForFile(container, "file1");
+
+    traverseTo("/?file=file2#usage");
+    window.history.pushState(null, "", "/?file=file3");
+    rerender({ id: "file3" });
+    result.current.onContentRendered();
+    window.history.pushState(null, "", "/?file=file2");
+    rerender({ id: "file2" });
+    placeAt(addHeading("usage"), 300);
+    result.current.onContentRendered();
+
+    expect(container.scrollTop).toBe(0);
+  });
+
+  it("follows hash changes after a group switch that kept the file and did not render again", () => {
+    const heading = addHeading("usage");
+    const container = makeContainer();
+    const { result, rerender } = renderHook(
+      ({ group }) => useHashNavigation(container, group, "file1"),
+      { initialProps: { group: "default" } },
+    );
+    result.current.onContentRendered();
+
+    window.history.pushState(null, "", "/design?file=file1#intro");
+    rerender({ group: "design" });
+    traverseTo("/design?file=file1#usage");
+
+    expect(heading.scrollIntoView).toHaveBeenCalled();
   });
 });

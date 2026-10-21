@@ -2,24 +2,22 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { headingIdFromHash, scrollToHeading } from "../utils/jumpToHeading";
 import { parseFileIdFromSearch, parseGroupFromPath } from "../utils/groups";
 
-interface Location {
+interface PendingHeading {
   group: string;
   fileId: string | null;
-}
-
-interface PendingHeading extends Location {
   id: string;
 }
 
-function currentLocation(): Location {
-  return {
-    group: parseGroupFromPath(window.location.pathname),
-    fileId: parseFileIdFromSearch(window.location.search),
-  };
+function currentFileId(): string | null {
+  return parseFileIdFromSearch(window.location.search);
 }
 
-function isSameLocation<T extends Location>(a: T | null, b: Location): a is T {
-  return a != null && a.group === b.group && a.fileId === b.fileId;
+function matchesCurrentUrl(pending: PendingHeading): boolean {
+  return (
+    pending.group === parseGroupFromPath(window.location.pathname) &&
+    pending.fileId === currentFileId() &&
+    pending.id === headingIdFromHash(window.location.hash)
+  );
 }
 
 // Back/forward between entries that differ only in the hash (left by table of
@@ -34,10 +32,12 @@ export function useHashNavigation(
   activeFileId: string | null,
 ) {
   const pendingRef = useRef<PendingHeading | null>(null);
-  // The file whose content is on screen, not the active file state: browsers run
-  // a microtask checkpoint between popstate listeners, so App's popstate handler
-  // may already have re-rendered with the new file before these listeners run.
-  const renderedRef = useRef<Location | null>(null);
+  // The file whose content was last rendered, not the active file state: browsers
+  // run a microtask checkpoint between popstate listeners, so App's popstate
+  // handler may already have re-rendered with the new file before these listeners
+  // run. The group is left out because a file shows the same content in every
+  // group, and a group switch that keeps the file does not render again.
+  const renderedFileRef = useRef<string | null>(null);
   const latestRef = useRef({ scrollContainer, activeGroup, activeFileId });
   useLayoutEffect(() => {
     latestRef.current = { scrollContainer, activeGroup, activeFileId };
@@ -46,15 +46,18 @@ export function useHashNavigation(
   useEffect(() => {
     const handlePopState = () => {
       pendingRef.current = null;
-      const location = currentLocation();
-      if (isSameLocation(renderedRef.current, location)) return;
       const id = headingIdFromHash(window.location.hash);
-      if (id) pendingRef.current = { ...location, id };
+      if (!id) return;
+      const fileId = currentFileId();
+      // The last rendered file may already have been replaced by another file's
+      // loading state, so only a mounted heading proves hashchange can reach it.
+      if (renderedFileRef.current === fileId && document.getElementById(id)) return;
+      pendingRef.current = { group: parseGroupFromPath(window.location.pathname), fileId, id };
     };
     const handleHashChange = () => {
       // A traversal to another file also fires hashchange, after popstate. That
       // file has not rendered yet, so the pending heading is applied on render.
-      if (!isSameLocation(renderedRef.current, currentLocation())) return;
+      if (renderedFileRef.current !== currentFileId()) return;
       const id = headingIdFromHash(window.location.hash);
       if (id) {
         scrollToHeading(id);
@@ -75,10 +78,17 @@ export function useHashNavigation(
   }, []);
 
   const onContentRendered = useCallback(() => {
-    const { scrollContainer: sc, activeGroup: group, activeFileId: fileId } = latestRef.current;
-    renderedRef.current = { group, fileId };
+    const { scrollContainer: sc, activeFileId: fileId } = latestRef.current;
+    renderedFileRef.current = fileId;
     const pending = pendingRef.current;
-    if (!isSameLocation(pending, renderedRef.current)) return;
+    if (!pending) return;
+    // Sidebar and link navigation use pushState, which fires no popstate, so a
+    // heading left pending by an interrupted traversal is checked against the URL.
+    if (!matchesCurrentUrl(pending)) {
+      pendingRef.current = null;
+      return;
+    }
+    if (pending.fileId !== fileId) return;
     pendingRef.current = null;
     const headingEl = document.getElementById(pending.id);
     if (sc && headingEl) {
