@@ -127,9 +127,8 @@ function FileItem({
 }
 
 function SortableFileItem(props: FileItemProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: props.file.id,
-    attributes: { tabIndex: -1 },
   });
 
   const style = {
@@ -138,8 +137,11 @@ function SortableFileItem(props: FileItemProps) {
     opacity: isDragging ? 0.5 : undefined,
   };
 
+  // dnd-kit's `attributes` (role="button", tabIndex, aria-describedby pointing at
+  // keyboard drag instructions) are not spread: reordering is pointer-only, so they
+  // would announce a focusable sortable control that keyboard users cannot operate.
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div ref={setNodeRef} style={style} {...listeners}>
       <FileItem {...props} />
     </div>
   );
