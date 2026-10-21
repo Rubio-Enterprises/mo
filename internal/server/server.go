@@ -2141,7 +2141,7 @@ func handleFileRaw(state *State) http.HandlerFunc {
 
 		// No boundary check: mo serves local files to the user's own browser
 		// (like handleOpenFile); http.ServeFile already rejects "..".
-		http.ServeFile(w, r, absPath)
+		http.ServeFile(w, r, absPath) //nolint:gosec // G703: intentional, see comment above
 	}
 }
 
