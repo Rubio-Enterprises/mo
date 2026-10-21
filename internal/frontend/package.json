@@ -15,13 +15,12 @@
     "fmt": "oxfmt -c .oxfmtrc.json --write src/",
     "fmt:check": "oxfmt -c .oxfmtrc.json --check src/"
   },
-  "pnpm": {
-    "executionEnv": {
-      "nodeVersion": "22.16.0"
-    },
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "22.16.0",
+      "onFail": "download"
+    }
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
