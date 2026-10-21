@@ -20,6 +20,15 @@ function initialHashId(): string | null {
   }
 }
 
+// A saved position in sessionStorage is not proof of a reload: beforeunload also
+// saves it when the tab leaves mo for another site, and it survives until the tab
+// comes back. Only a reload or a history traversal returns to the place it was
+// saved from.
+function isReloadOrHistoryTraversal(): boolean {
+  const [nav] = performance.getEntriesByType("navigation") as PerformanceNavigationTiming[];
+  return nav?.type === "reload" || nav?.type === "back_forward";
+}
+
 export function useScrollRestoration(
   scrollContainer: HTMLElement | null,
   activeHeadingId: string | null,
@@ -119,7 +128,11 @@ export function useScrollRestoration(
       if (stored) {
         const ctx: ScrollContext = JSON.parse(stored);
         sessionStorage.removeItem(SCROLL_SESSION_KEY);
-        if (ctx.fileId === fileId && ctx.url === window.location.pathname) {
+        if (
+          ctx.fileId === fileId &&
+          ctx.url === window.location.pathname &&
+          (!initialHash || isReloadOrHistoryTraversal())
+        ) {
           restoreFromContext(ctx);
           restored = true;
         }
@@ -128,10 +141,10 @@ export function useScrollRestoration(
       // ignore
     }
 
-    // The saved position wins over the URL hash. The hash stays in the URL after a
-    // table-of-contents click and goes stale as the reader scrolls, so preferring it
-    // would undo every reload. sessionStorage is per tab, so a deep link opened in a
-    // new tab has no saved position and still lands on its heading.
+    // On a reload the saved position wins over the URL hash. The hash stays in the
+    // URL after a table-of-contents click and goes stale as the reader scrolls, so
+    // preferring it would undo every reload. A fresh navigation to a deep link
+    // still lands on its heading.
     if (!restored && initialHash) {
       const sc = latestRef.current.scrollContainer;
       const headingEl = document.getElementById(initialHash);

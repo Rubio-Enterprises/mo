@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useScrollRestoration, SCROLL_SESSION_KEY } from "./useScrollRestoration";
 
@@ -17,6 +17,12 @@ function makeContainer(scrollTop = 0): HTMLDivElement {
     toJSON() {},
   });
   return el;
+}
+
+function mockNavigationType(type: NavigationTimingType) {
+  vi.spyOn(performance, "getEntriesByType").mockReturnValue([
+    { type } as PerformanceNavigationTiming,
+  ]);
 }
 
 function addHeading(id: string, topOffset: number) {
@@ -43,6 +49,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   document.body.innerHTML = "";
   sessionStorage.clear();
   window.history.replaceState(null, "", "/");
@@ -296,6 +303,7 @@ describe("useScrollRestoration", () => {
 
     it("yields to a saved scroll position from a reload of the same file", () => {
       window.history.replaceState(null, "", "/#section-3");
+      mockNavigationType("reload");
       const container = makeContainer(0);
       addHeading("section-3", 90);
 
@@ -326,6 +334,42 @@ describe("useScrollRestoration", () => {
       });
 
       expect(container.scrollTop).toBe(750);
+      expect(sessionStorage.getItem(SCROLL_SESSION_KEY)).toBeNull();
+    });
+
+    it("scrolls to the hash on a fresh navigation despite a saved position for the same file", () => {
+      window.history.replaceState(null, "", "/#section-3");
+      mockNavigationType("navigate");
+      const container = makeContainer(0);
+      addHeading("section-3", 90);
+
+      sessionStorage.setItem(
+        SCROLL_SESSION_KEY,
+        JSON.stringify({
+          headingId: null,
+          relativeOffset: 0,
+          rawScrollTop: 750,
+          fileId: "file1",
+          url: "/",
+        }),
+      );
+
+      const { result } = renderHook(
+        ({ sc, headingId, fileId }) => useScrollRestoration(sc, headingId, fileId),
+        {
+          initialProps: {
+            sc: container as HTMLElement | null,
+            headingId: null as string | null,
+            fileId: "file1" as string | null,
+          },
+        },
+      );
+
+      act(() => {
+        result.current.onContentRendered();
+      });
+
+      expect(container.scrollTop).toBe(90);
       expect(sessionStorage.getItem(SCROLL_SESSION_KEY)).toBeNull();
     });
 
