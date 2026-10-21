@@ -461,13 +461,22 @@ export function App() {
 
   const activeHeadingId = useActiveHeading(headingIds, scrollContainer);
 
-  const { captureScrollPosition, onContentRendered } = useScrollRestoration(
+  const { captureScrollPosition, onContentRendered: restoreScrollOnRender } = useScrollRestoration(
     scrollContainer,
     activeHeadingId,
     activeFileId,
   );
 
-  useHashNavigation(scrollContainer, activeGroup, activeFileId);
+  const { onContentRendered: applyHashOnRender } = useHashNavigation(
+    scrollContainer,
+    activeGroup,
+    activeFileId,
+  );
+
+  const onContentRendered = useCallback(() => {
+    restoreScrollOnRender();
+    applyHashOnRender();
+  }, [restoreScrollOnRender, applyHashOnRender]);
 
   const handleHeadingClick = useCallback((id: string) => {
     jumpToHeading(id);
