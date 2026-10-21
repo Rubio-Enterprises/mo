@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & Run
 
-Requires Go 1.26+ and [pnpm](https://pnpm.io/). Node.js version is managed via `pnpm.executionEnv.nodeVersion` in `internal/frontend/package.json`.
+Requires Go 1.26+ and [pnpm](https://pnpm.io/). Node.js version is managed via `devEngines.runtime` in `internal/frontend/package.json`.
 
 ```bash
 # Full build (frontend + Go binary, with ldflags)
