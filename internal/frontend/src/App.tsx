@@ -19,6 +19,7 @@ import { useSSE } from "./hooks/useSSE";
 import { useFileDrop } from "./hooks/useFileDrop";
 import { useActiveHeading } from "./hooks/useActiveHeading";
 import { useScrollRestoration, SCROLL_SESSION_KEY } from "./hooks/useScrollRestoration";
+import { useHashNavigation } from "./hooks/useHashNavigation";
 import type { FileEntry, Group, SearchResult } from "./hooks/useApi";
 import {
   fetchGroups,
@@ -465,6 +466,8 @@ export function App() {
     activeHeadingId,
     activeFileId,
   );
+
+  useHashNavigation(scrollContainer, activeGroup, activeFileId);
 
   const handleHeadingClick = useCallback((id: string) => {
     jumpToHeading(id);

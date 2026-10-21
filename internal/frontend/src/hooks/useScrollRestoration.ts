@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { headingIdFromHash } from "../utils/jumpToHeading";
 
 export const SCROLL_SESSION_KEY = "mo-scroll-context";
 
@@ -8,16 +9,6 @@ interface ScrollContext {
   rawScrollTop: number;
   fileId: string;
   url: string;
-}
-
-function initialHashId(): string | null {
-  const raw = window.location.hash.slice(1);
-  if (!raw) return null;
-  try {
-    return decodeURIComponent(raw);
-  } catch {
-    return raw;
-  }
 }
 
 // A saved position in sessionStorage is not proof of a reload: beforeunload also
@@ -39,7 +30,7 @@ export function useScrollRestoration(
   const sessionRestoredRef = useRef(false);
   // Captured at mount because the URL sync in App may rewrite the location (and
   // drop the hash) before the first content render.
-  const [initialHash] = useState(initialHashId);
+  const [initialHash] = useState(() => headingIdFromHash(window.location.hash));
 
   // Single ref object for stable access in beforeunload and captureScrollPosition
   const latestRef = useRef({ scrollContainer, activeHeadingId, activeFileId });
