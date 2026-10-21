@@ -1,5 +1,27 @@
 # Changelog
 
+## [v1.7.0](https://github.com/k1LoW/mo/compare/v1.6.9...v1.7.0) - 2026-10-21
+
+### New Features 🎉
+- feat(frontend): reflect table of contents clicks in the URL hash by @ChrisJr404 in https://github.com/k1LoW/mo/pull/271
+### Fix bug 🐛
+- fix(frontend): render math with the same KaTeX version as its stylesheet by @k1LoW in https://github.com/k1LoW/mo/pull/316
+### Dependency Updates ⬆️
+- chore(deps-dev): bump vite from 8.3.0 to 8.3.3 in /internal/frontend by @dependabot[bot] in https://github.com/k1LoW/mo/pull/305
+- chore(deps): bump the dependencies group across 1 directory with 3 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/301
+- chore(deps): bump the dependencies group across 1 directory with 3 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/300
+- chore(deps-dev): bump the dependencies group across 1 directory with 2 updates by @dependabot[bot] in https://github.com/k1LoW/mo/pull/308
+- chore(deps): bump katex from 0.18.7 to 0.18.8 in /internal/frontend by @dependabot[bot] in https://github.com/k1LoW/mo/pull/307
+- fix(frontend): bump mermaid and refresh transitive deps for security advisories by @k1LoW in https://github.com/k1LoW/mo/pull/314
+### Other Changes
+- fix: reduce sidebar Tab stops and keep focus rings inside rows by @nacal in https://github.com/k1LoW/mo/pull/297
+- fix(frontend): finish the sidebar keyboard a11y follow-ups from #297 by @k1LoW in https://github.com/k1LoW/mo/pull/309
+- fix(frontend): restore the saved scroll position before the URL hash on reload by @k1LoW in https://github.com/k1LoW/mo/pull/310
+- fix(frontend): scroll to the heading when back/forward changes the hash by @k1LoW in https://github.com/k1LoW/mo/pull/311
+- fix(frontend): land on the hash heading across files and close the file menu on Escape by @k1LoW in https://github.com/k1LoW/mo/pull/312
+- fix(frontend): keep a landed heading in place while content above it renders by @k1LoW in https://github.com/k1LoW/mo/pull/313
+- chore(frontend): move pnpm settings out of the package.json pnpm field by @k1LoW in https://github.com/k1LoW/mo/pull/315
+
 ## [v1.6.9](https://github.com/k1LoW/mo/compare/v1.6.8...v1.6.9) - 2026-09-28
 
 ### Dependency Updates ⬆️
