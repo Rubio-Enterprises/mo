@@ -1,3 +1,6 @@
+# The default 30sec leaves no room for the step lookup's retries (test.yml runs the report in
+# its own job), and running out of time skips the pull request comment.
+timeout: 2min
 coverage:
   paths:
     - coverage.out
