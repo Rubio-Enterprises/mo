@@ -1,3 +1,6 @@
+# The default 30sec leaves no room for the step lookup's retries (test.yml runs the report in
+# its own job), and running out of time skips the pull request comment.
+timeout: 2min
 coverage:
   paths:
     - coverage.out
@@ -18,6 +21,9 @@ codeToTestRatio:
     - "!internal/frontend/node_modules/**"
 testExecutionTime:
   if: true
+  # The report runs in its own job, so name the step to time (see .github/workflows/test.yml).
+  steps:
+    - Run tests (Linux)
 diff:
   datastores:
     - artifact://${GITHUB_REPOSITORY}
