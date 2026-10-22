@@ -26,7 +26,7 @@ concurrency:
 jobs:
   go-tests:
     name: go tests
-    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').light || fromJSON('["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
     timeout-minutes: 15
     outputs:
       tests_ran: ${{ steps.test.outputs.tests_ran }}
@@ -54,7 +54,7 @@ jobs:
 
   ts-tests:
     name: frontend tests (vitest)
-    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').light || fromJSON('["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
     timeout-minutes: 15
     outputs:
       tests_ran: ${{ steps.test.outputs.tests_ran }}
@@ -94,7 +94,7 @@ jobs:
     name: test-gate
     if: ${{ always() }}
     needs: [go-tests, ts-tests]
-    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').light || fromJSON('["ubuntu-latest"]') }}
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
     timeout-minutes: 15
     env:
       NEEDS_JSON: ${{ toJSON(needs) }}
