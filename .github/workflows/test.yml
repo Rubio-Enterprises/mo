@@ -20,13 +20,16 @@ jobs:
           - macos-latest
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    # This job runs the branch's code, so its token is read-only. The coverage report, which
+    # needs to comment on the pull request, runs in its own job below.
     permissions:
-      contents: write
-      pull-requests: write
-      actions: write
+      contents: read
+      pull-requests: read
     steps:
       - name: Check out source code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -69,9 +72,42 @@ jobs:
           config-file: .gostyle.yml
           version: v0.26.0
 
-      - name: Run tests
+      # octocov's testExecutionTime.steps names the Linux step, so keep the two in step.
+      - name: Run tests (${{ runner.os }})
         run: make ci
 
-      - name: Run octocov
+      - name: Upload coverage
         if: runner.os == 'Linux'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage
+          path: |
+            coverage.out
+            internal/frontend/coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 1
+
+  coverage-report:
+    # Runs no repository code: octocov reads the coverage files, .octocov.yml and the source
+    # tree as data. Permissions follow octocov's documented multi-job setup.
+    name: Coverage report
+    needs: job-test
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write # to comment the report on the pull request
+      actions: read # to read test execution time and the main branch's report artifact
+    steps:
+      - name: Check out source code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download coverage
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage
+
+      - name: Run octocov
         uses: k1LoW/octocov-action@a167dc0dee441b7ffc45e1b862ab55ec0d87f278 # v1.5.2

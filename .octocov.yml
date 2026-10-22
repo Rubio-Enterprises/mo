@@ -18,6 +18,9 @@ codeToTestRatio:
     - "!internal/frontend/node_modules/**"
 testExecutionTime:
   if: true
+  # The report runs in its own job, so name the step to time (see .github/workflows/test.yml).
+  steps:
+    - Run tests (Linux)
 diff:
   datastores:
     - artifact://${GITHUB_REPOSITORY}
