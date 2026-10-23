@@ -29,6 +29,9 @@ Requires **Go 1.26+** and [pnpm](https://pnpm.io/). The Node.js version is pinne
 The tiers below are the complete set of ways to build, run, and test mo. Every
 `make`/`pnpm` target that runs `go generate` needs Node ≥ 22.13 (see above).
 
+`mise run setup` installs the pinned toolchain, the Go modules and the frontend's
+dependencies; the Dev Container runs it on create.
+
 ### Build
 
 - `make build` — frontend (`go generate`) + Go binary with ldflags → `./mo`
@@ -39,6 +42,7 @@ The tiers below are the complete set of ways to build, run, and test mo. Every
 
 - `make dev ARGS="testdata/basic.md"` — build, then run foreground on port 16275
 - `make dev ARGS="-t design testdata/basic.md"` — with a tab group (`-t` takes one group per invocation)
+- `mise run dev -- testdata/basic.md` — the same build and foreground server on port 16275, which the Dev Container forwards
 - `./mo testdata/basic.md` — after `make build`; self-backgrounds and opens a browser (default port 6275)
 - `cd internal/frontend && pnpm run dev` — Vite dev server, proxies `/_/` to `localhost:6275` (set `MO_DISABLE_AUTH=1` on the backend for this cross-origin flow)
 - `make screenshot` — regenerate README screenshots (**requires Google Chrome**, not bundled Chromium)

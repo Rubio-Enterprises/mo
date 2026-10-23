@@ -3,5 +3,31 @@
   "image": "mcr.microsoft.com/devcontainers/base:2.2.1-trixie",
   "features": {
     "ghcr.io/rubio-enterprises/devcontainer-features/baseline:3.0.0": {}
-  }
+  },
+  "customizations": {
+    "fly-durable": {
+      "setupHosts": [
+        "dl.google.com",
+        "proxy.golang.org",
+        "storage.googleapis.com",
+        "sum.golang.org"
+      ]
+    }
+  },
+  "mounts": [
+    "source=${devcontainerId}-frontend-node-modules,target=${containerWorkspaceFolder}/internal/frontend/node_modules,type=volume"
+  ],
+  "containerEnv": {
+    "pnpm_config_store_dir": "/home/vscode/.local/share/pnpm/store"
+  },
+  "securityOpt": ["no-new-privileges=false"],
+  "forwardPorts": [16275],
+  "portsAttributes": {
+    "16275": { "label": "mo (mise run dev)" }
+  },
+  "otherPortsAttributes": {
+    "onAutoForward": "ignore"
+  },
+  "onCreateCommand": "sudo chown vscode internal/frontend/node_modules",
+  "updateContentCommand": "mise run setup"
 }
