@@ -17,6 +17,9 @@
   "mounts": [
     "source=${devcontainerId}-frontend-node-modules,target=${containerWorkspaceFolder}/internal/frontend/node_modules,type=volume"
   ],
+  "containerEnv": {
+    "pnpm_config_store_dir": "/home/vscode/.local/share/pnpm/store"
+  },
   "securityOpt": ["no-new-privileges=false"],
   "forwardPorts": [16275],
   "portsAttributes": {
