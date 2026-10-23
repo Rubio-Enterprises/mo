@@ -15,6 +15,13 @@
 # fresh CI runner (same pattern as the former [tasks.test] override, whose
 # Go half now lives in the rendered [tasks.test-go]).
 
+# `mise run setup` (template-owned) runs every setup:* task. The template's
+# setup:ts installs at the root, which has no package.json here.
+[tasks."setup:ts"]
+description = "Install the frontend's dependencies from internal/frontend/pnpm-lock.yaml"
+depends = ["setup:tools"]
+run = "pnpm --dir internal/frontend install --frozen-lockfile"
+
 [tasks.typecheck]
 description = "Strict TS type-check of the frontend (tsc --noEmit)"
 run = [
@@ -49,6 +56,10 @@ run = [
   "pnpm --dir internal/frontend install --frozen-lockfile",
   "pnpm --dir internal/frontend run build",
 ]
+
+[tasks.dev]
+description = "Build mo with its frontend, then serve in the foreground on port 16275 (files after --)"
+run = ["make build", "./mo -p 16275 --foreground"]
 
 [tasks.e2e]
 description = "Build the embedded frontend and Go binary, then run browser E2E tests"
