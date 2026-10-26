@@ -29,5 +29,5 @@
     "onAutoForward": "ignore"
   },
   "onCreateCommand": "sudo chown vscode internal/frontend/node_modules",
-  "updateContentCommand": "mise run setup"
+  "updateContentCommand": "mise bootstrap --only repos,tools --yes && mise run setup"
 }
