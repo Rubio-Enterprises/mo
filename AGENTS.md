@@ -24,13 +24,18 @@ This repository uses a single-context domain documentation layout. See `docs/age
 
 ## Build & Run
 
-Requires **Go 1.26+** and [pnpm](https://pnpm.io/). The Node.js version is pinned in `.tool-versions` (managed by mise) and must satisfy the `packageManager` pin in `internal/frontend/package.json`: **pnpm 11.9.0 requires Node ≥ 22.13**, so any `go generate` / `pnpm` step fails on an older Node.
+Requires **Go 1.26+** and [pnpm](https://pnpm.io/). The Node.js version is pinned in `.mise.toml` (managed by mise) and must satisfy the `packageManager` pin in `internal/frontend/package.json`: **pnpm 11.9.0 requires Node ≥ 22.13**, so any `go generate` / `pnpm` step fails on an older Node.
 
 The tiers below are the complete set of ways to build, run, and test mo. Every
 `make`/`pnpm` target that runs `go generate` needs Node ≥ 22.13 (see above).
 
-`mise run setup` installs the pinned toolchain, the Go modules and the frontend's
-dependencies; the Dev Container runs it on create.
+On a fresh clone, run `mise bootstrap --only repos,tools --yes` first. It clones
+the shared standards config into the gitignored `.standards-config/` (ADR-0033,
+`config_model: native`) and installs the pinned toolchain. The git hooks, lint
+configs and shared mise tasks (including `setup`) read that checkout and fail
+while it is missing; a plain `mise install` does not create it. `mise run setup`
+then refreshes it and installs the Go modules and the frontend's dependencies.
+The Dev Container runs both on create.
 
 ### Build
 
@@ -83,6 +88,7 @@ dependencies; the Dev Container runs it on create.
 - `make fmt` / `make fmt-check` — oxfmt write / check
 - `cd internal/frontend && pnpm run lint` · `pnpm run fmt` · `pnpm run fmt:check` — frontend directly
 - `mise exec -- lefthook run pre-commit --all-files` — run all git hooks across the repo
+- `mise run check` — lint, typecheck and test, then every pre-commit hook over every file
 
 ### CLI Flags
 
