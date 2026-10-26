@@ -4,7 +4,7 @@ name: test-gate
 # jobs plus the aggregate.
 #
 # This repo is polyglot, so the canonical non-E2E surface — `mise run test`,
-# which fans out to `test-go` and `test-ts` — is split into one execution job
+# which fans out to `test:go` and `test:ts` — is split into one execution job
 # per stack, both aggregated below. Nothing else belongs here: the frontend
 # oxlint/oxfmt + golangci-lint/gostyle checks and the octocov coverage report
 # stay in test.yml, and the Playwright e2e job stays in standards.yml.
@@ -39,7 +39,7 @@ jobs:
         name: Run canonical Go unit tests
         env:
           RUBIO_TEST_GATE_COUNT_OUTPUT: ${{ runner.temp }}/test-gate-count
-        # [tasks.test-go] wraps this same `./...` run in gotestsum for its JUnit
+        # The shared `test:go` task wraps this same `./...` run in gotestsum for its JUnit
         # report, but the gate contract's recognized-test-command allowlist only
         # accepts a bare `go test`, so the gate invokes it directly and takes the
         # executed-test count from the `=== RUN` lines `-v` emits.
@@ -74,7 +74,7 @@ jobs:
         env:
           RUBIO_TEST_GATE_COUNT_OUTPUT: ${{ runner.temp }}/test-gate-count
         working-directory: internal/frontend
-        # [tasks.test-ts] is `pnpm --dir internal/frontend run test`; running it
+        # `test:ts` (.mise.local.toml) is `pnpm --dir internal/frontend run test`; running it
         # from that working directory is the same invocation, driven through
         # `pnpm exec vitest` so the JUnit reporter flags reach vitest itself.
         # `default` runs alongside `junit` so a failing suite still prints to the

@@ -2,7 +2,7 @@
   "name": "mo",
   "image": "mcr.microsoft.com/devcontainers/base:2.2.1-trixie",
   "features": {
-    "ghcr.io/rubio-enterprises/devcontainer-features/baseline:3.0.0": {}
+    "ghcr.io/rubio-enterprises/devcontainer-features/baseline:3.0.1": {}
   },
   "customizations": {
     "fly-durable": {
@@ -29,5 +29,5 @@
     "onAutoForward": "ignore"
   },
   "onCreateCommand": "sudo chown vscode internal/frontend/node_modules",
-  "updateContentCommand": "mise run setup"
+  "updateContentCommand": "mise bootstrap --only repos,tools --yes && mise run setup"
 }

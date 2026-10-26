@@ -9,14 +9,14 @@
 # lockfile lives in internal/frontend/.
 "npm:pnpm" = "11.22.0"
 
-# The template's ts-facet tasks delegate to a root package.json this repo
+# The shared ts-facet tasks delegate to a root package.json this repo
 # does not have (upstream keeps the frontend in internal/frontend/). Each
 # override below self-installs with a frozen lockfile so it works on a
 # fresh CI runner (same pattern as the former [tasks.test] override, whose
-# Go half now lives in the rendered [tasks.test-go]).
+# Go half now lives in the shared test:go task).
 
-# `mise run setup` (template-owned) runs every setup:* task. The template's
-# setup:ts installs at the root, which has no package.json here.
+# `mise run setup` (shared) runs every setup:* task. The shared setup:ts
+# installs at the root, which has no package.json here.
 [tasks."setup:ts"]
 description = "Install the frontend's dependencies from internal/frontend/pnpm-lock.yaml"
 depends = ["setup:tools"]
@@ -29,7 +29,7 @@ run = [
   "pnpm --dir internal/frontend exec tsc --noEmit",
 ]
 
-[tasks.lint-ts]
+[tasks."lint:ts"]
 description = "Frontend Oxlint (changed applicable files in CI; full src/ locally)"
 run = [
   "pnpm --dir internal/frontend install --frozen-lockfile",
@@ -43,14 +43,14 @@ run = [
   "bash scripts/check-frontend.sh format",
 ]
 
-[tasks.test-ts]
+[tasks."test:ts"]
 description = "frontend Vitest"
 run = [
   "pnpm --dir internal/frontend install --frozen-lockfile",
   "pnpm --dir internal/frontend run test",
 ]
 
-[tasks.build-ts]
+[tasks."build:ts"]
 description = "frontend production build (tsc && vite build)"
 run = [
   "pnpm --dir internal/frontend install --frozen-lockfile",

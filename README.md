@@ -302,12 +302,13 @@ $ mo --status --json
 
 ## Development
 
-Requires Go 1.26+ and [pnpm](https://pnpm.io/). Node.js is pinned via `pnpm.executionEnv.nodeVersion` in `internal/frontend/package.json`; other runtimes are pinned via `.tool-versions` / `.mise.toml`.
+Requires Go 1.26+ and [pnpm](https://pnpm.io/). Node.js is pinned via `pnpm.executionEnv.nodeVersion` in `internal/frontend/package.json`; other runtimes are pinned via `.mise.toml`.
 
 ```bash
 git clone https://github.com/Rubio-Enterprises/mo.git
 cd mo
-mise install                       # install pinned runtimes from .tool-versions
+mise bootstrap --only repos,tools  # shared config checkout (.standards-config/) + pinned tools
+mise run setup                     # Go modules and frontend deps
 lefthook install                   # register git hooks
 
 # Full build (frontend + Go binary, with ldflags)
