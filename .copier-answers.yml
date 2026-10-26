@@ -1,10 +1,12 @@
 # Changes here will be overwritten by Copier; NEVER edit this file manually.
-_commit: template/v1.55.150
-_rubio_template_version: template/v1.55.150
+_commit: template/v1.55.151
+_rubio_template_version: template/v1.55.151
 _src_path: https://github.com/Rubio-Enterprises/standards.git
+config_model: rendered
 container_registry: ghcr.io/Rubio-Enterprises
 default_branch: main
 enforce_audit: true
+enforce_build: true
 enforce_e2e: true
 enforce_lint_config: true
 enforce_lint_hooks: true
@@ -15,6 +17,7 @@ fork_release_please: false
 has_ansible: false
 has_codewiki: false
 has_codex_plugin: false
+has_container_image: false
 has_embedded_web: false
 has_go: true
 has_homebrew_formulae: false
@@ -22,6 +25,7 @@ has_javascript: false
 has_knowledgebase: false
 has_playwright: false
 has_python: false
+has_release_artifact: false
 has_ruby: false
 has_rust: false
 has_swift: false
@@ -36,6 +40,7 @@ lint_hooks_workload_class: light
 linter_floor: repo
 project_name: mo
 repo_type: extended_fork
+supported_platforms: []
 ts_dom_surface: true
 ts_module_world: bundler
 typecheck_workload_class: light
