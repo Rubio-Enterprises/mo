@@ -44,7 +44,7 @@ jobs:
     if: >-
       github.event_name == 'schedule' && github.event.schedule == '0 9 * * 1'
       || github.event_name == 'workflow_dispatch'
-    uses: Rubio-Enterprises/.github/.github/workflows/secret-scan.yml@71959ddccacf875925d932f981f630fee1039abc # v4
+    uses: Rubio-Enterprises/.github/.github/workflows/secret-scan.yml@9f1564564ea6d939e86f54a4b2bfca9aba841855 # v4
     with: { mode: trufflehog }
 
   e2e:
@@ -52,7 +52,7 @@ jobs:
     permissions:
       contents: read
       checks: write
-    uses: Rubio-Enterprises/.github/.github/workflows/e2e.yml@71959ddccacf875925d932f981f630fee1039abc # v4
+    uses: Rubio-Enterprises/.github/.github/workflows/e2e.yml@9f1564564ea6d939e86f54a4b2bfca9aba841855 # v4
 
   cache-seed:
     # Warms this repo's pnpm store + turbo task caches on the default branch,
@@ -73,5 +73,5 @@ jobs:
     # Rendered wherever `gate_typescript` is (has_typescript and
     # enforce_typecheck), so the seeder exists precisely where the gate does.
     if: github.event_name == 'push'
-    uses: Rubio-Enterprises/.github/.github/workflows/typecheck-ts.yml@71959ddccacf875925d932f981f630fee1039abc # v4
+    uses: Rubio-Enterprises/.github/.github/workflows/typecheck-ts.yml@9f1564564ea6d939e86f54a4b2bfca9aba841855 # v4
     with: { seed-caches: true }
