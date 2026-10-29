@@ -1,6 +1,6 @@
 # Changes here will be overwritten by Copier; NEVER edit this file manually.
-_commit: template/v1.55.157
-_rubio_template_version: template/v1.55.157
+_commit: template/v1.55.158
+_rubio_template_version: template/v1.55.158
 _src_path: https://github.com/Rubio-Enterprises/standards.git
 container_registry: ghcr.io/Rubio-Enterprises
 default_branch: main
@@ -19,6 +19,7 @@ has_codex_plugin: false
 has_container_image: false
 has_embedded_web: false
 has_go: true
+has_herdr_plugin: false
 has_homebrew_formulae: false
 has_javascript: false
 has_knowledgebase: false
@@ -35,14 +36,14 @@ is_marketplace: false
 is_mcp_server: false
 is_monorepo: true
 is_public: true
-lint_hooks_workload_class: light
+lint_hooks_workload_class: small
 linter_floor: repo
 project_name: mo
 repo_type: extended_fork
 supported_platforms: []
 ts_dom_surface: true
 ts_module_world: bundler
-typecheck_workload_class: light
+typecheck_workload_class: small
 upstream_branch: main
 upstream_url: https://github.com/k1LoW/mo
 uses_release_please: false
