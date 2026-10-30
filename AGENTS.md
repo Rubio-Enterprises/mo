@@ -30,8 +30,8 @@ The tiers below are the complete set of ways to build, run, and test mo. Every
 `make`/`pnpm` target that runs `go generate` needs Node ≥ 22.13 (see above).
 
 On a fresh clone, run `mise bootstrap --only repos,tools --yes` first. It clones
-the shared standards config into the gitignored `.standards-config/` (ADR-0033,
-`config_model: native`) and installs the pinned toolchain. The git hooks, lint
+the Shared Config Directory into the gitignored `.standards-config/` (ADR-0033)
+and installs the pinned toolchain. The git hooks, lint
 configs and shared mise tasks (including `setup`) read that checkout and fail
 while it is missing; a plain `mise install` does not create it. `mise run setup`
 then refreshes it and installs the Go modules and the frontend's dependencies.

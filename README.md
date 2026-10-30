@@ -307,7 +307,7 @@ Requires Go 1.26+ and [pnpm](https://pnpm.io/). Node.js is pinned via `pnpm.exec
 ```bash
 git clone https://github.com/Rubio-Enterprises/mo.git
 cd mo
-mise bootstrap --only repos,tools  # shared config checkout (.standards-config/) + pinned tools
+mise bootstrap --only repos,tools  # Shared Config Directory (.standards-config/) + pinned tools
 mise run setup                     # Go modules and frontend deps
 lefthook install                   # register git hooks
 
