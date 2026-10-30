@@ -47,3 +47,5 @@ typecheck_workload_class: small
 upstream_branch: main
 upstream_url: https://github.com/k1LoW/mo
 uses_release_please: false
+
+#copier updated
