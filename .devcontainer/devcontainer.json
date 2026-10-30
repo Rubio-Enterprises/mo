@@ -15,7 +15,8 @@
     }
   },
   "mounts": [
-    "source=${devcontainerId}-frontend-node-modules,target=${containerWorkspaceFolder}/internal/frontend/node_modules,type=volume"
+    "source=${devcontainerId}-frontend-node-modules,target=${containerWorkspaceFolder}/internal/frontend/node_modules,type=volume",
+    "source=${devcontainerId}-e2e-node-modules,target=${containerWorkspaceFolder}/e2e/node_modules,type=volume"
   ],
   "containerEnv": {
     "pnpm_config_store_dir": "/home/vscode/.local/share/pnpm/store"
@@ -28,6 +29,6 @@
   "otherPortsAttributes": {
     "onAutoForward": "ignore"
   },
-  "onCreateCommand": "sudo chown vscode internal/frontend/node_modules",
+  "onCreateCommand": "sudo chown vscode internal/frontend/node_modules e2e/node_modules",
   "updateContentCommand": "mise bootstrap --only repos,tools --yes && mise run setup"
 }
