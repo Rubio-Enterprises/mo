@@ -88,7 +88,7 @@ jobs:
     # Least privilege: explicitly forward only the dedicated private-module App
     # credentials; when absent, the reusable still runs an uncredentialed smoke.
     # ADR-0033: the read-only standards-reader App clones
-    # the Shared Config Checkout; the reusable fails without it.
+    # the Shared Config Directory; the reusable fails without it.
     secrets:
       PRIVATE_MODULES_READER_APP_ID: ${{ secrets.PRIVATE_MODULES_READER_APP_ID }}
       PRIVATE_MODULES_READER_APP_PRIVATE_KEY: ${{ secrets.PRIVATE_MODULES_READER_APP_PRIVATE_KEY }}
