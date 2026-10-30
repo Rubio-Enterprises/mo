@@ -8,7 +8,7 @@ This repo follows Rubio-Enterprises standards. Run `/audit-standards` from a Cla
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues for `Rubio-Enterprises/mo`. See `docs/agents/issue-tracker.md`.
+Issues and PRDs are tracked in GitHub Issues for `Rubio-Enterprises/mo`.
 
 ### Triage labels
 
