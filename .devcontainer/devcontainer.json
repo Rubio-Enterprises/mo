@@ -19,12 +19,8 @@
     "pnpm_config_store_dir": "/home/vscode/.local/share/pnpm/store",
     "STANDARDS_DEVCONTAINER": "1"
   },
-  "securityOpt": [
-    "no-new-privileges=false"
-  ],
-  "forwardPorts": [
-    16275
-  ],
+  "securityOpt": ["no-new-privileges=false"],
+  "forwardPorts": [16275],
   "portsAttributes": {
     "16275": {
       "label": "mo (mise run dev)"
