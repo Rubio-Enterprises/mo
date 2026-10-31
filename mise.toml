@@ -1,0 +1,77 @@
+# This repository's tools and tasks. The Checks, their tool pins and the Conformance Tasks (check,
+# check:pr, fmt) come from @rubio-enterprises/standards, which `mise run setup` installs into
+# .standards/ and mise loads through .config/mise/conf.d/standards.toml.
+min_version = "2026.10.19"
+
+[env]
+# STANDARDS_VERSION = "1.4.2"  # Release Pin: hold this release while the latest breaks the repository; <issue link>
+# STANDARDS_TEST_GATE = "off"  # Opt-out of the Test Gate; <reason>
+
+[tools]
+node = "24.21.0"
+go = "1.24.0"
+# pnpm backs the frontend tasks; its lockfile lives in internal/frontend/.
+"npm:pnpm" = "11.22.0"
+
+# The frontend lives in internal/frontend/ (upstream's layout), the browser tests in e2e/.
+[tasks."setup:deps"]
+description = "Install the frontend's and the e2e suite's locked dependencies"
+run = [
+  "pnpm --dir internal/frontend install --frozen-lockfile",
+  "npm ci --prefix e2e --no-audit --no-fund",
+]
+
+[tasks.typecheck]
+description = "Strict TS type-check of the frontend (tsc --noEmit)"
+run = "pnpm --dir internal/frontend exec tsc --noEmit"
+
+[tasks."lint:ts"]
+description = "Frontend Oxlint (changed applicable files in CI; full src/ locally)"
+run = "bash scripts/check-frontend.sh lint"
+
+[tasks.format]
+description = "Frontend Oxfmt check (changed applicable files in CI; full src/ locally)"
+run = "bash scripts/check-frontend.sh format"
+
+[tasks.test]
+description = "Go and frontend unit tests, with JUnit reports in reports/test/"
+depends = ["test:go", "test:ts"]
+
+[tasks."test:go"]
+description = "go test through gotestsum"
+run = "gotestsum --junitfile reports/test/go.xml -- -count=1 ./..."
+
+[tasks."test:ts"]
+description = "frontend Vitest"
+run = "pnpm --dir internal/frontend exec vitest run --reporter=default --reporter=junit --outputFile.junit={{config_root}}/reports/test/frontend.xml"
+
+[tasks.build]
+description = "Build the embedded frontend and the mo binary"
+run = "make build"
+
+[tasks.dev]
+description = "Build mo with its frontend, then serve in the foreground on port 16275 (files after --)"
+run = ["make build", "./mo -p 16275 --foreground"]
+
+[tasks.e2e]
+description = "Build the embedded frontend and Go binary, then run the Playwright browser tests (JUnit in reports/test/)"
+run = ["make e2e"]
+
+[tasks.setup]
+description = "Install the standards package, its tools and the git hooks, then every setup:* task"
+depends = ["standards:install"]
+# `mise install` only when something is missing: on a machine with many tracked configs a no-op
+# install still rebuilds every shim.
+run = ['test -z "$(mise ls --missing)" || mise install', "mise exec -- lefthook install"]
+# This repository's own setup steps (dependencies the Checks or Lifecycle Tasks need) are setup:*
+# tasks; none is fine.
+depends_post = [{ task = "setup:*", optional = true }]
+
+[tasks."standards:install"]
+description = "Install the latest Standards Release (or the STANDARDS_VERSION Release Pin) into .standards/"
+run = '''npm install --prefix .standards --no-save --prefer-online --fetch-retries=0 --no-audit --no-fund --ignore-scripts --loglevel=error "--@rubio-enterprises:registry=${STANDARDS_REGISTRY:-https://npm.pkg.github.com}" '--//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' "@rubio-enterprises/standards@${STANDARDS_VERSION:-latest}"'''
+
+# Lifecycle Tasks (test, typecheck, build, e2e) are this repository's own. `test` and `e2e` write
+# reports/test/junit.xml; the Test Gate runs each one that exists.
+[hooks]
+enter = "test -f .standards/node_modules/@rubio-enterprises/standards/mise/standards.toml || echo 'standards: not installed; run mise run setup' >&2"
