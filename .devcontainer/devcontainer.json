@@ -16,8 +16,7 @@
     "source=${devcontainerId}-e2e-node-modules,target=${containerWorkspaceFolder}/e2e/node_modules,type=volume"
   ],
   "containerEnv": {
-    "pnpm_config_store_dir": "/home/vscode/.local/share/pnpm/store",
-    "STANDARDS_DEVCONTAINER": "1"
+    "pnpm_config_store_dir": "/home/vscode/.local/share/pnpm/store"
   },
   "securityOpt": ["no-new-privileges=false"],
   "forwardPorts": [16275],
@@ -29,6 +28,8 @@
   "otherPortsAttributes": {
     "onAutoForward": "ignore"
   },
-  "onCreateCommand": "bash -c 'source scripts/common/standards-pin.sh && standards_devcontainer_setup \"$PWD\" --check-only && exec \"$@\"' standards-lifecycle bash -c 'sudo chown vscode internal/frontend/node_modules e2e/node_modules'",
-  "updateContentCommand": "bash -c 'source scripts/common/standards-pin.sh && standards_devcontainer_setup \"$PWD\" --check-only && exec \"$@\"' standards-lifecycle bash -c 'mise run setup'"
+  "onCreateCommand": "sudo chown vscode internal/frontend/node_modules e2e/node_modules && mise run setup",
+  "remoteEnv": {
+    "NODE_AUTH_TOKEN": "${localEnv:NODE_AUTH_TOKEN}"
+  }
 }

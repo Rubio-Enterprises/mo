@@ -8,9 +8,6 @@ e2e/test-results
 e2e/playwright-report
 
 
-# >>> rubio-standards >>>
-# Managed by rubio-standards Copier template. Do not edit between sentinels —
-# `scripts/merge-gitignore.sh` rewrites this block on every `copier copy/update`.
 .DS_Store
 .envrc.local
 # .mise.local.toml stays trackable for committed repository tools, tasks and env
@@ -21,21 +18,9 @@ dist/
 build/
 coverage/
 reports/
-# Shared Config Directory (ADR-0033), provisioned by `mise bootstrap --only repos,tools`.
-.standards-config/
 
-# .claude deny-block (template/v1.29.0): ignore the whole .claude/ dir EXCEPT
-# the committed cloud carrier + hooks/commands/agents. CONTENTS form (.claude/*)
-# is mandatory — a dir-form `.claude/` would make the `!` negations silent
-# no-ops (git cannot re-include a path under an ignored DIRECTORY). Keeps
-# settings.json + hooks/commands/agents trackable while ignoring
-# settings.local.json and other local-only .claude/ state.
-# The leading `!.claude/` re-includes the directory itself FIRST, so the
-# negations below still fire when a parent ignore shadows .claude/ — e.g. a
-# developer whose GLOBAL ~/.gitignore ignores `.claude/`. Without it, git
-# can't re-include a path whose parent dir is excluded, the carrier is
-# silently un-add-able, and MD-09 / CLAUDE-SETTINGS-PLUGIN-BLOCK red-X in CI
-# while local check.sh passes. No-op without such a global ignore.
+# .claude/: only the committed settings and hooks/commands/agents; the leading negation
+# re-includes the directory under a global .claude ignore.
 !.claude/
 .claude/*
 !.claude/settings.json
@@ -52,18 +37,18 @@ vendor/
 *.exe
 *.test
 *.out
-# <<< rubio-standards <<<
 
 # Keep the committed agent skills (.claude/skills/run-mo/) trackable. Must come
-# AFTER the rubio-standards block, whose .claude deny-block ignores everything
-# under .claude/ except the cloud carrier and hooks/commands/agents.
+# after the .claude/* rule above.
 !.claude/skills/
 
 # Keep the placeholder for `internal/static/dist/` so `//go:embed all:dist` in
 # internal/static/static.go matches at least one file before `go generate`
-# runs. Must come AFTER the rubio-standards block above (which ignores `dist/`
+# runs. Must come after the `dist/` rule above (which ignores `dist/`
 # anywhere); gitignore requires re-allowing the directory before re-allowing
 # a file inside it. The real frontend bundle is still gitignored via the
 # `internal/static/dist/**/*` rule near the top of this file.
 !internal/static/dist/
 !internal/static/dist/.gitkeep
+.standards/
+lefthook-local.yml

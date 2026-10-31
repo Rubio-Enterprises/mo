@@ -1,0 +1,16 @@
+// markdownlint-cli2 options for this repository; the rules come from @rubio-enterprises/standards.
+// `ignores` replaces the shared list, so it restates it and adds testdata/ (Markdown fixtures).
+{
+  "ignores": [
+    "**/node_modules",
+    "**/.astro",
+    "**/dist",
+    "**/build",
+    "**/playwright-report",
+    "**/test-results",
+    "**/CHANGELOG.md",
+    "**/CHANGELOG.rubio.md",
+    ".standards",
+    "testdata"
+  ]
+}

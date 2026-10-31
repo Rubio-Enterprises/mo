@@ -1,6 +1,8 @@
 # Agent context
 
-This repo follows Rubio-Enterprises standards. Run `/audit-standards` from a Claude Code session to check conformance, or `/onboard-repo` for greenfield setup.
+<!-- agnix-disable CC-MEM-014 -->
+Checks come from `@rubio-enterprises/standards`: `mise run setup` once (needs `NODE_AUTH_TOKEN`),
+then `mise run check`. This is a fork of `k1LoW/mo`; `check` covers the fork's own changes.
 
 ---
 
@@ -24,18 +26,14 @@ This repository uses a single-context domain documentation layout. See `docs/age
 
 ## Build & Run
 
-Requires **Go 1.26+** and [pnpm](https://pnpm.io/). The Node.js version is pinned in `.mise.toml` (managed by mise) and must satisfy the `packageManager` pin in `internal/frontend/package.json`: **pnpm 11.9.0 requires Node ≥ 22.13**, so any `go generate` / `pnpm` step fails on an older Node.
+Requires **Go 1.26+** and [pnpm](https://pnpm.io/). The Node.js version is pinned in `mise.toml` (managed by mise) and must satisfy the `packageManager` pin in `internal/frontend/package.json`: **pnpm 11.9.0 requires Node ≥ 22.13**, so any `go generate` / `pnpm` step fails on an older Node.
 
 The tiers below are the complete set of ways to build, run, and test mo. Every
 `make`/`pnpm` target that runs `go generate` needs Node ≥ 22.13 (see above).
 
-On a fresh clone, run `mise bootstrap --only repos,tools --yes` first. It clones
-the Shared Config Directory into the gitignored `.standards-config/` (ADR-0033)
-and installs the pinned toolchain. The git hooks, lint
-configs and shared mise tasks (including `setup`) read that checkout and fail
-while it is missing; a plain `mise install` does not create it. `mise run setup`
-then refreshes it and installs the Go modules and the frontend's dependencies.
-The Dev Container runs both on create.
+On a fresh clone, run `mise run setup` (it needs `NODE_AUTH_TOKEN`). It installs
+`@rubio-enterprises/standards` into the gitignored `.standards/`, the pinned toolchain, the git
+hooks and the frontend's and e2e suite's dependencies. The Dev Container runs it on create.
 
 ### Build
 
@@ -60,7 +58,7 @@ The Dev Container runs both on create.
 - `go test ./...` — all Go packages
 - `go test ./internal/server/ -run TestHandleReorderFiles` — a single Go test
 - `go test ./... -coverprofile=coverage.out -covermode=count -count=1` — with coverage
-- `mise run test` — gotestsum; writes JUnit to `reports/unit/junit.xml`
+- `mise run test` — gotestsum and Vitest; JUnit reports in the `reports/test/` directory
 
 ### Test — frontend (vitest)
 
@@ -71,10 +69,9 @@ The Dev Container runs both on create.
 ### Test — end-to-end (Playwright, `e2e/`)
 
 - `make e2e` — build binary, install the browser, run all specs (API + SPA + CLI)
-- `mise run e2e` — repo-owned entrypoint for the shared E2E gate; delegates to
-  `make e2e` and writes `reports/e2e/junit.xml` when `CI=1`.
-- `cd e2e && npm test` — specs only (requires `./mo` already built)
-- `cd e2e && npm run test:headed` · `test:ui` · `report` — require a display; not runnable in a headless container
+- `mise run e2e` — the Test Gate's entrypoint; delegates to `make e2e`, JUnit in the
+  `reports/test/` directory
+- `test:headed`, `test:ui` and `report` (the e2e package scripts) require a display; not runnable in a headless container
 
 ### Test — combined
 
@@ -84,11 +81,10 @@ The Dev Container runs both on create.
 ### Lint / format / hooks
 
 - `make lint` — oxlint (frontend) + golangci-lint + gostyle (run `make depsdev` once to install gostyle/gocredits)
-- `mise run lint` — golangci-lint only
 - `make fmt` / `make fmt-check` — oxfmt write / check
 - `cd internal/frontend && pnpm run lint` · `pnpm run fmt` · `pnpm run fmt:check` — frontend directly
 - `mise exec -- lefthook run pre-commit --all-files` — run all git hooks across the repo
-- `mise run check` — lint, typecheck and test, then every pre-commit hook over every file
+- `mise run check` — every standards Check and this repository's hooks (on this fork: the files it changed)
 
 ### CLI Flags
 
@@ -129,7 +125,7 @@ The Dev Container runs both on create.
 - Key components: `App.tsx` (routing/state), `Sidebar.tsx` (file list with flat/tree view, resizable, drag-and-drop reorder), `TreeView.tsx` (tree view with collapsible directories), `MarkdownViewer.tsx` (rendering + raw view toggle), `TocPanel.tsx` (table of contents, resizable), `GroupDropdown.tsx` (group switcher), `FileContextMenu.tsx` (shared kebab menu for file operations), `WidthToggle.tsx` (wide/narrow content width toggle)
 - Custom hooks: `useSSE.ts` (SSE subscription with auto-reconnect), `useApi.ts` (typed API fetch wrappers), `useActiveHeading.ts` (scroll-based active heading tracking via IntersectionObserver)
 - Utilities: `buildTree.ts` (converts flat file list to hierarchical tree with common prefix removal and single-child directory collapsing)
-- Theme: GitHub-style light/dark via CSS custom properties (`--color-gh-*`) in `styles/app.css`, toggled by `data-theme` attribute on `<html>`. UI components use Tailwind classes like `bg-gh-bg-sidebar`, `text-gh-text-secondary`, etc.
+- Theme: GitHub-style light/dark via CSS custom properties (`--color-gh-*`) in `internal/frontend/src/styles/app.css`, toggled by `data-theme` attribute on `<html>`. UI components use Tailwind classes like `bg-gh-bg-sidebar`, `text-gh-text-secondary`, etc.
 - Toggle button pattern: `RawToggle.tsx` and `TocToggle.tsx` follow the same style (`bg-transparent border border-gh-border rounded-md p-1.5 text-gh-text-secondary`). Header buttons (`ViewModeToggle`, `ThemeToggle`, `WidthToggle`, sidebar toggle) use `text-gh-header-text` instead. New buttons should match the appropriate variant.
 
 ## Key Design Patterns
@@ -175,7 +171,7 @@ Frontend: ESLint via `pnpm run lint` in `internal/frontend/`. Formatting via `pn
 ## CI/CD
 
 - **CI**: golangci-lint (via reviewdog), gostyle, `make ci` (test + coverage), octocov
-- **Release**: tags matching `v*-strubio.*` trigger `.github/workflows/tagpr.yml`. The `go generate` step (frontend build) runs before cross-platform Go builds; binaries are uploaded as a GitHub release and `Formula/mo.rb` in `Rubio-Enterprises/homebrew-tap` is rewritten in the same job. There is no tagpr and no goreleaser in this fork.
+- **Release**: tags matching `v*-strubio.*` trigger `.github/workflows/tagpr.yml`. The `go generate` step (frontend build) runs before cross-platform Go builds; binaries are uploaded as a GitHub release and the `mo` formula in `Rubio-Enterprises/homebrew-tap` is rewritten in the same job. There is no tagpr and no goreleaser in this fork.
 - **License check**: `.github/workflows/license-scan.yml` runs Trivy's license scanner on PRs and pushes to `main`. It replaces the manually disabled upstream `trivy.yml` path so GitHub registers the preserved check as an active workflow.
 - CI requires pnpm setup (`pnpm/action-setup`) before any Go build step because `go generate` triggers the frontend build.
 
