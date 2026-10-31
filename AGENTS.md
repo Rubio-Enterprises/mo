@@ -26,18 +26,14 @@ This repository uses a single-context domain documentation layout. See `docs/age
 
 ## Build & Run
 
-Requires **Go 1.26+** and [pnpm](https://pnpm.io/). The Node.js version is pinned in `.mise.toml` (managed by mise) and must satisfy the `packageManager` pin in `internal/frontend/package.json`: **pnpm 11.9.0 requires Node ≥ 22.13**, so any `go generate` / `pnpm` step fails on an older Node.
+Requires **Go 1.26+** and [pnpm](https://pnpm.io/). The Node.js version is pinned in `mise.toml` (managed by mise) and must satisfy the `packageManager` pin in `internal/frontend/package.json`: **pnpm 11.9.0 requires Node ≥ 22.13**, so any `go generate` / `pnpm` step fails on an older Node.
 
 The tiers below are the complete set of ways to build, run, and test mo. Every
 `make`/`pnpm` target that runs `go generate` needs Node ≥ 22.13 (see above).
 
-On a fresh clone, run `mise bootstrap --only repos,tools --yes` first. It clones
-the Shared Config Directory into the gitignored `.standards-config/` (ADR-0033)
-and installs the pinned toolchain. The git hooks, lint
-configs and shared mise tasks (including `setup`) read that checkout and fail
-while it is missing; a plain `mise install` does not create it. `mise run setup`
-then refreshes it and installs the Go modules and the frontend's dependencies.
-The Dev Container runs both on create.
+On a fresh clone, run `mise run setup` (it needs `NODE_AUTH_TOKEN`). It installs
+`@rubio-enterprises/standards` into the gitignored `.standards/`, the pinned toolchain, the git
+hooks and the frontend's and e2e suite's dependencies. The Dev Container runs it on create.
 
 ### Build
 

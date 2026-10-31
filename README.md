@@ -302,14 +302,13 @@ $ mo --status --json
 
 ## Development
 
-Requires Go 1.26+ and [pnpm](https://pnpm.io/). Node.js is pinned via `pnpm.executionEnv.nodeVersion` in `internal/frontend/package.json`; other runtimes are pinned via `.mise.toml`.
+Requires Go 1.26+ and [pnpm](https://pnpm.io/). Node.js is pinned via `pnpm.executionEnv.nodeVersion` in `internal/frontend/package.json`; other runtimes are pinned via `mise.toml`.
 
 ```bash
 git clone https://github.com/Rubio-Enterprises/mo.git
 cd mo
-mise bootstrap --only repos,tools  # Shared Config Directory (.standards-config/) + pinned tools
-mise run setup                     # Go modules and frontend deps
-lefthook install                   # register git hooks
+mise run setup                     # standards package, pinned tools, git hooks, frontend + e2e deps
+mise run check                     # every check (on this fork: the files it changed)
 
 # Full build (frontend + Go binary, with ldflags)
 make build
@@ -320,8 +319,8 @@ make dev ARGS="testdata/basic.md"
 # Lint
 golangci-lint run
 
-# Tests with JUnit output (Rubio-Enterprises go-cli standard)
-gotestsum --junitfile=reports/unit/junit.xml -- ./...
+# Go and frontend tests with JUnit output in reports/test/
+mise run test
 
 # Or via make
 make test
