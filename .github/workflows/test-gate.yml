@@ -1,105 +1,66 @@
+# Test Gate (from @rubio-enterprises/standards; this repository owns it). The `test-gate` job is a
+# required status check. It runs each Lifecycle Task this repository defines (typecheck, build,
+# test, e2e) and, for test and e2e, requires JUnit reports under reports/test/ (junit.xml, or one
+# per package) with at least one test case and no failures, so a suite that runs nothing cannot
+# pass. Change runs-on, add services or setup steps as the repository needs; keep the job name.
+# An Opt-out (STANDARDS_TEST_GATE = "off" in mise.toml) passes it with a notice.
 name: test-gate
-# Canonical repository-local Test Gate (standards ADR-0020). It publishes the
-# single required `test-gate` status context and may contain ONLY test-execution
-# jobs plus the aggregate.
-#
-# This repo is polyglot, so the canonical non-E2E surface — `mise run test`,
-# which fans out to `test:go` and `test:ts` — is split into one execution job
-# per stack, both aggregated below. Nothing else belongs here: the frontend
-# oxlint/oxfmt + golangci-lint/gostyle checks and the octocov coverage report
-# stay in test.yml, and the Playwright e2e job stays in standards.yml.
-#
-# Runner: the gate deliberately runs the single primary Linux route rather than
-# test.yml's ubuntu/macos matrix — the contract forbids a matrix on a mandatory
-# execution job, and test.yml keeps the cross-OS run as an advisory workflow.
-#
-# `on:` is quoted to satisfy `yaml[truthy]` — same convention as standards.yml.
+
 "on":
   pull_request:
   merge_group:
+
 permissions:
   contents: read
+  packages: read
+
 concurrency:
-  # Superseded pushes to the same PR/merge-queue entry cancel the in-flight run.
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
+
 jobs:
-  go-tests:
-    name: go tests
-    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
-    timeout-minutes: 15
-    outputs:
-      tests_ran: ${{ steps.test.outputs.tests_ran }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version-file: go.mod
-      - id: test
-        name: Run canonical Go unit tests
-        env:
-          RUBIO_TEST_GATE_COUNT_OUTPUT: ${{ runner.temp }}/test-gate-count
-        # The shared `test:go` task wraps this same `./...` run in gotestsum for its JUnit
-        # report, but the gate contract's recognized-test-command allowlist only
-        # accepts a bare `go test`, so the gate invokes it directly and takes the
-        # executed-test count from the `=== RUN` lines `-v` emits.
-        run: |
-          set -euo pipefail
-          rm -f "$RUBIO_TEST_GATE_COUNT_OUTPUT"
-          go test -count=1 -v ./... | tee "$RUNNER_TEMP/go-test.log"
-          grep -c '=== RUN' "$RUNNER_TEMP/go-test.log" > "$RUBIO_TEST_GATE_COUNT_OUTPUT"
-          test -s "$RUBIO_TEST_GATE_COUNT_OUTPUT"
-          test "$(cat "$RUBIO_TEST_GATE_COUNT_OUTPUT")" -gt 0
-          echo "tests_ran=true" >> "$GITHUB_OUTPUT"
-
-  ts-tests:
-    name: frontend tests (vitest)
-    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
-    timeout-minutes: 15
-    outputs:
-      tests_ran: ${{ steps.test.outputs.tests_ran }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
-        with:
-          node-version-file: .nvmrc
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: internal/frontend/package.json
-      - name: Install frontend deps
-        run: pnpm install --frozen-lockfile
-        working-directory: internal/frontend
-      - id: test
-        name: Run canonical frontend unit tests
-        env:
-          RUBIO_TEST_GATE_COUNT_OUTPUT: ${{ runner.temp }}/test-gate-count
-        working-directory: internal/frontend
-        # `test:ts` (.mise.local.toml) is `pnpm --dir internal/frontend run test`; running it
-        # from that working directory is the same invocation, driven through
-        # `pnpm exec vitest` so the JUnit reporter flags reach vitest itself.
-        # `default` runs alongside `junit` so a failing suite still prints to the
-        # CI log — junit alone writes only the XML and leaves the log empty.
-        # `outputFile` as a plain string is consumed by the junit reporter;
-        # `default` writes to stdout and ignores it.
-        run: |
-          set -euo pipefail
-          rm -f "$RUBIO_TEST_GATE_COUNT_OUTPUT"
-          pnpm exec vitest run --reporter=default --reporter=junit --outputFile="$RUNNER_TEMP/vitest.xml"
-          grep -o '<testcase ' "$RUNNER_TEMP/vitest.xml" | wc -l | tr -d ' ' > "$RUBIO_TEST_GATE_COUNT_OUTPUT"
-          test -s "$RUBIO_TEST_GATE_COUNT_OUTPUT"
-          test "$(cat "$RUBIO_TEST_GATE_COUNT_OUTPUT")" -gt 0
-          echo "tests_ran=true" >> "$GITHUB_OUTPUT"
-
-  aggregate:
+  test-gate:
     name: test-gate
-    if: ${{ always() }}
-    needs: [go-tests, ts-tests]
-    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
-    timeout-minutes: 15
-    env:
-      NEEDS_JSON: ${{ toJSON(needs) }}
+    # medium: typecheck, build, Go + Vitest tests and the Playwright e2e run in one job, past
+    # ubuntu-slim's 15-minute cap (this public repository gets the hosted fallback).
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').medium || fromJSON('["ubuntu-latest"]') }}
+    timeout-minutes: 40
     steps:
-      - name: Require successful non-empty test execution
-        run: >-
-          jq -e 'length > 0 and all(.[]; .result == "success" and
-          .outputs.tests_ran == "true")' <<<"$NEEDS_JSON"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          install: false
+      - name: Install the standards package, the tools and the dependencies
+        run: mise run setup
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+      - name: Run the Lifecycle Tasks this repository defines
+        run: |
+          if [ "$(mise exec -- printenv STANDARDS_TEST_GATE || true)" = off ]; then
+            echo "::notice::Test Gate Opt-out: STANDARDS_TEST_GATE = off in mise.toml"
+            exit 0
+          fi
+          for task in typecheck build test e2e; do
+            if ! mise tasks info "$task" >/dev/null 2>&1; then echo "no $task task"; continue; fi
+            rm -rf reports/test
+            echo "::group::mise run $task"
+            mise run "$task"
+            echo "::endgroup::"
+            case $task in test | e2e)
+              # reports/test/junit.xml, or one report per package in a monorepo.
+              if [ -z "$(find reports/test -name '*.xml' 2>/dev/null)" ]; then
+                echo "::error::$task wrote no JUnit report under reports/test/"
+                exit 1
+              fi
+              junit() { find reports/test -name '*.xml' -exec cat {} + | { grep -oE "$1" || true; } | wc -l; }
+              cases=$(junit '<testcase[ >]')
+              failed=$(junit '<(failure|error)[ >/]')
+              echo "$task: $cases test cases, $failed failures or errors"
+              if [ "$cases" -eq 0 ] || [ "$failed" -ne 0 ]; then
+                echo "::error::$task: the JUnit proof needs at least one test case and no failures"
+                exit 1
+              fi
+            esac
+          done
