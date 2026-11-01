@@ -9,7 +9,7 @@ min_version = "2026.10.19"
 
 [tools]
 node = "24.21.0"
-go = "1.24.0"
+go = "1.27.3"
 # pnpm backs the frontend tasks; its lockfile lives in internal/frontend/.
 "npm:pnpm" = "11.22.0"
 
