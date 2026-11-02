@@ -14,7 +14,7 @@ Issues and PRDs are tracked in GitHub Issues for `Rubio-Enterprises/mo`.
 
 ### Triage labels
 
-Triage uses the canonical `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix` labels. See `docs/agents/triage-labels.md`.
+Use the canonical state labels in `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
