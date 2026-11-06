@@ -37,6 +37,10 @@ jobs:
     permissions:
       contents: read
     uses: Rubio-Enterprises/.github/.github/workflows/project-route.yml@main
+    with:
+      # medium: typecheck, build, Go + Vitest tests and the Playwright e2e run in one job, past
+      # ubuntu-slim's 15-minute cap (this public repository gets the hosted fallback).
+      route: medium
 
   test-gate:
     name: test-gate
