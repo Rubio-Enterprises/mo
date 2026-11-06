@@ -1,8 +1,8 @@
 # Agent context
 
 <!-- agnix-disable CC-MEM-014 -->
-Checks come from `@rubio-enterprises/standards`: `mise run setup` once (needs `NODE_AUTH_TOKEN`),
-then `mise run check`. This is a fork of `k1LoW/mo`; `check` covers the fork's own changes.
+Checks come from `@rubio-enterprises/standards`: `just build && just setup` once,
+then `just check`. This is a fork of `k1LoW/mo`; `check` covers the fork's own changes.
 
 ---
 
@@ -26,14 +26,14 @@ This repository uses a single-context domain documentation layout. See `docs/age
 
 ## Build & Run
 
-Requires **Go 1.26+** and [pnpm](https://pnpm.io/). The Node.js version is pinned in `mise.toml` (managed by mise) and must satisfy the `packageManager` pin in `internal/frontend/package.json`: **pnpm 11.9.0 requires Node ≥ 22.13**, so any `go generate` / `pnpm` step fails on an older Node.
+Requires **Go 1.26+** and [pnpm](https://pnpm.io/). The Node.js version is pinned in `image/mise.toml` (managed by mise) and must satisfy the `packageManager` pin in `internal/frontend/package.json`: **pnpm 11.9.0 requires Node ≥ 22.13**, so any `go generate` / `pnpm` step fails on an older Node.
 
 The tiers below are the complete set of ways to build, run, and test mo. Every
 `make`/`pnpm` target that runs `go generate` needs Node ≥ 22.13 (see above).
 
-On a fresh clone, run `mise run setup` (it needs `NODE_AUTH_TOKEN`). It installs
-`@rubio-enterprises/standards` into the gitignored `.standards/`, the pinned toolchain, the git
-hooks and the frontend's and e2e suite's dependencies. The Dev Container runs it on create.
+On a fresh clone, run `just build && just setup`. The base image supplies
+`@rubio-enterprises/standards` at `/opt/standards`; setup installs git hooks and the
+frontend's and e2e suite's dependencies. The Dev Container attaches to the same service.
 
 ### Build
 
@@ -45,7 +45,7 @@ hooks and the frontend's and e2e suite's dependencies. The Dev Container runs it
 
 - `make dev ARGS="testdata/basic.md"` — build, then run foreground on port 16275
 - `make dev ARGS="-t design testdata/basic.md"` — with a tab group (`-t` takes one group per invocation)
-- `mise run dev -- testdata/basic.md` — the same build and foreground server on port 16275, which the Dev Container forwards
+- `just dev -- testdata/basic.md` — the same build and foreground server on port 16275, which the Dev Container forwards
 - `./mo testdata/basic.md` — after `make build`; self-backgrounds and opens a browser (default port 6275)
 - `cd internal/frontend && pnpm run dev` — Vite dev server, proxies `/_/` to `localhost:6275` (set `MO_DISABLE_AUTH=1` on the backend for this cross-origin flow)
 - `make screenshot` — regenerate README screenshots (**requires Google Chrome**, not bundled Chromium)
@@ -58,7 +58,7 @@ hooks and the frontend's and e2e suite's dependencies. The Dev Container runs it
 - `go test ./...` — all Go packages
 - `go test ./internal/server/ -run TestHandleReorderFiles` — a single Go test
 - `go test ./... -coverprofile=coverage.out -covermode=count -count=1` — with coverage
-- `mise run test` — gotestsum and Vitest; JUnit reports in the `reports/test/` directory
+- `just test` — gotestsum and Vitest; JUnit reports in the `reports/test/` directory
 
 ### Test — frontend (vitest)
 
@@ -69,7 +69,7 @@ hooks and the frontend's and e2e suite's dependencies. The Dev Container runs it
 ### Test — end-to-end (Playwright, `e2e/`)
 
 - `make e2e` — build binary, install the browser, run all specs (API + SPA + CLI)
-- `mise run e2e` — the Test Gate's entrypoint; delegates to `make e2e`, JUnit in the
+- `just e2e` — the Test Gate's entrypoint; delegates to `make e2e`, JUnit in the
   `reports/test/` directory
 - `test:headed`, `test:ui` and `report` (the e2e package scripts) require a display; not runnable in a headless container
 
@@ -83,8 +83,8 @@ hooks and the frontend's and e2e suite's dependencies. The Dev Container runs it
 - `make lint` — oxlint (frontend) + golangci-lint + gostyle (run `make depsdev` once to install gostyle/gocredits)
 - `make fmt` / `make fmt-check` — oxfmt write / check
 - `cd internal/frontend && pnpm run lint` · `pnpm run fmt` · `pnpm run fmt:check` — frontend directly
-- `mise exec -- lefthook run pre-commit --all-files` — run all git hooks across the repo
-- `mise run check` — every standards Check and this repository's hooks (on this fork: the files it changed)
+- `just exec lefthook run pre-commit --all-files` — run all git hooks across the repo
+- `just check` — every standards Check and this repository's hooks (on this fork: the files it changed)
 
 ### CLI Flags
 
