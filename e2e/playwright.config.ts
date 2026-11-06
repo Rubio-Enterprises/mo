@@ -23,10 +23,9 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 2 : undefined,
-  // The Test Gate reads the JUnit report from reports/test/.
   reporter: [
     [process.env.CI ? "dot" : "list"],
-    ["junit", { outputFile: resolve(REPO_ROOT, "reports/test/e2e.xml") }],
+    ["junit", { outputFile: resolve(REPO_ROOT, "reports/e2e/junit.xml") }],
   ],
 
   globalSetup: "./global-setup.ts",
