@@ -50,5 +50,5 @@ vendor/
 # `internal/static/dist/**/*` rule near the top of this file.
 !internal/static/dist/
 !internal/static/dist/.gitkeep
-.standards/
 lefthook-local.yml
+.venv/

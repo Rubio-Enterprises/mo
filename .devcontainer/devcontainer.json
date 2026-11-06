@@ -1,6 +1,10 @@
 {
   "name": "mo",
-  "image": "ghcr.io/rubio-enterprises/mo/devcontainer:main",
+  "dockerComposeFile": ["../compose.yaml"],
+  "service": "dev",
+  "workspaceFolder": "${localWorkspaceFolder}",
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": false,
   "customizations": {
     "fly-durable": {
       "setupHosts": [
@@ -10,26 +14,5 @@
         "sum.golang.org"
       ]
     }
-  },
-  "mounts": [
-    "source=${devcontainerId}-frontend-node-modules,target=${containerWorkspaceFolder}/internal/frontend/node_modules,type=volume",
-    "source=${devcontainerId}-e2e-node-modules,target=${containerWorkspaceFolder}/e2e/node_modules,type=volume"
-  ],
-  "containerEnv": {
-    "pnpm_config_store_dir": "/home/vscode/.local/share/pnpm/store"
-  },
-  "securityOpt": ["no-new-privileges=false"],
-  "forwardPorts": [16275],
-  "portsAttributes": {
-    "16275": {
-      "label": "mo (mise run dev)"
-    }
-  },
-  "otherPortsAttributes": {
-    "onAutoForward": "ignore"
-  },
-  "onCreateCommand": "sudo chown vscode internal/frontend/node_modules e2e/node_modules && mise run setup",
-  "remoteEnv": {
-    "NODE_AUTH_TOKEN": "${localEnv:NODE_AUTH_TOKEN}"
   }
 }

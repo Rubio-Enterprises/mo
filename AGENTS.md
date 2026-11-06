@@ -212,3 +212,30 @@ Two constraints worth not rediscovering the hard way:
 - **`.github/workflows/tagpr.yml` keeps its misleading filename on purpose.** Upstream owns that path, so holding it stops upstream's tagpr + goreleaser pipeline from reappearing through a sync merge. Renaming it to `release.yml` would let upstream's version land as a plain file addition and run on every push to `main`.
 
 Tags from the retired `strubio-v*` scheme (`strubio-v0.1.0` … `strubio-v0.27.0`) stay on origin as tombstones — no history rewrite. Homebrew upgrades cleanly across the cutover because `1.6.7-strubio.1` outranks `0.27.0` on the first version token.
+
+## Commands
+
+First command in a fresh checkout: `just build`.
+Never install toolchains on the host — all project commands run in the dev image through `just`.
+
+```bash
+just build
+just setup
+just check
+just fmt
+just check-pr
+just setup-deps
+just typecheck
+just lint-ts
+just format
+just test
+just test-go
+just test-ts
+just package
+just dev
+just e2e
+just shell
+just exec <cmd...>
+```
+
+Single test: `just exec uv run pytest path::test` (Python); otherwise prefix the underlying runner with `just exec`.
