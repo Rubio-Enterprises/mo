@@ -9,7 +9,7 @@ This repository uses the single-context layout: one root `CONTEXT.md` and root-l
 ## Before exploring, read these
 
 - **`CONTEXT.md`** at the repo root.
-- **`docs/adr/`** — read ADRs that touch the area you are about to work in.
+- **`docs/adr/`** — read ADRs that touch the area you are about to work in; skip records whose `status` is `deprecated` or `superseded by ADR-NNNN`.
 
 If these files do not exist, proceed silently. Do not flag their absence or suggest creating them upfront. The `/domain-modeling` skill creates them lazily when terms or decisions are resolved.
 
