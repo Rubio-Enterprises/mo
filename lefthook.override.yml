@@ -16,7 +16,6 @@
 # No Check validates this file: confirm a patch with `lefthook dump`.
 
 pre-commit:
-  # repo-oxfmt and the Fixers would otherwise rewrite files concurrently.
   parallel: false
   jobs:
     - name: fixers

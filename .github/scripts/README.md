@@ -30,6 +30,6 @@ The legacy per-file "files in pull request scope" table and Details block are
 intentionally dropped by the lead's decision. Total coverage, covered/total,
 the main diff, test/code ratio and Lifecycle timing remain.
 
-This is preparatory: the legacy workflow stays until live listener and baseline
-proofs after merge. The inline gotestsum dispatcher also stays until the shared
-mandate Check supports delegation to `bin/test-go.sh`.
+The central Test Gate is the only automated test run. Coverage reporting consumes
+its summary without a second test job. The inline gotestsum dispatcher stays until
+the shared mandate Check supports delegation to `bin/test-go.sh`.

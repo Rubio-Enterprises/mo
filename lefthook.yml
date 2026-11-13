@@ -15,17 +15,13 @@ pre-commit:
     # The frontend (upstream's internal/frontend/) is formatted by Oxfmt and linted by Oxlint with
     # upstream's configs; upstream formats only its src/, never the config files.
     - name: repo-oxfmt
-      glob: "internal/frontend/src/**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts,css,scss,json,md,mdx,html,yaml,yml}"
-      stage_fixed: true
-      run: >-
-        mise exec -- pnpm --dir internal/frontend exec sh -c 'cd ../..; exec
-        oxfmt -c internal/frontend/.oxfmtrc.json --write "$@"' -- {staged_files}
+      root: internal/frontend/
+      run: pnpm exec oxfmt -c .oxfmtrc.json --check src/
     - name: repo-gostyle
       run: go vet -vettool="$(mise which gostyle)" -gostyle.config="$(pwd)/.gostyle.yml" ./...
     - name: repo-oxlint
-      glob: "internal/frontend/src/**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"
       root: internal/frontend/
-      run: pnpm exec oxlint -c .oxlintrc.json --disable-nested-config {staged_files}
+      run: pnpm exec oxlint -c .oxlintrc.json --disable-nested-config src/
 
 commit-msg:
   jobs:
