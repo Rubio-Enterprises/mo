@@ -2,7 +2,7 @@
 # Check tools are supplied by base at /opt/standards
 [tools]
 node = "24.21.0"
-go = "1.24.0"
+go = "1.26.6"
 # pnpm backs the frontend tasks; its lockfile lives in internal/frontend/.
 "npm:pnpm" = "11.22.0"
 
