@@ -1,8 +1,9 @@
 # Repository toolchain pins only, installed by Dockerfile
 # Check tools are supplied by base at /opt/standards
 [tools]
-node = "24.21.0"
+node = "24.22.1"
 go = "1.26.6"
+"aqua:k1LoW/gostyle" = "0.26.2"
 # pnpm backs the frontend tasks; its lockfile lives in internal/frontend/.
 "npm:pnpm" = "11.22.0"
 

@@ -1,0 +1,82 @@
+name: central coverage
+
+"on":
+  # Trusted default-branch reporter reads bounded archives as data and posts only numeric metrics.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: [Test Gate, standards]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: central-coverage-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  report-pr:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.name == 'Test Gate' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.repository.full_name == github.repository
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    steps: &report-steps
+      - name: Check out trusted reporter only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            .github/coverage-gate.yml
+          sparse-checkout-cone-mode: false
+      - name: Validate untrusted reports and source as data
+        id: prepare
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await require('./.github/scripts/coverage-report.cjs').prepare({ github, context, core });
+      - name: Measure sanitized coverage and source
+        if: steps.prepare.outputs.selected == 'true'
+        uses: k1LoW/octocov-action@a167dc0dee441b7ffc45e1b862ab55ec0d87f278 # v1.5.2
+        with:
+          version: v0.83.5
+          config: ${{ steps.prepare.outputs.directory }}/source/.octocov.yml
+          work-dir: ${{ steps.prepare.outputs.directory }}/source
+      - name: Publish only numeric metrics
+        if: steps.prepare.outputs.selected == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          COVERAGE_DIRECTORY: ${{ steps.prepare.outputs.directory }}
+        with:
+          script: |
+            await require('./.github/scripts/coverage-report.cjs').finish(
+              { github, context, core }, process.env.COVERAGE_DIRECTORY);
+      - name: Store central main baseline
+        if: steps.prepare.outputs.baseline == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: central-coverage-baseline
+          path: ${{ steps.prepare.outputs.directory }}/baseline.json
+          if-no-files-found: error
+          retention-days: 90
+
+  report-main:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.path == '.github/workflows/standards.yml' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+      github.event.workflow_run.repository.full_name == github.repository
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps: *report-steps
