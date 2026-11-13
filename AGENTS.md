@@ -64,7 +64,8 @@ frontend's and e2e suite's dependencies. The Dev Container attaches to the same 
 - `go test ./...` — all Go packages
 - `go test ./internal/server/ -run TestHandleReorderFiles` — a single Go test
 - `go test ./... -coverprofile=coverage.out -covermode=count -count=1` — with coverage
-- `just test` — gotestsum and Vitest; JUnit reports in the `reports/test/` directory
+- `just test`: the central test concern; JUnit in `reports/test/`, Go/frontend coverage
+  and the numeric summary in `reports/coverage/`.
 
 ### Test — frontend (vitest)
 
@@ -75,14 +76,15 @@ frontend's and e2e suite's dependencies. The Dev Container attaches to the same 
 ### Test — end-to-end (Playwright, `e2e/`)
 
 - `make e2e` — build binary, install the browser, run all specs (API + SPA + CLI)
-- `just e2e` — the Test Gate's entrypoint; delegates to `make e2e`, JUnit in the
-  `reports/test/` directory
+- `just e2e`: the Test Gate's entrypoint; delegates to `make e2e`, JUnit in
+  `reports/e2e/`.
 - `test:headed`, `test:ui` and `report` (the e2e package scripts) require a display; not runnable in a headless container
 
 ### Test — combined
 
 - `make test` — frontend coverage + Go coverage
-- `make ci` — `depsdev` + `generate` + `test` (matches the CI `Test` job)
+- `just exec make ci`: upstream compatibility target (`depsdev` + `generate` + `test`).
+  Central CI uses the Test Gate instead.
 
 ### Lint / format / hooks
 
@@ -90,7 +92,8 @@ frontend's and e2e suite's dependencies. The Dev Container attaches to the same 
 - `make fmt` / `make fmt-check` — oxfmt write / check
 - `cd internal/frontend && pnpm run lint` · `pnpm run fmt` · `pnpm run fmt:check` — frontend directly
 - `just exec lefthook run pre-commit --all-files` — run all git hooks across the repo
-- `just check` — every standards Check and this repository's hooks (on this fork: the files it changed)
+- `just check`: shared Checks plus full-source frontend checks and gostyle.
+  Use `just format` to apply frontend formatting.
 
 ### CLI Flags
 
@@ -172,14 +175,23 @@ Go linters (`.golangci.yml`): errorlint, godot, gosec, misspell (US locale), rev
 
 gostyle (`.gostyle.yml`): mixedcaps and funcfmt analyzers are disabled. errorstrings analysis excludes tests.
 
-Frontend: ESLint via `pnpm run lint` in `internal/frontend/`. Formatting via `pnpm run fmt` (check with `pnpm run fmt:check`).
+Frontend: Oxlint via `pnpm run lint` in `internal/frontend/`. Formatting via `pnpm run fmt` (check with `pnpm run fmt:check`).
 
 ## CI/CD
 
-- **CI**: golangci-lint (via reviewdog), gostyle, `make ci` (test + coverage), octocov
+- **Lint**: the central Standards Check owns golangci-lint, gostyle, Oxlint and Oxfmt.
+  Run the same Checks with `just check`.
+- **Tests**: the central Test Gate runs Linux concerns and the declared macOS test leg.
+  macOS executes `TestWatchedFile_RetainedAfterAtomicSaveRewrite` and
+  `TestPathAliasRegisterAndUnregister`; cross-compilation does not replace them.
+- **Coverage**: `.github/workflows/coverage.yml` reads the Test Gate's numeric summary
+  and posts total coverage, the main diff, test/code ratio and Lifecycle timing.
+  It stores the main baseline without rerunning tests. The per-file table is intentionally
+  omitted. For reporting failures and the trust boundary, read `.github/scripts/README.md`.
 - **Release**: tags matching `v*-strubio.*` trigger `.github/workflows/tagpr.yml`. The `go generate` step (frontend build) runs before cross-platform Go builds; binaries are uploaded as a GitHub release and the `mo` formula in `Rubio-Enterprises/homebrew-tap` is rewritten in the same job. There is no tagpr and no goreleaser in this fork.
 - **License check**: `.github/workflows/license-scan.yml` runs Trivy's license scanner on PRs and pushes to `main`. It replaces the manually disabled upstream `trivy.yml` path so GitHub registers the preserved check as an active workflow.
-- CI requires pnpm setup (`pnpm/action-setup`) before any Go build step because `go generate` triggers the frontend build.
+- Central checks use locked image tools and locked macOS provisioning. Frontend asset
+  generation belongs to the package concern, not test setup.
 
 ### Release Tags
 

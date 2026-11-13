@@ -36,8 +36,8 @@ go test ./internal/server/ -run TestHandleFiles
 # Run linters (oxlint for frontend, golangci-lint + gostyle for Go)
 make lint
 
-# CI target (install dev deps + generate + test)
-make ci
+# Upstream compatibility target, not the CI test entrypoint
+just exec make ci
 ```
 
 ### CLI Flags
@@ -113,7 +113,17 @@ Key endpoints:
 
 ## CI/CD
 
-- **CI**: golangci-lint (via reviewdog), gostyle, `make ci` (test + coverage), octocov
+- **Lint**: central Standards Check runs golangci-lint, gostyle, Oxlint and Oxfmt;
+  use `just check` locally. Frontend checks cover all of `src/`; `just format`
+  applies frontend formatting.
+- **Tests**: central Test Gate runs Linux concerns and the macOS test leg. The macOS
+  leg executes `TestWatchedFile_RetainedAfterAtomicSaveRewrite` and
+  `TestPathAliasRegisterAndUnregister`, not just a cross-compile.
+- **Coverage**: `.github/workflows/coverage.yml` consumes the Test Gate's numeric
+  summary, comments total coverage/main diff/test-code ratio/Lifecycle timing and
+  stores the main baseline without running tests. The per-file table is intentionally
+  omitted. See `.github/scripts/README.md` for the reporter's trust boundary.
 - **Release**: tags matching `v*-strubio.*` (e.g. `v1.6.7-strubio.1`) trigger `.github/workflows/tagpr.yml`, which cross-compiles a matrix, publishes a GitHub release, and rewrites the Homebrew formula in `Rubio-Enterprises/homebrew-tap`. The `go generate` step (frontend build) runs before the Go build. No tagpr, no goreleaser — see AGENTS.md "Release Tags".
 - **License check**: Trivy scans for license issues
-- CI requires pnpm setup (`pnpm/action-setup`) before any Go build step because `go generate` triggers the frontend build.
+- Central checks use locked image tools and locked macOS provisioning. Asset
+  generation runs in packaging, not test setup.

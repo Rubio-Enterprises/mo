@@ -28,7 +28,7 @@ function comment(current, baseline, seconds) {
     `| Coverage | ${percent(current).toFixed(2)}% | ${baseline ? percent(baseline).toFixed(2) + '%' : 'Not established'} | ${baseline ? (percent(current) - percent(baseline)).toFixed(2) + ' pp' : 'Not established'} |\n` +
     `| Test/code ratio | ${ratio(current).toFixed(3)} | ${baseline ? ratio(baseline).toFixed(3) : 'Not established'} | ${baseline ? (ratio(current) - ratio(baseline)).toFixed(3) : 'Not established'} |\n` +
     `| Covered / total | ${current.covered} / ${current.total} | ${baseline ? baseline.covered + ' / ' + baseline.total : 'Not established'} | |\n` +
-    `\nLinux Lifecycle execution: ${seconds} seconds.\n\nMeasured in the unprivileged Test Gate. Separate from the legacy test workflow report.\n`;
+    `\nLinux Lifecycle execution: ${seconds} seconds.\n\nMeasured in the unprivileged Test Gate.\n`;
 }
 
 async function select(github, repo, run, defaultBranch) {
