@@ -3,7 +3,9 @@
 The unprivileged Test Gate runs the image-pinned octocov with no token or network
 requirement. It writes `reports/coverage/summary.json`: `covered`, `total`, `code`
 and `test`, all safe non-negative integers. Existing Go and frontend coverage
-remain available under `reports/coverage/`.
+remain available under `reports/coverage/`. Download the central reports artifact
+to inspect `coverage/summary.json` and the JUnit reports together. The Linux
+summary drives comments and the main baseline; the macOS leg emits the same format.
 
 The privileged listener checks out only its default-branch reporter. It downloads
 one bounded Linux reports artifact and reads only `coverage/summary.json` with a
