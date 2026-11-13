@@ -4,6 +4,7 @@
 node = "24.22.1"
 go = "1.26.6"
 "aqua:k1LoW/gostyle" = "0.26.2"
+"aqua:k1LoW/octocov" = "0.83.5"
 # pnpm backs the frontend tasks; its lockfile lives in internal/frontend/.
 "npm:pnpm" = "11.22.0"
 

@@ -1,8 +1,8 @@
 timeout: 2min
 coverage:
   paths:
-    - gate-go.out
-    - gate-lcov.info
+    - reports/coverage/go.out
+    - reports/coverage/frontend/lcov.info
 codeToTestRatio:
   code:
     - "**/*.go"
@@ -11,17 +11,11 @@ codeToTestRatio:
     - "internal/frontend/src/**/*.tsx"
     - "!internal/frontend/src/**/*.test.ts"
     - "!internal/frontend/src/**/*.test.tsx"
+    - "!internal/frontend/node_modules/**"
   test:
     - "**/*_test.go"
     - "internal/frontend/src/**/*.test.ts"
     - "internal/frontend/src/**/*.test.tsx"
+    - "!internal/frontend/node_modules/**"
 testExecutionTime:
   if: false
-diff:
-  if: false
-comment:
-  if: false
-summary:
-  if: false
-report:
-  path: metrics.json

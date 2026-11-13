@@ -49,6 +49,53 @@ checksum_source = "mise-versions"
 url = "https://github.com/k1LoW/gostyle/releases/download/v0.26.2/gostyle_v0.26.2_windows_amd64.tar.gz"
 url_api = "https://api.github.com/repos/k1LoW/gostyle/releases/assets/624290899"
 
+[[tools."aqua:k1LoW/octocov"]]
+version = "0.83.5"
+backend = "aqua:k1LoW/octocov"
+specifiers = ["0.83.5"]
+
+[tools."aqua:k1LoW/octocov"."platforms.linux-arm64"]
+checksum = "sha256:fce0c42af4bfbcb2fdb8f5961e2a3992bc4fbf46051e89835c3ed4c440c2ec03"
+checksum_source = "mise-versions"
+url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/k1LoW/octocov/releases/assets/711698538"
+
+[tools."aqua:k1LoW/octocov"."platforms.linux-arm64-musl"]
+checksum = "sha256:fce0c42af4bfbcb2fdb8f5961e2a3992bc4fbf46051e89835c3ed4c440c2ec03"
+checksum_source = "mise-versions"
+url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/k1LoW/octocov/releases/assets/711698538"
+
+[tools."aqua:k1LoW/octocov"."platforms.linux-x64"]
+checksum = "sha256:3aa6973a8e68036b640dac6ef0c5456dda12289c7abbdaf7b919a036555d8e9c"
+checksum_source = "mise-versions"
+url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/k1LoW/octocov/releases/assets/711698412"
+
+[tools."aqua:k1LoW/octocov"."platforms.linux-x64-musl"]
+checksum = "sha256:3aa6973a8e68036b640dac6ef0c5456dda12289c7abbdaf7b919a036555d8e9c"
+checksum_source = "mise-versions"
+url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/k1LoW/octocov/releases/assets/711698412"
+
+[tools."aqua:k1LoW/octocov"."platforms.macos-arm64"]
+checksum = "sha256:31cee98c5c21f5c4e07a30df13456daa6bba73cc666875831f9207a73bbdc20b"
+checksum_source = "mise-versions"
+url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_darwin_arm64.zip"
+url_api = "https://api.github.com/repos/k1LoW/octocov/releases/assets/711698408"
+
+[tools."aqua:k1LoW/octocov"."platforms.macos-x64"]
+checksum = "sha256:f9ab2b5c6996de5005bea809046e479ed47fa6b6a7c957e41aeb40dc12e1d0ec"
+checksum_source = "mise-versions"
+url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_darwin_amd64.zip"
+url_api = "https://api.github.com/repos/k1LoW/octocov/releases/assets/711698409"
+
+[tools."aqua:k1LoW/octocov"."platforms.windows-x64"]
+checksum = "sha256:b971a865539c4ec08d79bca098e56ddb9e48a192c023619a50da6267ed2addf1"
+checksum_source = "mise-versions"
+url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_windows_amd64.zip"
+url_api = "https://api.github.com/repos/k1LoW/octocov/releases/assets/711698411"
+
 [[tools.go]]
 version = "1.26.6"
 backend = "core:go"

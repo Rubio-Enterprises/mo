@@ -1,16 +1,12 @@
 name: central coverage
 
 "on":
-  # Trusted default-branch reporter reads bounded archives as data and posts only numeric metrics.
+  # Trusted default-branch code reads only a capped numeric summary; no PR code is executed.
   workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: [Test Gate, standards]
     types: [completed]
 
 permissions: {}
-
-concurrency:
-  group: central-coverage-${{ github.event.workflow_run.head_branch }}
-  cancel-in-progress: false
 
 jobs:
   report-pr:
@@ -18,7 +14,13 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.name == 'Test Gate' &&
       github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.repository.full_name == github.repository
+      github.event.workflow_run.head_repository.full_name == github.repository
+    concurrency:
+      group: >-
+        ${{ format('central-coverage-pr-{0}-{1}',
+            github.event.workflow_run.head_repository.full_name,
+            github.event.workflow_run.head_branch) }}
+      cancel-in-progress: false
     runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
     timeout-minutes: 10
     permissions:
@@ -31,23 +33,14 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          sparse-checkout: |
-            .github/scripts
-            .github/coverage-gate.yml
+          sparse-checkout: .github/scripts/coverage-report.cjs
           sparse-checkout-cone-mode: false
-      - name: Validate untrusted reports and source as data
+      - name: Read numeric summary from Test Gate artifact
         id: prepare
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             await require('./.github/scripts/coverage-report.cjs').prepare({ github, context, core });
-      - name: Measure sanitized coverage and source
-        if: steps.prepare.outputs.selected == 'true'
-        uses: k1LoW/octocov-action@a167dc0dee441b7ffc45e1b862ab55ec0d87f278 # v1.5.2
-        with:
-          version: v0.83.5
-          config: ${{ steps.prepare.outputs.directory }}/source/.octocov.yml
-          work-dir: ${{ steps.prepare.outputs.directory }}/source
       - name: Publish only numeric metrics
         if: steps.prepare.outputs.selected == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -72,7 +65,10 @@ jobs:
       github.event.workflow_run.path == '.github/workflows/standards.yml' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == github.event.repository.default_branch &&
-      github.event.workflow_run.repository.full_name == github.repository
+      github.event.workflow_run.head_repository.full_name == github.repository
+    concurrency:
+      group: central-coverage-main
+      cancel-in-progress: false
     runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
     timeout-minutes: 10
     permissions:
