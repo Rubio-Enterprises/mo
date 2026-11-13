@@ -41,6 +41,13 @@ test('reused verification uses a passing PR artifact only for the identical Git 
   assert.equal(selected.run.id, 2);
   assert.equal(selected.commit, commit);
 });
+test('main may reuse an already-merged fork PR only with the identical Git tree', async () => {
+  const head = 'b'.repeat(40);
+  const merged = { ...pull, merged_at: '2026-11-13', merge_commit_sha: commit, head: { sha: head, repo: { full_name: 'outside/mo' } } };
+  const selected = await select(api({ pulls: [merged], trees: { [commit]: 'tree', [head]: 'tree' }, runs: [{ ...run, id: 3, head_sha: head }] }), repo, main, 'main');
+  assert.equal(selected.run.id, 3);
+  assert.equal(selected.pull, undefined);
+});
 test('rejects a reused artifact for different files', async () => {
   const head = 'b'.repeat(40);
   const merged = { ...pull, merged_at: '2026-11-13', merge_commit_sha: commit, head: { ...pull.head, sha: head } };

@@ -49,7 +49,7 @@ async function select(github, repo, run, defaultBranch) {
   // Reused verification has no fresh artifact. Require exactly the same Git tree.
   const main = await github.rest.git.getCommit({ ...repo, commit_sha: run.head_sha });
   const pulls = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, { ...repo, commit_sha: run.head_sha, per_page: 100 });
-  for (const pull of pulls.filter((p) => p.merged_at && p.merge_commit_sha === run.head_sha && p.head.repo?.full_name === run.repository.full_name)) {
+  for (const pull of pulls.filter((p) => p.merged_at && p.merge_commit_sha === run.head_sha)) {
     const head = await github.rest.git.getCommit({ ...repo, commit_sha: pull.head.sha });
     if (head.data.tree.sha !== main.data.tree.sha) continue;
     const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, { ...repo, head_sha: pull.head.sha, event: 'pull_request', per_page: 100 });
