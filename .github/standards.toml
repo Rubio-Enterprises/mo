@@ -1,0 +1,2 @@
+[workflows."coverage.yml"]
+reason = "Report validated central Test Gate coverage and retain the main baseline without executing repository code."

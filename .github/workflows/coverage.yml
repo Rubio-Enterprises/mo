@@ -1,0 +1,78 @@
+name: central coverage
+
+"on":
+  # Trusted default-branch code reads only a capped numeric summary; no PR code is executed.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: [Test Gate, standards]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  report-pr:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.name == 'Test Gate' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    concurrency:
+      group: >-
+        ${{ format('central-coverage-pr-{0}-{1}',
+            github.event.workflow_run.head_repository.full_name,
+            github.event.workflow_run.head_branch) }}
+      cancel-in-progress: false
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    steps: &report-steps
+      - name: Check out trusted reporter only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts/coverage-report.cjs
+          sparse-checkout-cone-mode: false
+      - name: Read numeric summary from Test Gate artifact
+        id: prepare
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await require('./.github/scripts/coverage-report.cjs').prepare({ github, context, core });
+      - name: Publish only numeric metrics
+        if: steps.prepare.outputs.selected == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          COVERAGE_DIRECTORY: ${{ steps.prepare.outputs.directory }}
+        with:
+          script: |
+            await require('./.github/scripts/coverage-report.cjs').finish(
+              { github, context, core }, process.env.COVERAGE_DIRECTORY);
+      - name: Store central main baseline
+        if: steps.prepare.outputs.baseline == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: central-coverage-baseline
+          path: ${{ steps.prepare.outputs.directory }}/baseline.json
+          if-no-files-found: error
+          retention-days: 90
+
+  report-main:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.path == '.github/workflows/standards.yml' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    concurrency:
+      group: central-coverage-main
+      cancel-in-progress: false
+    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps: *report-steps

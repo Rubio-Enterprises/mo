@@ -20,6 +20,8 @@ pre-commit:
       run: >-
         mise exec -- pnpm --dir internal/frontend exec sh -c 'cd ../..; exec
         oxfmt -c internal/frontend/.oxfmtrc.json --write "$@"' -- {staged_files}
+    - name: repo-gostyle
+      run: go vet -vettool="$(mise which gostyle)" -gostyle.config="$(pwd)/.gostyle.yml" ./...
     - name: repo-oxlint
       glob: "internal/frontend/src/**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"
       root: internal/frontend/
