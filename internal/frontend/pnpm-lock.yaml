@@ -127,8 +127,8 @@ importers:
         specifier: 11.1.2
         version: 11.1.2
       rollup-plugin-license:
-        specifier: 3.7.1
-        version: 3.7.1(picomatch@4.0.7)(rollup@4.63.1)
+        specifier: 3.7.2
+        version: 3.7.2(picomatch@4.0.7)(rollup@4.63.1)
       tailwindcss:
         specifier: 4.3.5
         version: 4.3.5
@@ -2540,8 +2540,8 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
 
-  rollup-plugin-license@3.7.1:
-    resolution: {integrity: sha512-FcGXUbAmPvRSLxjVdjp/r/MUtKBlttVQd+ApUyvKfREnsoAfAZA6Ic2fE1Tz4RL0f9XqEQU9UIRNUMdtQtliDw==}
+  rollup-plugin-license@3.7.2:
+    resolution: {integrity: sha512-xsEifZTR9xIFzgXqhNEoWmdM8mwLyEynXr50krGTCv/OhBAXS8+YFDWpD7pdT3Q1DZdt9T9yu7sACEfYiRdq8A==}
     engines: {node: '>=14.0.0'}
     peerDependencies:
       rollup: ^1.0.0 || ^2.0.0 || ^3.0.0 || ^4.0.0
@@ -5256,7 +5256,7 @@ snapshots:
       '@rolldown/binding-win32-arm64-msvc': 1.2.19
       '@rolldown/binding-win32-x64-msvc': 1.2.19
 
-  rollup-plugin-license@3.7.1(picomatch@4.0.7)(rollup@4.63.1):
+  rollup-plugin-license@3.7.2(picomatch@4.0.7)(rollup@4.63.1):
     dependencies:
       commenting: 1.1.0
       fdir: 6.5.0(picomatch@4.0.7)
