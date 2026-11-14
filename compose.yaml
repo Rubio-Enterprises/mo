@@ -10,6 +10,7 @@ services:
     init: true
     command: sleep infinity
     environment:
+      - BASE_SHA
       - GH_TOKEN
       - LEFTHOOK
       - RUBIO_VOLUME_DIRS=${REPO_DIR}/.venv:${REPO_DIR}/node_modules:/home/vscode/.cache/uv:/home/vscode/.cache/npm:/home/vscode/.cache/gomod:/home/vscode/.cache/cargo/registry:/home/vscode/.cache/coursier:${REPO_DIR}/internal/frontend/node_modules:${REPO_DIR}/e2e/node_modules
