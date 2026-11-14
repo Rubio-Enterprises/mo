@@ -1,5 +1,6 @@
 {
   "name": "mo",
+  "initializeCommand": ["sh", "bin/dev-environment.sh"],
   "dockerComposeFile": ["../compose.yaml"],
   "service": "dev",
   "workspaceFolder": "${localWorkspaceFolder}",

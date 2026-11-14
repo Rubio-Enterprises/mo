@@ -1,10 +1,12 @@
 # Agent context
 
-<!-- agnix-disable CC-MEM-014 -->
-Checks come from `@rubio-enterprises/standards`: `just build && just setup` once,
-then `just check`. This is a fork of `k1LoW/mo`; `check` covers the fork's own changes.
+## Commands
 
----
+Run every project command through `just`, which runs it in this repository's dev image; the host carries no project toolchain.
+
+In a fresh checkout: `just build`, then `just setup`. `just --list` shows the recipes.
+
+Single Go test: `just exec go test ./internal/server/ -run TestHandleReorderFiles`. Single frontend test: `just exec pnpm --dir internal/frontend test src/utils/buildTree.test.ts`.
 
 ## Agent skills
 
@@ -32,68 +34,15 @@ This repository uses a single-context domain documentation layout. See `docs/age
 
 ## Build & Run
 
-Requires **Go 1.26+** and [pnpm](https://pnpm.io/). The Node.js version is pinned in `image/mise.toml` (managed by mise) and must satisfy the `packageManager` pin in `internal/frontend/package.json`: **pnpm 11.9.0 requires Node ≥ 22.13**, so any `go generate` / `pnpm` step fails on an older Node.
+The dev image pins Go, Node and pnpm in `image/mise.toml`. `just setup` installs frontend and e2e dependencies. The Dev Container attaches to the same service.
 
-The tiers below are the complete set of ways to build, run, and test mo. Every
-`make`/`pnpm` target that runs `go generate` needs Node ≥ 22.13 (see above).
-
-On a fresh clone, run `just build && just setup`. The base image supplies
-`@rubio-enterprises/standards` at `/opt/standards`; setup installs git hooks and the
-frontend's and e2e suite's dependencies. The Dev Container attaches to the same service.
-
-### Build
-
-- `make build` — frontend (`go generate`) + Go binary with ldflags → `./mo`
-- `make generate` — frontend build only (`go generate ./internal/static/`)
-- `go build -o mo .` — Go binary only (requires `internal/static/dist/` already generated)
-
-### Run
-
-- `make dev ARGS="testdata/basic.md"` — build, then run foreground on port 16275
-- `make dev ARGS="-t design testdata/basic.md"` — with a tab group (`-t` takes one group per invocation)
-- `just dev -- testdata/basic.md` — the same build and foreground server on port 16275, which the Dev Container forwards
-- `./mo testdata/basic.md` — after `make build`; self-backgrounds and opens a browser (default port 6275)
-- `cd internal/frontend && pnpm run dev` — Vite dev server, proxies `/_/` to `localhost:6275` (set `MO_DISABLE_AUTH=1` on the backend for this cross-origin flow)
-- `make screenshot` — regenerate README screenshots (**requires Google Chrome**, not bundled Chromium)
-- Drive a running server via the CLI — `./mo --status [--json]`, `./mo --json <file>` (adds to the running server), `--restart`, `--shutdown`, `--clear`
-- Drive a running server via the API — token-gated `curl` to `/_/api/*` with `X-Mo-Token: $(cat $XDG_STATE_HOME/mo/token/mo-<port>.token)`
-- Headless drive + screenshot — `node .claude/skills/run-mo/driver.mjs <url> [out.png]` (see the `run-mo` skill)
-
-### Test — Go
-
-- `go test ./...` — all Go packages
-- `go test ./internal/server/ -run TestHandleReorderFiles` — a single Go test
-- `go test ./... -coverprofile=coverage.out -covermode=count -count=1` — with coverage
-- `just test`: the central test concern; JUnit in `reports/test/`, Go/frontend coverage
-  and the numeric summary in `reports/coverage/`.
-
-### Test — frontend (vitest)
-
-- `cd internal/frontend && pnpm test` — all frontend tests
-- `cd internal/frontend && pnpm test src/utils/buildTree.test.ts` — a single test file
-- `cd internal/frontend && pnpm run test:coverage` — with coverage
-
-### Test — end-to-end (Playwright, `e2e/`)
-
-- `make e2e` — build binary, install the browser, run all specs (API + SPA + CLI)
-- `just e2e`: the Test Gate's entrypoint; delegates to `make e2e`, JUnit in
-  `reports/e2e/`.
-- `test:headed`, `test:ui` and `report` (the e2e package scripts) require a display; not runnable in a headless container
-
-### Test — combined
-
-- `make test` — frontend coverage + Go coverage
-- `just exec make ci`: upstream compatibility target (`depsdev` + `generate` + `test`).
-  Central CI uses the Test Gate instead.
-
-### Lint / format / hooks
-
-- `make lint` — oxlint (frontend) + golangci-lint + gostyle (run `make depsdev` once to install gostyle/gocredits)
-- `make fmt` / `make fmt-check` — oxfmt write / check
-- `cd internal/frontend && pnpm run lint` · `pnpm run fmt` · `pnpm run fmt:check` — frontend directly
-- `just exec lefthook run pre-commit --all-files` — run all git hooks across the repo
-- `just check`: shared Checks plus full-source frontend checks and gostyle.
-  Use `just format` to apply frontend formatting.
+- `just exec make build` builds the frontend and Go binary.
+- `just dev -- testdata/basic.md` runs the server on port 16275.
+- `just test` runs Go and frontend tests with JUnit and coverage reports.
+- `just e2e` runs the Playwright suite; headed mode requires a display.
+- `just check` runs shared checks, frontend checks and gostyle. `just format` applies frontend formatting.
+- `just exec make ci` runs the upstream compatibility target.
+- See the `run-mo` skill for driving a server and screenshots.
 
 ### CLI Flags
 
@@ -188,8 +137,8 @@ Frontend: Oxlint via `pnpm run lint` in `internal/frontend/`. Formatting via `pn
   and posts total coverage, the main diff, test/code ratio and Lifecycle timing.
   It stores the main baseline without rerunning tests. The per-file table is intentionally
   omitted. For reporting failures and the trust boundary, read `.github/scripts/README.md`.
-- **Release**: tags matching `v*-strubio.*` trigger `.github/workflows/tagpr.yml`. The `go generate` step (frontend build) runs before cross-platform Go builds; binaries are uploaded as a GitHub release and the `mo` formula in `Rubio-Enterprises/homebrew-tap` is rewritten in the same job. There is no tagpr and no goreleaser in this fork.
-- **License check**: `.github/workflows/license-scan.yml` runs Trivy's license scanner on PRs and pushes to `main`. It replaces the manually disabled upstream `trivy.yml` path so GitHub registers the preserved check as an active workflow.
+- **Release**: tags matching `v*-strubio.*` trigger `.github/workflows/release.yml`. The `go generate` step (frontend build) runs before cross-platform Go builds; binaries are uploaded as a GitHub release and the `mo` formula in `Rubio-Enterprises/homebrew-tap` is rewritten in the same job. There is no tagpr and no goreleaser in this fork.
+- **License check**: `.github/workflows/scan.yml` runs Trivy's license scanner on PRs and pushes to `main`. It replaces the manually disabled upstream `trivy.yml` path so GitHub registers the preserved check as an active workflow.
 - Central checks use locked image tools and locked macOS provisioning. Frontend asset
   generation belongs to the package concern, not test setup.
 
@@ -217,7 +166,7 @@ The workflow runs four jobs — `verify` → `build` (4-arch matrix) → `releas
 **If the tap bump fails but the release published**, re-drive just the bump — do not cut a new tag:
 
 ```bash
-gh workflow run tagpr.yml -f tag=v<X.Y.Z>-strubio.<N>
+gh workflow run release.yml -f tag=v<X.Y.Z>-strubio.<N>
 ```
 
 On `workflow_dispatch`, `verify`/`build`/`release` are skipped and `bump-tap` recomputes the four checksums from the **published release assets**, so it is correct standalone for any released tag. `release` is also idempotent (`gh release view` → `upload --clobber`, else `create`), so re-running that job is safe too.
@@ -227,33 +176,6 @@ This path exists because it was needed: `v1.6.7-strubio.1`'s tap write lost a 71
 Two constraints worth not rediscovering the hard way:
 
 - **The trigger glob must stay `v*-strubio.*`.** Origin already carries 44 upstream tags (`v0.1.0` … `v0.20.1`), and the local clone holds more up to `v1.6.7`; a bare `v*` glob would fire a full matrix build and a garbage tap write for every one of them.
-- **`.github/workflows/tagpr.yml` keeps its misleading filename on purpose.** Upstream owns that path, so holding it stops upstream's tagpr + goreleaser pipeline from reappearing through a sync merge. Renaming it to `release.yml` would let upstream's version land as a plain file addition and run on every push to `main`.
+- **Upstream syncs need review.** A newly arriving upstream `tagpr.yml` is not protected by the default-branch-wins resolver.
 
 Tags from the retired `strubio-v*` scheme (`strubio-v0.1.0` … `strubio-v0.27.0`) stay on origin as tombstones — no history rewrite. Homebrew upgrades cleanly across the cutover because `1.6.7-strubio.1` outranks `0.27.0` on the first version token.
-
-## Commands
-
-First command in a fresh checkout: `just build`.
-Never install toolchains on the host — all project commands run in the dev image through `just`.
-
-```bash
-just build
-just setup
-just check
-just fmt
-just check-pr
-just setup-deps
-just typecheck
-just lint-ts
-just format
-just test
-just test-go
-just test-ts
-just package
-just dev
-just e2e
-just shell
-just exec <cmd...>
-```
-
-Single test: `just exec uv run pytest path::test` (Python); otherwise prefix the underlying runner with `just exec`.

@@ -12,17 +12,12 @@ here); it navigates a URL, waits for the markdown to render, captures
 console/page errors, and writes a screenshot. The same binary is also the CLI
 (`--status`, `--json`, `--shutdown`) and exposes a token-gated HTTP API.
 
-All paths below are relative to the repo root (the `mo` module root).
+All paths below are relative to the repo root (the `mo` module root). Run `just build` and `just setup` first, then enter `just shell` and run the commands below in that shell. The container is headless; use an isolated state directory.
 
 ## Prerequisites
 
-- **Go 1.26+** and **pnpm** (pnpm manages the Node version via
-  `internal/frontend/package.json`). In this container they're provided by
-  `mise` (`.mise.toml`) and already on `PATH` — no `apt-get` was needed.
-- **A Playwright Chromium** for the driver. This container ships one at
-  `$PLAYWRIGHT_BROWSERS_PATH` (`/opt/pw-browsers`), and the driver launches it
-  directly — no download, no extra system libs were required. If none is
-  present, install one: `cd internal/frontend && pnpm exec playwright install chromium`.
+- Go, Node and pnpm are pinned in `image/mise.toml` and provided by the dev image.
+- The driver needs Playwright Chromium. In `just shell`, run `cd internal/frontend && pnpm exec playwright install chromium` if it is absent, then return to the repository root.
 
 ## Build
 
@@ -30,9 +25,7 @@ All paths below are relative to the repo root (the `mo` module root).
 make build
 ```
 
-Runs `go generate` (which builds the frontend with pnpm — the first run
-downloads the pinned Node and ~450 npm packages, ~1–2 min) then `go build`,
-producing `./mo`. Verify:
+Runs `go generate` to build the frontend, then `go build`, producing `./mo`. Verify:
 
 ```bash
 ./mo --version    # → mo version 1.6.7-strubio.1  (v<upstream>-strubio.<fork rebuild>)
@@ -151,11 +144,7 @@ gets the cookie on first navigation). No `MO_DISABLE_AUTH` needed.
   as a secure context. But `curl`/`fetch` must pass
   `X-Mo-Token: $(cat $XDG_STATE_HOME/mo/token/mo-<port>.token)`. Without it you
   get `401`.
-- **Playwright browser version skew.** The frontend's Playwright (1.60) wants a
-  newer Chromium build than the one prebuilt at `/opt/pw-browsers` (1194,
-  pinned by the e2e suite's Playwright 1.58). The driver sidesteps this by
-  discovering the on-disk `chromium-*/chrome` and passing it as
-  `executablePath`, so it needs no matching download.
+- **Playwright browser version skew.** The driver discovers an installed `chromium-*/chrome` and passes it as `executablePath`.
 - **External resources in the markdown are sandbox noise.** A fixture image
   like `![](https://placehold.co/...)` fails with
   `net::ERR_CERT_AUTHORITY_INVALID` / `ERR_NAME_NOT_RESOLVED`. Those surface in

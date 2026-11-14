@@ -302,29 +302,30 @@ $ mo --status --json
 
 ## Development
 
-Requires Go 1.26+ and [pnpm](https://pnpm.io/). Node.js is pinned via `pnpm.executionEnv.nodeVersion` in `internal/frontend/package.json`; other runtimes are pinned via `mise.toml`.
+The development image provides Go, Node.js and pnpm pinned in `image/mise.toml`.
 
 ```bash
 git clone https://github.com/Rubio-Enterprises/mo.git
 cd mo
-mise run setup                     # standards package, pinned tools, git hooks, frontend + e2e deps
-mise run check                     # every check (on this fork: the files it changed)
+just build                         # build the development image
+just setup                         # git hooks, frontend + e2e deps
+just check                         # every check (on this fork: the files it changed)
 
 # Full build (frontend + Go binary, with ldflags)
-make build
+just exec make build
 
 # Dev: build frontend then run with args (uses port 16275, foreground mode)
-make dev ARGS="testdata/basic.md"
+just dev -- testdata/basic.md
 
 # Lint
-golangci-lint run
+just check
 
 # Go and frontend tests with JUnit output in reports/test/
-mise run test
+just test
 
 # Or via make
-make test
-make lint
+just exec make test
+just exec make lint
 ```
 
 For deeper agent / contributor notes (single-test invocations, frontend dev server, screenshots), see [`AGENTS.md`](AGENTS.md).
