@@ -1,2 +1,8 @@
+[workflows."scan.yml"]
+reason = "Scan Go and frontend dependency licenses against the existing policy."
+
+[workflows."release.yml"]
+reason = "Build release archives, publish assets and update the Homebrew tap."
+
 [workflows."coverage.yml"]
 reason = "Report validated central Test Gate coverage and retain the main baseline without executing repository code."

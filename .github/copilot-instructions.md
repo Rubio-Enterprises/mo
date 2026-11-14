@@ -6,35 +6,35 @@
 
 ## Build & Run
 
-Requires Go and [pnpm](https://pnpm.io/). Node.js version is managed via `pnpm.executionEnv.nodeVersion` in `internal/frontend/package.json`.
+Run project commands through the dev image. In a fresh checkout, run `just build` then `just setup`; `just --list` shows the recipes.
 
 ```bash
 # Full build (frontend + Go binary, with ldflags)
-make build
+just exec make build
 
 # Dev: build frontend then run with args (uses port 16275, foreground mode)
-make dev ARGS="testdata/basic.md"
+just dev -- testdata/basic.md
 
 # Dev with tab groups (-t can only specify one group per invocation)
-make dev ARGS="-t design testdata/basic.md"
+just dev -- -t design testdata/basic.md
 
 # Frontend code generation only (called by make build/dev via go generate)
-make generate
+just exec make generate
 
 # Run all tests (frontend + Go)
-make test
+just test
 
 # Run a single frontend test (vitest)
-cd internal/frontend && pnpm test src/utils/buildTree.test.ts
+just exec pnpm --dir internal/frontend test src/utils/buildTree.test.ts
 
 # Run Go tests only
-go test ./...
+just exec go test ./...
 
 # Run a single Go test
-go test ./internal/server/ -run TestHandleFiles
+just exec go test ./internal/server/ -run TestHandleFiles
 
-# Run linters (oxlint for frontend, golangci-lint + gostyle for Go)
-make lint
+# Run shared checks, frontend checks and gostyle
+just check
 
 # Upstream compatibility target, not the CI test entrypoint
 just exec make ci
@@ -123,7 +123,7 @@ Key endpoints:
   summary, comments total coverage/main diff/test-code ratio/Lifecycle timing and
   stores the main baseline without running tests. The per-file table is intentionally
   omitted. See `.github/scripts/README.md` for the reporter's trust boundary.
-- **Release**: tags matching `v*-strubio.*` (e.g. `v1.6.7-strubio.1`) trigger `.github/workflows/tagpr.yml`, which cross-compiles a matrix, publishes a GitHub release, and rewrites the Homebrew formula in `Rubio-Enterprises/homebrew-tap`. The `go generate` step (frontend build) runs before the Go build. No tagpr, no goreleaser — see AGENTS.md "Release Tags".
+- **Release**: tags matching `v*-strubio.*` (e.g. `v1.6.7-strubio.1`) trigger `.github/workflows/release.yml`, which cross-compiles a matrix, publishes a GitHub release, and rewrites the Homebrew formula in `Rubio-Enterprises/homebrew-tap`. The `go generate` step (frontend build) runs before the Go build. No tagpr, no goreleaser — see AGENTS.md "Release Tags".
 - **License check**: Trivy scans for license issues
 - Central checks use locked image tools and locked macOS provisioning. Asset
   generation runs in packaging, not test setup.

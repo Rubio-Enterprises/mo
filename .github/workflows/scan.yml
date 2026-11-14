@@ -1,0 +1,47 @@
+name: license scan
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  route:
+    uses: Rubio-Enterprises/.github/.github/workflows/project-route.yml@main
+    with:
+      route: linux
+  job-trivy:
+    name: Run trivy for license check
+    needs: route
+    runs-on: ${{ fromJSON(needs.route.outputs.runner) }}
+    timeout-minutes: 15
+    steps:
+      - name: Check out source code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install just
+        if: needs.route.outputs.ci-image != 'true'
+        uses: Rubio-Enterprises/.github/actions/setup-just@main
+      - name: Log in to GHCR
+        if: needs.route.outputs.ci-image != 'true'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Prepare container-writable hosted checkout
+        if: runner.environment == 'github-hosted' && runner.os == 'Linux'
+        run: chmod -R a+rwX "$GITHUB_WORKSPACE"
+      - run: just build && just setup
+      - name: Run trivy
+        run: just license-scan

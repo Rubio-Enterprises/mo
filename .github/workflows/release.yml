@@ -3,17 +3,14 @@
 # homebrew-tap. `<X.Y.Z>` mirrors the upstream k1LoW/mo version this fork
 # carries; `<N>` counts fork rebuilds on that same upstream version.
 #
-# The filename is a deliberate squat, NOT an oversight: upstream owns
-# `.github/workflows/tagpr.yml`, and holding the path keeps upstream's
-# tagpr + goreleaser pipeline from silently reappearing through an upstream
-# sync merge. Nothing here runs tagpr. Renaming this file to `release.yml`
-# would free the path for upstream's version to land as a plain addition on
-# the next sync, where it would run on every push to main.
-#
 # The glob MUST stay `v*-strubio.*`. A bare `v*` would match the 44 upstream
 # tags already on origin (`v0.1.0` … `v0.20.1`), each firing a full matrix
 # build and a garbage tap write.
 name: release
+
+permissions:
+  contents: read
+  packages: read
 
 on:
   push:
@@ -36,6 +33,10 @@ on:
         type: string
 
 jobs:
+  route:
+    uses: Rubio-Enterprises/.github/.github/workflows/project-route.yml@main
+    with:
+      route: linux
   verify:
     # The tag triggers the release, but `version/version.go` is the version
     # source of truth (upstream's shape, bumped by the release commit). Nothing
@@ -66,9 +67,9 @@ jobs:
           echo "version/version.go declares $DECLARED, matching $TAG"
 
   build:
-    needs: verify
+    needs: [verify, route]
     if: github.event_name == 'push'
-    runs-on: ${{ fromJSON(vars.RUNNERS || '{}').small || fromJSON('["ubuntu-slim"]') }}
+    runs-on: ${{ fromJSON(needs.route.outputs.runner) }}
     timeout-minutes: 30
     strategy:
       matrix:
@@ -88,46 +89,34 @@ jobs:
     steps:
       - name: Check out source code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version-file: go.mod
-          # A tag push publishes the release: no shared Go cache (zizmor cache-poisoning).
-          cache: false
+          persist-credentials: false
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Install just
+        if: needs.route.outputs.ci-image != 'true'
+        uses: Rubio-Enterprises/.github/actions/setup-just@main
+      - name: Log in to GHCR
+        if: needs.route.outputs.ci-image != 'true'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
         with:
-          package_json_file: internal/frontend/package.json
-
-      - name: Generate frontend assets
-        run: go generate ./internal/static/
-
-      - name: Build
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Prepare container-writable hosted checkout
+        if: runner.environment == 'github-hosted' && runner.os == 'Linux'
+        run: chmod -R a+rwX "$GITHUB_WORKSPACE"
+      - run: just build && just setup
+      - name: Build archive
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-        run: |
-          COMMIT=$(git rev-parse --short HEAD)
-          go build -ldflags "-s -w -X github.com/k1LoW/mo/version.Revision=$COMMIT" \
-            -trimpath -o mo .
-
-      - name: Package
-        run: |
-          ARCHIVE="mo_${GITHUB_REF_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
-          if [ "${{ matrix.ext }}" = "zip" ]; then
-            zip "${ARCHIVE}.zip" mo LICENSE
-          else
-            tar czf "${ARCHIVE}.tar.gz" mo LICENSE
-          fi
+          TARGET_OS: ${{ matrix.goos }}
+          TARGET_ARCH: ${{ matrix.goarch }}
+        run: just release-archive "$TARGET_OS" "$TARGET_ARCH" "$GITHUB_REF_NAME"
 
       - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mo_${{ matrix.goos }}_${{ matrix.goarch }}
-          path: mo_*.${{ matrix.ext }}
+          path: dist/mo_*.${{ matrix.ext }}
 
   release:
     needs: build
