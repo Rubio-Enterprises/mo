@@ -163,7 +163,7 @@ checksum = "sha256:ca1bff5d8ead13c9f2ea404a176db46bd430704d5b5113734049fa365e779
 url = "https://nodejs.org/dist/v24.22.2/node-v24.22.2-win-x64.zip"
 
 [[tools."npm:pnpm"]]
-version = "11.22.0"
-aube = { path = ".mise/locks/npm-pnpm/11.22.0", digest = "sha256:f9c9c9674f869d8c818454f018fa5014929b299b96c5525e5621a62cdf58bd45" }
+version = "11.28.11"
+aube = { path = ".mise/locks/npm-pnpm/11.28.11", digest = "sha256:c505232b715f75dda20ad9b8bec98a8b6b34234f37704aeede16752641c54278" }
 backend = "npm:pnpm"
-specifiers = ["11.22.0"]
+specifiers = ["11.28.11"]
