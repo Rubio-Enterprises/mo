@@ -3,7 +3,7 @@
   "initializeCommand": ["sh", "bin/dev-environment.sh"],
   "dockerComposeFile": ["../compose.yaml"],
   "service": "dev",
-  "workspaceFolder": "${localWorkspaceFolder}",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
   "remoteUser": "vscode",
   "updateRemoteUserUID": false,
   "customizations": {
