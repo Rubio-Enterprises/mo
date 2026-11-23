@@ -3,7 +3,8 @@
 [tools]
 node = "24.22.3"
 go = "1.27.4"
-"aqua:k1LoW/gostyle" = "0.26.2"
+# Built from source with the Go pinned above: the released binary cannot check a newer Go standard library.
+"go:github.com/k1LoW/gostyle" = "0.26.2"
 "aqua:k1LoW/octocov" = "0.83.5"
 # pnpm backs the frontend tasks; its lockfile lives in internal/frontend/.
 "npm:pnpm" = "11.28.13"
