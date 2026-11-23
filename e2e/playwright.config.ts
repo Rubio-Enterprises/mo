@@ -25,7 +25,7 @@ export default defineConfig({
   workers: process.env.CI ? 2 : undefined,
   reporter: [
     [process.env.CI ? "dot" : "list"],
-    ["junit", { outputFile: resolve(REPO_ROOT, "reports/e2e/junit.xml") }],
+    ["junit", { outputFile: resolve(REPO_ROOT, "reports/test-e2e/junit.xml") }],
   ],
 
   globalSetup: "./global-setup.ts",

@@ -14,9 +14,13 @@ pre-commit:
       fail_text: "run this inside the dev image: just check"
     # The frontend (upstream's internal/frontend/) is formatted by Oxfmt and linted by Oxlint with
     # upstream's configs; upstream formats only its src/, never the config files.
+    - name: repo-oxfmt-fixer
+      tags: [fixer]
+      root: internal/frontend/
+      run: pnpm run fmt
     - name: repo-oxfmt
       root: internal/frontend/
-      run: pnpm exec oxfmt -c .oxfmtrc.json --check src/
+      run: pnpm run fmt:check
     - name: repo-gostyle
       run: go vet -vettool="$(mise which gostyle)" -gostyle.config="$(pwd)/.gostyle.yml" ./...
     - name: repo-oxlint

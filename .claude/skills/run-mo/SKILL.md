@@ -12,7 +12,7 @@ here); it navigates a URL, waits for the markdown to render, captures
 console/page errors, and writes a screenshot. The same binary is also the CLI
 (`--status`, `--json`, `--shutdown`) and exposes a token-gated HTTP API.
 
-All paths below are relative to the repo root (the `mo` module root). Run `just build` and `just setup` first, then enter `just shell` and run the commands below in that shell. The container is headless; use an isolated state directory.
+All paths below are relative to the repo root (the `mo` module root). Run `just build-dev` and `just setup` first, then enter `just shell` and run the commands below in that shell. The container is headless; use an isolated state directory.
 
 ## Prerequisites
 

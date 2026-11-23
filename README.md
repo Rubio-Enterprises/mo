@@ -307,7 +307,7 @@ The development image provides Go, Node.js and pnpm pinned in `image/mise.toml`.
 ```bash
 git clone https://github.com/Rubio-Enterprises/mo.git
 cd mo
-just build                         # build the development image
+just build-dev                         # build the development image
 just setup                         # git hooks, frontend + e2e deps
 just check                         # every check (on this fork: the files it changed)
 
@@ -315,7 +315,7 @@ just check                         # every check (on this fork: the files it cha
 just exec make build
 
 # Dev: build frontend then run with args (uses port 16275, foreground mode)
-just dev -- testdata/basic.md
+just run -- testdata/basic.md
 
 # Lint
 just check

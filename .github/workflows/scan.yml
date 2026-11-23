@@ -42,6 +42,6 @@ jobs:
       - name: Prepare container-writable hosted checkout
         if: runner.environment == 'github-hosted' && runner.os == 'Linux'
         run: chmod -R a+rwX "$GITHUB_WORKSPACE"
-      - run: just build && just setup
+      - run: just build-dev && just setup
       - name: Run trivy
-        run: just license-scan
+        run: just check-licenses

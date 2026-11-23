@@ -13,19 +13,7 @@ checksum_source = "mise-versions"
 url = "https://github.com/k1LoW/gostyle/releases/download/v0.26.2/gostyle_v0.26.2_linux_arm64.tar.gz"
 url_api = "https://api.github.com/repos/k1LoW/gostyle/releases/assets/624290962"
 
-[tools."aqua:k1LoW/gostyle"."platforms.linux-arm64-musl"]
-checksum = "sha256:8a25bd4f03804223a3d78d7af3ff2bf6278a744ce401aa8dec52ed86d7822104"
-checksum_source = "mise-versions"
-url = "https://github.com/k1LoW/gostyle/releases/download/v0.26.2/gostyle_v0.26.2_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/k1LoW/gostyle/releases/assets/624290962"
-
 [tools."aqua:k1LoW/gostyle"."platforms.linux-x64"]
-checksum = "sha256:e28cd77ad009ac6082770de90da553dd8fb495a2816fe4592949a6a8e879ee2d"
-checksum_source = "mise-versions"
-url = "https://github.com/k1LoW/gostyle/releases/download/v0.26.2/gostyle_v0.26.2_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/k1LoW/gostyle/releases/assets/624290955"
-
-[tools."aqua:k1LoW/gostyle"."platforms.linux-x64-musl"]
 checksum = "sha256:e28cd77ad009ac6082770de90da553dd8fb495a2816fe4592949a6a8e879ee2d"
 checksum_source = "mise-versions"
 url = "https://github.com/k1LoW/gostyle/releases/download/v0.26.2/gostyle_v0.26.2_linux_amd64.tar.gz"
@@ -36,18 +24,6 @@ checksum = "sha256:d5f814c1d0f02d319836d13a50826afaf99ffea98622561472ac12ab2f944
 checksum_source = "mise-versions"
 url = "https://github.com/k1LoW/gostyle/releases/download/v0.26.2/gostyle_v0.26.2_darwin_arm64.zip"
 url_api = "https://api.github.com/repos/k1LoW/gostyle/releases/assets/624290900"
-
-[tools."aqua:k1LoW/gostyle"."platforms.macos-x64"]
-checksum = "sha256:58ffd84fa363f61c24a0786471b7bdfd4d0a73bf54e8f5db662b47b19d01531c"
-checksum_source = "mise-versions"
-url = "https://github.com/k1LoW/gostyle/releases/download/v0.26.2/gostyle_v0.26.2_darwin_amd64.zip"
-url_api = "https://api.github.com/repos/k1LoW/gostyle/releases/assets/624290905"
-
-[tools."aqua:k1LoW/gostyle"."platforms.windows-x64"]
-checksum = "sha256:622d4c9beb06b5cc3898f35d906d42bbcbfbfb44fa4f5461429d40a6eaabc8ad"
-checksum_source = "mise-versions"
-url = "https://github.com/k1LoW/gostyle/releases/download/v0.26.2/gostyle_v0.26.2_windows_amd64.tar.gz"
-url_api = "https://api.github.com/repos/k1LoW/gostyle/releases/assets/624290899"
 
 [[tools."aqua:k1LoW/octocov"]]
 version = "0.83.5"
@@ -60,19 +36,7 @@ checksum_source = "mise-versions"
 url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_linux_arm64.tar.gz"
 url_api = "https://api.github.com/repos/k1LoW/octocov/releases/assets/711698538"
 
-[tools."aqua:k1LoW/octocov"."platforms.linux-arm64-musl"]
-checksum = "sha256:fce0c42af4bfbcb2fdb8f5961e2a3992bc4fbf46051e89835c3ed4c440c2ec03"
-checksum_source = "mise-versions"
-url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/k1LoW/octocov/releases/assets/711698538"
-
 [tools."aqua:k1LoW/octocov"."platforms.linux-x64"]
-checksum = "sha256:3aa6973a8e68036b640dac6ef0c5456dda12289c7abbdaf7b919a036555d8e9c"
-checksum_source = "mise-versions"
-url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/k1LoW/octocov/releases/assets/711698412"
-
-[tools."aqua:k1LoW/octocov"."platforms.linux-x64-musl"]
 checksum = "sha256:3aa6973a8e68036b640dac6ef0c5456dda12289c7abbdaf7b919a036555d8e9c"
 checksum_source = "mise-versions"
 url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_linux_amd64.tar.gz"
@@ -84,18 +48,6 @@ checksum_source = "mise-versions"
 url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_darwin_arm64.zip"
 url_api = "https://api.github.com/repos/k1LoW/octocov/releases/assets/711698408"
 
-[tools."aqua:k1LoW/octocov"."platforms.macos-x64"]
-checksum = "sha256:f9ab2b5c6996de5005bea809046e479ed47fa6b6a7c957e41aeb40dc12e1d0ec"
-checksum_source = "mise-versions"
-url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_darwin_amd64.zip"
-url_api = "https://api.github.com/repos/k1LoW/octocov/releases/assets/711698409"
-
-[tools."aqua:k1LoW/octocov"."platforms.windows-x64"]
-checksum = "sha256:b971a865539c4ec08d79bca098e56ddb9e48a192c023619a50da6267ed2addf1"
-checksum_source = "mise-versions"
-url = "https://github.com/k1LoW/octocov/releases/download/v0.83.5/octocov_v0.83.5_windows_amd64.zip"
-url_api = "https://api.github.com/repos/k1LoW/octocov/releases/assets/711698411"
-
 [[tools.go]]
 version = "1.26.6"
 backend = "core:go"
@@ -105,29 +57,13 @@ specifiers = ["1.26.6"]
 checksum = "sha256:d0507e9e9d7fe012aae570108cbd76c15de879e17130ab8cb90d4d7445cb1f2e"
 url = "https://dl.google.com/go/go1.26.6.linux-arm64.tar.gz"
 
-[tools.go."platforms.linux-arm64-musl"]
-checksum = "sha256:d0507e9e9d7fe012aae570108cbd76c15de879e17130ab8cb90d4d7445cb1f2e"
-url = "https://dl.google.com/go/go1.26.6.linux-arm64.tar.gz"
-
 [tools.go."platforms.linux-x64"]
-checksum = "sha256:708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89"
-url = "https://dl.google.com/go/go1.26.6.linux-amd64.tar.gz"
-
-[tools.go."platforms.linux-x64-musl"]
 checksum = "sha256:708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89"
 url = "https://dl.google.com/go/go1.26.6.linux-amd64.tar.gz"
 
 [tools.go."platforms.macos-arm64"]
 checksum = "sha256:2dc95ce4675829f2df0e86b28bcef3283635902062a5f0580ca659bf570f3204"
 url = "https://dl.google.com/go/go1.26.6.darwin-arm64.tar.gz"
-
-[tools.go."platforms.macos-x64"]
-checksum = "sha256:08b65a63f244115121ced6c3b55ad38d801a7442acad5c949a17aad84ae6d684"
-url = "https://dl.google.com/go/go1.26.6.darwin-amd64.tar.gz"
-
-[tools.go."platforms.windows-x64"]
-checksum = "sha256:5b6c5b556525810463b5c897b50dc7a82d6a3dc0bfaf55d990a7e9f31d6b2318"
-url = "https://dl.google.com/go/go1.26.6.windows-amd64.zip"
 
 [[tools.node]]
 version = "24.22.3"
@@ -138,29 +74,13 @@ specifiers = ["24.22.3"]
 checksum = "sha256:261af2af250dfd7e9f25cf151d1b2713a0adf8f10a9ad116c4947f68627affe8"
 url = "https://nodejs.org/dist/v24.22.3/node-v24.22.3-linux-arm64.tar.gz"
 
-[tools.node."platforms.linux-arm64-musl"]
-checksum = "sha256:248c96a84f6c8338646b9fd73bf125124678f8fb08db5f23023f462055e0eedc"
-url = "https://unofficial-builds.nodejs.org/download/release/v24.22.3/node-v24.22.3-linux-arm64-musl.tar.gz"
-
 [tools.node."platforms.linux-x64"]
 checksum = "sha256:061ec3e3062115705b56b51fa9cc330ab50d34b6969387d4e4b1a50c6809acc2"
 url = "https://nodejs.org/dist/v24.22.3/node-v24.22.3-linux-x64.tar.gz"
 
-[tools.node."platforms.linux-x64-musl"]
-checksum = "sha256:2db4f8a40abe5f5b5d119964223fedc9c4c7c5e7c632901ae860af522c7844b2"
-url = "https://unofficial-builds.nodejs.org/download/release/v24.22.3/node-v24.22.3-linux-x64-musl.tar.gz"
-
 [tools.node."platforms.macos-arm64"]
 checksum = "sha256:ff6e17d4874b76d272212b908cc020d6e815fba5a6c7eaaa06add725840307fd"
 url = "https://nodejs.org/dist/v24.22.3/node-v24.22.3-darwin-arm64.tar.gz"
-
-[tools.node."platforms.macos-x64"]
-checksum = "sha256:977614af0504c81045e7fd85596dbca0e5f951b96681516dadafedcca8c447f7"
-url = "https://nodejs.org/dist/v24.22.3/node-v24.22.3-darwin-x64.tar.gz"
-
-[tools.node."platforms.windows-x64"]
-checksum = "sha256:e612af99f626ab415ea225af6bce5c971feb448cb5cae250bb1c3fa50c5f7d9f"
-url = "https://nodejs.org/dist/v24.22.3/node-v24.22.3-win-x64.zip"
 
 [[tools."npm:pnpm"]]
 version = "11.28.13"
