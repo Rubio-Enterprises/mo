@@ -42,8 +42,8 @@ importers:
         specifier: ^10.5.0
         version: 10.5.0(@types/react@19.2.18)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react-zoom-pan-pinch:
-        specifier: ^4.2.0
-        version: 4.2.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: ^4.4.0
+        version: 4.4.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       rehype-github-alerts:
         specifier: ^4.2.0
         version: 4.2.0
@@ -72,7 +72,7 @@ importers:
         specifier: ^11.0.5
         version: 11.0.5
       unist-util-visit:
-        specifier: ^5.1.0
+        specifier: ^5.2.0
         version: 5.2.0
     devDependencies:
       '@tailwindcss/vite':
@@ -2452,8 +2452,8 @@ packages:
       '@types/react':
         optional: true
 
-  react-zoom-pan-pinch@4.2.0:
-    resolution: {integrity: sha512-QSw1dvr6QGv5zHCUY7SEIY7EWRDbx1y6plylrWf2Nko9KOMW1MEoPC6oJ+Y/qOSeQjhvbkMV0m5bFF7pBxCH4A==}
+  react-zoom-pan-pinch@4.4.0:
+    resolution: {integrity: sha512-7lMrVmFopsR3KeUNesScTUcc9pNxfEPaqsJfwEH2rkuzLEMqEvwJlPaqEY8gCZ9q2AEpxplZMAZTwr/m7nY05g==}
     engines: {node: '>=8', npm: '>=5'}
     peerDependencies:
       react: '*'
@@ -5085,7 +5085,7 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.18
 
-  react-zoom-pan-pinch@4.2.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
+  react-zoom-pan-pinch@4.4.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
     dependencies:
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
