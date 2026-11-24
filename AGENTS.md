@@ -4,7 +4,7 @@
 
 Run every project command through `just`, which runs it in this repository's dev image; the host carries no project toolchain.
 
-In a fresh checkout: `just build`, then `just setup`. `just --list` shows the recipes.
+In a fresh checkout: `just build-dev`, then `just setup`. `just --list` shows the recipes.
 
 Single Go test: `just exec go test ./internal/server/ -run TestHandleReorderFiles`. Single frontend test: `just exec pnpm --dir internal/frontend test src/utils/buildTree.test.ts`.
 
@@ -37,12 +37,12 @@ This repository is a fork of `k1LoW/mo`. `mo` is a CLI tool that opens Markdown 
 The dev image pins Go, Node and pnpm in `image/mise.toml`. `just setup` installs frontend and e2e dependencies. The Dev Container attaches to the same service.
 
 - `just exec make build` builds the frontend and Go binary. `just exec make generate` builds only the frontend; `just exec go build -o mo .` requires the generated `internal/static/dist/`.
-- `just dev -- testdata/basic.md` runs the server on port 16275.
+- `just run -- testdata/basic.md` runs the server on port 16275.
 - `just exec pnpm --dir internal/frontend run dev` starts the Vite dev server, which proxies `/_/` to localhost:6275. Set `MO_DISABLE_AUTH=1` on the backend for this cross-origin flow.
 - On the host, `make screenshot` regenerates README screenshots and requires Google Chrome and the host project toolchain.
 - `just test` runs Go and frontend tests, with JUnit in `reports/test/` and coverage in `reports/coverage/`. For individual coverage runs, use `just exec go test ./... -coverprofile=coverage.out -covermode=count -count=1` or `just exec pnpm --dir internal/frontend run test:coverage`.
-- `just e2e` runs the Playwright suite with JUnit in `reports/e2e/`; headed mode requires a display.
-- `just check` runs shared checks, frontend checks and gostyle. When `origin/upstream` exists, fork-aware checks scope to the fork's changes; an explicit `BASE_SHA` selects the base instead. `just format` applies frontend formatting.
+- `just test-e2e` runs the Playwright suite with JUnit in `reports/test-e2e/`; headed mode requires a display.
+- `just check` runs shared checks, frontend checks and gostyle. When `origin/upstream` exists, fork-aware checks scope to the fork's changes; an explicit `BASE_SHA` selects the base instead. `just fmt` applies frontend formatting.
 - `just exec lefthook run pre-commit --all-files` runs all pre-commit hooks.
 - `just exec make ci` runs the upstream compatibility target.
 - See the `run-mo` skill for driving a server and screenshots.

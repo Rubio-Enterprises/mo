@@ -14,12 +14,12 @@ interactive := if path_exists('/opt/standards') == 'true' { '' } else { 'docker 
 _default:
     @just --list
 
-# Build dev container image
-build:
-    @if [ ! -d /opt/standards ]; then bin/build.sh; fi
+# Build the dev image
+build-dev:
+    @if [ ! -d /opt/standards ]; then bin/build-dev.sh; fi
 
 # Build the dev image, sync dependencies into volumes, and install git hooks
-setup: build
+setup: build-dev
     {{_run}} bin/setup.sh </dev/null
     {{_run}} /opt/standards/bin/install-hooks </dev/null
 
@@ -35,6 +35,12 @@ fmt:
 check-pr:
     {{_run}} standards check-pr </dev/null
 
+# Regenerate the mise lock and every generated file
+generate *args:
+    @if [ -d /opt/standards ]; then standards lock; else docker run --rm -v "$PWD:$PWD" -w "$PWD" -e MISE_GITHUB_TOKEN -e GH_TOKEN "$(awk '/^FROM ghcr.io\/rubio-enterprises\/base:/ { print $2; exit }' Dockerfile)" standards lock </dev/null; fi
+    @if [ ! -d /opt/standards ]; then bin/build-dev.sh; fi
+    {{_run}} standards generate "$@" </dev/null
+
 # Open interactive shell inside the dev container
 shell:
     {{interactive}} bash
@@ -43,17 +49,15 @@ shell:
 exec *args:
     {{_run}} "$@" </dev/null
 
+# Run a command that reads its request from a pipe or heredoc
+pipe *args:
+    {{_run}} "$@"
+
 setup-deps *args:
     {{_run}} bin/setup-deps.sh "$@" </dev/null
 
 typecheck *args:
     {{_run}} bin/typecheck.sh "$@" </dev/null
-
-lint-ts *args:
-    {{_run}} bin/lint-ts.sh "$@" </dev/null
-
-format *args:
-    {{_run}} bin/format.sh "$@" </dev/null
 
 test *args:
     {{_run}} bin/test.sh "$@" </dev/null
@@ -67,14 +71,14 @@ test-ts *args:
 package *args:
     {{_run}} bin/package.sh "$@" </dev/null
 
-dev *args:
-    {{_run}} bin/dev.sh "$@" </dev/null
+run *args:
+    {{_run}} bin/run.sh "$@" </dev/null
 
-e2e *args:
-    {{_run}} bin/e2e.sh "$@" </dev/null
+test-e2e *args:
+    {{_run}} bin/test-e2e.sh "$@" </dev/null
 
-license-scan:
-    {{_run}} bin/license-scan.sh </dev/null
+check-licenses:
+    {{_run}} bin/check-licenses.sh "$@" </dev/null
 
 release-archive *args:
     {{_run}} bin/release-archive.sh "$@" </dev/null

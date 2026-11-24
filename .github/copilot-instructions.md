@@ -6,17 +6,17 @@
 
 ## Build & Run
 
-Run project commands through the dev image. In a fresh checkout, run `just build` then `just setup`; `just --list` shows the recipes.
+Run project commands through the dev image. In a fresh checkout, run `just build-dev` then `just setup`; `just --list` shows the recipes.
 
 ```bash
 # Full build (frontend + Go binary, with ldflags)
 just exec make build
 
 # Dev: build frontend then run with args (uses port 16275, foreground mode)
-just dev -- testdata/basic.md
+just run -- testdata/basic.md
 
 # Dev with tab groups (-t can only specify one group per invocation)
-just dev -- -t design testdata/basic.md
+just run -- -t design testdata/basic.md
 
 # Frontend code generation only (called by make build/dev via go generate)
 just exec make generate
@@ -114,7 +114,7 @@ Key endpoints:
 ## CI/CD
 
 - **Lint**: central Standards Check runs golangci-lint, gostyle, Oxlint and Oxfmt;
-  use `just check` locally. Frontend checks cover all of `src/`; `just format`
+  use `just check` locally. Frontend checks cover all of `src/`; `just fmt`
   applies frontend formatting.
 - **Tests**: central Test Gate runs Linux concerns and the macOS test leg. The macOS
   leg executes `TestWatchedFile_RetainedAfterAtomicSaveRewrite` and
